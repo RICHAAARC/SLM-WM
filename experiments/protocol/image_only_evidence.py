@@ -17,12 +17,12 @@ from main.methods.detection import (
 )
 
 
-FROZEN_EVIDENCE_PROTOCOL_SCHEMA = "slm_wm_frozen_evidence_protocol_v3"
+FROZEN_EVIDENCE_PROTOCOL_SCHEMA = "slm_wm_frozen_evidence_protocol"
 CALIBRATION_PARTITION_PROTOCOL = (
-    "prompt_id_sha256_nested_rescue_calibration_v1"
+    "prompt_id_sha256_nested_rescue_calibration"
 )
 RESCUE_WINDOW_SELECTION_PROTOCOL = (
-    "widest_empirical_fixed_fpr_negative_margin_window_v1"
+    "widest_empirical_fixed_fpr_negative_margin_window"
 )
 
 
@@ -255,18 +255,27 @@ def calibrated_geometry_ready(
 
     alignment = record.get("alignment")
     metadata = record.get("metadata")
+    if not isinstance(alignment, Mapping) or not isinstance(metadata, Mapping):
+        raise ValueError("启用几何 rescue 时测量记录必须包含 alignment 与 metadata")
+    required_measurements = (
+        record.get("raw_attention_geometry_score"),
+        record.get("attention_geometry_score"),
+        record.get("registration_confidence"),
+        record.get("attention_sync_score"),
+        record.get("aligned_content_score"),
+    )
+    if not all(_finite_number(value) for value in required_measurements):
+        raise ValueError("启用几何 rescue 时内容、注意力、配准与同步分数必须全部有限")
+    stable_pair_ready = metadata.get("stable_pair_weight_identity_ready")
+    if type(stable_pair_ready) is not bool:
+        raise ValueError("稳定关系权重身份状态必须为 bool")
     return bool(
-        isinstance(alignment, Mapping)
-        and alignment.get("geometry_reliable") is True
-        and isinstance(metadata, Mapping)
-        and metadata.get("stable_pair_weight_identity_ready") is True
-        and _finite_number(record.get("attention_geometry_score"))
+        alignment.get("geometry_reliable") is True
+        and stable_pair_ready is True
         and float(record["attention_geometry_score"])
         >= geometry_score_threshold
-        and _finite_number(record.get("registration_confidence"))
         and float(record["registration_confidence"])
         >= registration_confidence_threshold
-        and _finite_number(record.get("attention_sync_score"))
         and float(record["attention_sync_score"])
         >= attention_sync_score_threshold
     )
@@ -284,6 +293,10 @@ def complete_evidence_decision(
 ) -> EvidenceDecision:
     """用唯一冻结参数重建内容主判和同阈值几何救回。"""
 
+    if not _finite_number(record.get("content_score")) or not _finite_number(
+        content_threshold
+    ):
+        raise ValueError("内容分数与冻结阈值必须为有限数")
     raw_score = float(record["content_score"])
     raw_margin = raw_score - content_threshold
     positive_by_content = raw_margin >= 0.0
@@ -295,7 +308,6 @@ def complete_evidence_decision(
         attention_sync_score_threshold=attention_sync_score_threshold,
     )
     aligned_score = record.get("aligned_content_score")
-    aligned_score_ready = _finite_number(aligned_score)
     # 使用与等价分数相同的运算顺序, 避免浮点减法在窗口下界产生一位 ULP
     # 的布尔分叉。该比较与实数公式 `delta <= raw-threshold < 0` 等价。
     within_rescue_window = bool(
@@ -313,7 +325,7 @@ def complete_evidence_decision(
     else:
         failure_reason = "content_evidence_absent"
     rescue_eligible = bool(
-        within_rescue_window and geometry_reliable and aligned_score_ready
+        within_rescue_window and geometry_reliable
     )
     rescue_applied = bool(
         rescue_eligible and float(aligned_score) >= content_threshold
@@ -339,19 +351,18 @@ def decision_equivalent_score(
 ) -> float:
     """计算与任意同阈值完整布尔判定严格等价的连续分数。"""
 
+    if not _finite_number(record.get("content_score")):
+        raise ValueError("内容分数必须为有限数")
     raw_score = float(record["content_score"])
     aligned_score = record.get("aligned_content_score")
-    if not (
-        calibrated_geometry_ready(
-            record,
-            geometry_rescue_enabled=geometry_rescue_enabled,
-            geometry_score_threshold=geometry_score_threshold,
-            registration_confidence_threshold=(
-                registration_confidence_threshold
-            ),
-            attention_sync_score_threshold=attention_sync_score_threshold,
-        )
-        and _finite_number(aligned_score)
+    if not calibrated_geometry_ready(
+        record,
+        geometry_rescue_enabled=geometry_rescue_enabled,
+        geometry_score_threshold=geometry_score_threshold,
+        registration_confidence_threshold=(
+            registration_confidence_threshold
+        ),
+        attention_sync_score_threshold=attention_sync_score_threshold,
     ):
         return raw_score
     if not _finite_number(rescue_margin_low):

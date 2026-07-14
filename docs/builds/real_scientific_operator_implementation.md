@@ -13,7 +13,7 @@
 | 真实注意力梯度 | `main/methods/geometry/differentiable_attention.py` | 从 Transformer `to_q`/`to_k` 得到真实 attention, 构造有身份摘要的稳定 token pair 权重并对 latent 求梯度 |
 | 几何恢复 | `main/methods/geometry/attention_alignment.py` | 使用同一 pair 权重联合规范拉回 $W A_{\mathrm{obs}} W^\top$、观测前推 $V S_K V^\top$、双向覆盖惩罚和攻击无关的分层局部搜索恢复图像参考系 |
 | 仅图像检测 | `main/methods/detection/image_only.py` | 只接收图像、密钥和公开模型配置, 传递注册前后的同一 pair 权重并完成内容主判与同阈值救回 |
-| 正式随机化 | `experiments/protocol/formal_randomization.py` | 冻结3生成 seed × 3水印密钥交叉重复, 以 `sha256_counter_normal_icdf_table20_float32_v2` 构造主方法与 baseline 共享的实际基础 latent Tensor |
+| 正式随机化 | `experiments/protocol/formal_randomization.py` | 冻结3生成 seed × 3水印密钥交叉重复, 以 `sha256_counter_normal_icdf_table20_float32` 构造主方法与 baseline 共享的实际基础 latent Tensor |
 | 真实模型运行 | `experiments/runners/semantic_watermark_runtime.py` | 在 SD3.5 Medium 中执行完整方法与同种子 carrier-only 总机制效应反事实, 持久化无 attention 更新原子, 并以三边最终特征保持和真实 Q/K 双归因增益门禁验证 attention 可观测性 |
 | 共同攻击算子 | `experiments/runtime/diffusion/regeneration_attacks.py` | 为主方法与全部 baseline 统一执行 SD3.5 img2img、flow-matching 反向 Euler 积分、inpainting 和检测器引导搜索 |
 | 科学会话 | `experiments/runtime/semantic_watermark_scientific_session.py` | 在同一受验证主方法子解释器中调度主运行、质量评估、正式消融与绑定打包 |
@@ -31,7 +31,7 @@
 
 高斯幅值尾部截断分支的正式运行标识为 `tail_robust`。`build_tail_robust_template(...)` 对 Q20 中点逆 CDF 量化标准正态模板按元素绝对幅值稳定排序，精确保留 `ceil(element_count * tail_fraction)` 个元素，并以展平索引处理同幅值排序；该算子不执行 FFT、DCT、带通滤波或空间频带 mask, 因而不具有空间频带定义。内容模板与安全投影实现位于 `main/methods/carrier/keyed_tensor.py`。
 
-注意力分支风险必须接收由真实跨层 Q/K 关系计算的独立稳定度，核心接口不接受缺失值。正式层集合精确固定为 `transformer_blocks.0.attn` 与 `transformer_blocks.23.attn`, 运行时直接按名称解析公开 `to_q`、`to_k` 与 `heads` 协议。token 坐标采用 `normalized_xy_token_centers_corner_endpoints_v1`, 角点中心分别落在 -1 与 1；关系稳定图插值和图像仿射重采样统一使用 `align_corners=True`。图像配准结构门禁固定 `attention_anchor_count=12`、`attention_residual_threshold=0.20` 和 `attention_minimum_inlier_ratio=0.50`。锚点在抽样 token 索引中确定性均匀选择, token 数少于12时失败；残差为归一化 xy 欧氏距离, 内点率只以具有有效双线性覆盖的锚点为分母并要求唯一观测匹配。三项值来自预注册方法配置, calibration 和 test 不得调节。两个冻结层分别完成层内配准后, 按注册目标、观测关系分、注册置信度执行跨层字典序最大化；完全同分时选择冻结顺序中更靠前的层。aligned 图像使用 bilinear、`padding_mode=border`、`align_corners=True`, 再按 `floor(clamp(x, 0, 1) * 255)` 转回 RGB uint8。仅图像测量使用 `slm_wm_image_only_measurement_config_v2` 与 `slm_wm_image_only_extraction_profile_v1`, 并冻结模型 revision、图像预处理、VAE 编码、公开噪声/条件、Q/K 层集合、token 上限和坐标协议。完整配置正文只保存在顶层运行 manifest；对齐与样本记录保存决策必需原子及测量配置摘要, calibration/test 必须绑定同一测量身份。最终图像 Q/K 提取在冻结检测日程上调用 scheduler 的 `scale_noise`；缺少该方法或方法不可调用时运行失败，当前协议不定义线性 latent/noise 混合作为替代算子。
+注意力分支风险必须接收由真实跨层 Q/K 关系计算的独立稳定度，核心接口不接受缺失值。正式层集合精确固定为 `transformer_blocks.0.attn` 与 `transformer_blocks.23.attn`, 运行时直接按名称解析公开 `to_q`、`to_k` 与 `heads` 协议。生成端写回回调位于6、10、14, 但三个位置的全部 Q/K 科学求值都固定使用 `scheduler.timesteps[7]`；`post_step_schedule_index=step_index+1` 只标识当前 latent 的采样状态, 不得替代冻结注意力算子索引。检测端同样使用公开检测索引7。token 坐标采用 `normalized_xy_token_centers_corner_endpoints`, 角点中心分别落在 -1 与 1；关系稳定图插值和图像仿射重采样统一使用 `align_corners=True`。图像配准结构门禁固定 `attention_anchor_count=12`、`attention_residual_threshold=0.20` 和 `attention_minimum_inlier_ratio=0.50`。锚点在抽样 token 索引中确定性均匀选择, token 数少于12时失败；残差为归一化 xy 欧氏距离, 内点率只以具有有效双线性覆盖的锚点为分母并要求唯一观测匹配。三项值来自预注册方法配置, calibration 和 test 不得调节。两个冻结层分别完成层内配准后, 按注册目标、观测关系分、注册置信度执行跨层字典序最大化；完全同分时选择冻结顺序中更靠前的层。aligned 图像使用 bilinear、`padding_mode=border`、`align_corners=True`, 再按 `floor(clamp(x, 0, 1) * 255)` 转回 RGB uint8。仅图像测量使用 `slm_wm_image_only_measurement_config` 与 `slm_wm_image_only_extraction_profile`, 并冻结模型 revision、图像预处理、VAE 编码、公开噪声/条件、Q/K 层集合、token 上限和坐标协议。完整配置正文只保存在顶层运行 manifest；对齐与样本记录保存决策必需原子及测量配置摘要, calibration/test 必须绑定同一测量身份。最终图像 Q/K 提取在冻结检测日程上调用 scheduler 的 `scale_noise`；缺少该方法或方法不可调用时运行失败，当前协议不定义线性 latent/noise 混合作为替代算子。
 
 分支风险中的 `local_contrast_risk` 定义为解码灰度图相对反射填充5x5局部均值的绝对偏离。`adjacent_step_stability` 直接来自当前与紧邻上一 scheduler 步 latent 的解码 RGB 差异；注入回调在每个 post-step 时刻更新参考 latent，并把参考索引和 Tensor 内容 SHA-256 写入更新原子。204维 `handcrafted_structure_feature` 由 RGB 通道均值/标准差、水平/垂直绝对梯度均值和8x8 RGB 平均池化组成；一般感知质量结论必须独立依赖正式 FID、KID 与配对图像质量指标。
 
@@ -64,7 +64,7 @@ measure_image_only_watermark(
 
 ## 四、固定模板与安全投影的盲检闭合
 
-全部密钥化随机原语由密钥、算子 domain、输出 shape 和 `keyed_prg_version=sha256_counter_normal_icdf_table20_float32_v2` 确定。Gaussian 路径把 SHA-256 大端计数器块连接为 MSB-first 比特流, 跨块连续提取20位索引并查询 $q_i=\operatorname{round}_{\mathrm{binary32}}(\Phi^{-1}((i+0.5)/2^{20}))$ 的冻结 Q20 表。完整表大端字节 SHA-256 为 `70abf440a7f3670147965ffa52f5aaa639dab97f6282b68f3a9a1b1ce5e6cf5a`。该输出是有限离散的量化标准正态而非连续精确的 $\mathcal N(0,1)$；理想中点 KS 距离为 $2^{-21}$, 含 float32 舍入的登记上界为 `4.912236096776823e-7`。独立53位开区间 uniform 路径只用于注意力关系符号。所有结果先在 CPU 物化为规范 float32, 目标 dtype 转换也在 CPU 完成, 随后才搬运到执行设备；CPU/CUDA 设备 RNG 均不参与方法身份。检测模板的 domain 额外绑定公开模型标识和分支。MPFR 逐项复验属于外层参考证据, 不进入 PRG 算法摘要；当前逐字节固定向量只在 Windows CPU 实测, Linux/Colab 复验由 GPU 运行前门禁完成。嵌入端求得安全基底 $B$ 后执行：
+全部密钥化随机原语由密钥、算子 domain、输出 shape 和 `keyed_prg_version=sha256_counter_normal_icdf_table20_float32` 确定。Gaussian 路径把 SHA-256 大端计数器块连接为 MSB-first 比特流, 跨块连续提取20位索引并查询 $q_i=\operatorname{round}_{\mathrm{binary32}}(\Phi^{-1}((i+0.5)/2^{20}))$ 的冻结 Q20 表。完整表大端字节 SHA-256 为 `70abf440a7f3670147965ffa52f5aaa639dab97f6282b68f3a9a1b1ce5e6cf5a`。该输出是有限离散的量化标准正态而非连续精确的 $\mathcal N(0,1)$；理想中点 KS 距离为 $2^{-21}$, 含 float32 舍入的登记上界为 `4.912236096776823e-7`。独立53位开区间 uniform 路径只用于注意力关系符号。所有结果先在 CPU 物化为规范 float32, 目标 dtype 转换也在 CPU 完成, 随后才搬运到执行设备；CPU/CUDA 设备 RNG 均不参与方法身份。检测模板的 domain 额外绑定公开模型标识和分支。MPFR 逐项复验属于外层参考证据, 不进入 PRG 算法摘要；当前逐字节固定向量只在 Windows CPU 实测, Linux/Colab 复验由 GPU 运行前门禁完成。嵌入端求得安全基底 $B$ 后执行：
 
 $$
 \bar\nu=BB^\top\nu.
@@ -107,7 +107,7 @@ $$
 6. attention 来源为真实 Q/K 投影和 autograd；中心化 logit、可微 rank、抽样图像 token 关系概率和概率偏离与距离偏离的双中心交互四分量分别完成逐行加权归一化后按冻结协议组合, 嵌入、注册与盲检共享分量权重及 pair 构造规则；完整方法为四项等权, 四个留一变体各自把一项置零并将其余三项设为 $1/3$；
 7. carrier-only 与完整方法首个注入前 latent 字节级相同, 更新数、顺序和 scheduler 轨迹一致；carrier-only 更新原子无 attention 来源、分数、更新、关系、pair 身份或 attention Null Space, 且其 JSONL 路径、文件 SHA-256 和内容摘要绑定结果与 manifest；
 8. 最终 clean、carrier-only 与完整方法成图在 CUDA 上重新构造直接 Q/K 四分量关系, 完整方法相对同种子 carrier-only 的自身盲选择归因增益和冻结 carrier-only pair 权重归因增益都严格超过0.0001, 且反事实保持记录、四分量归因、关系图身份、Q/K 记录与 manifest 绑定同一身份和图像 SHA-256；
-9. `slm_wm_tensor_content_v1` 完整绑定三个风险场、三个 Null Space 的候选/预算/响应/基底、三分支更新与实际写回增量；Q/K 原子完整覆盖注入四角色、最终成图三角色及盲检两角色；
+9. `slm_wm_tensor_content` 完整绑定三个风险场、三个 Null Space 的候选/预算/响应/基底、三分支更新与实际写回增量；Q/K 原子完整覆盖注入四角色、最终成图三角色及盲检两角色；
 10. 检测访问模式为 `image_key_public_model_only`, 每条对齐、检测和冻结阈值记录均绑定12个锚点、0.20归一化 xy 欧氏残差上界与0.50最小有效覆盖锚点内点率；
 11. test clean negative 的95%误报率上界不超过目标 FPR；
 12. FID/KID 使用 torch-fidelity `inception-v3-compat` 的2048维特征，配对质量指标来自真实图像集合；

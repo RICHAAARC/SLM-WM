@@ -43,9 +43,10 @@ ATTENTION_RELATION_COMPONENT_POLARITIES = (1.0, -1.0, 1.0, 1.0)
 ATTENTION_RELATION_NUMERICAL_EPSILON = 1e-12
 DIRECT_QK_RELATION_SOURCE = "direct_qk_centered_logits_and_probabilities"
 ATTENTION_COORDINATE_CONVENTION = (
-    "normalized_xy_token_centers_corner_endpoints_v1"
+    "normalized_xy_token_centers_corner_endpoints"
 )
 ATTENTION_GRID_ALIGN_CORNERS = True
+ATTENTION_OPERATOR_SCHEDULE_INDEX = 7
 FROZEN_SD35_ATTENTION_MODULE_NAMES = (
     "transformer_blocks.0.attn",
     "transformer_blocks.23.attn",
@@ -389,6 +390,10 @@ def attention_probability(attention: Any) -> Any:
         or attention.relation_source != DIRECT_QK_RELATION_SOURCE
     ):
         raise ValueError("注意力概率必须来自具有冻结身份的直接 Q/K 关系")
+    if not bool(_torch().isfinite(attention.centered_logits).all()) or not bool(
+        _torch().isfinite(attention.probabilities).all()
+    ):
+        raise RuntimeError("直接 Q/K 关系必须全部有限")
     metadata = attention.metadata
     if not isinstance(metadata, dict):
         raise ValueError("直接 Q/K 关系缺少可核验的算子元数据")
@@ -891,6 +896,8 @@ def qk_self_attention(
     index_tensor = torch.tensor(token_indices, device=hidden_states.device)
     query = module.to_q(hidden_states)
     key = module.to_k(hidden_states)
+    if not bool(torch.isfinite(query).all()) or not bool(torch.isfinite(key).all()):
+        raise RuntimeError("注意力 Q/K 投影必须全部有限")
     heads_value = getattr(module, "heads", None)
     if (
         isinstance(heads_value, bool)
@@ -910,6 +917,8 @@ def qk_self_attention(
         query = norm_q(query)
     if norm_k is not None:
         key = norm_k(key)
+    if not bool(torch.isfinite(query).all()) or not bool(torch.isfinite(key).all()):
+        raise RuntimeError("注意力 Q/K 归一化结果必须全部有限")
     query = query.index_select(2, index_tensor)
     key = key.index_select(2, index_tensor)
     expected_attention_scale = 1.0 / math.sqrt(head_width)
@@ -929,8 +938,14 @@ def qk_self_attention(
     per_head_logits = (
         query.float() @ key.float().transpose(-1, -2)
     ) * attention_scale
+    if not bool(torch.isfinite(per_head_logits).all()):
+        raise RuntimeError("注意力 Q/K logits 必须全部有限")
     centered_logits = per_head_logits - per_head_logits.mean(dim=-1, keepdim=True)
     attention = torch.softmax(per_head_logits, dim=-1)
+    if not bool(torch.isfinite(centered_logits).all()) or not bool(
+        torch.isfinite(attention).all()
+    ):
+        raise RuntimeError("注意力 Q/K 关系必须全部有限")
     resolved_layer_name = layer_name or module.__class__.__qualname__
     centered_relation = centered_logits.mean(dim=1)
     probability_relation = attention.mean(dim=1)
@@ -1718,6 +1733,8 @@ def attention_relation_component_scores(
         dtype=torch.long,
     )
     relation = relation.index_select(-1, active_index_tensor)
+    if not bool(torch.isfinite(relation).all()):
+        raise RuntimeError("活动四分量关系图必须全部有限")
     projection = projection_values
     if projection.ndim == 3:
         projection = projection.unsqueeze(0)
@@ -1729,6 +1746,8 @@ def attention_relation_component_scores(
         ):
             raise ValueError("projection_values 必须与 relation_values 具有相同关系图形状")
         projection = projection.index_select(-1, active_index_tensor)
+    if not bool(torch.isfinite(projection).all()):
+        raise RuntimeError("密钥关系投影必须全部有限")
     weights = pair_weights
     if weights.ndim == 2:
         weights = weights.unsqueeze(0)
@@ -1736,6 +1755,8 @@ def attention_relation_component_scores(
         weights = weights.expand(relation.shape[0], -1, -1)
     if weights.shape != relation.shape[:-1]:
         raise ValueError("pair_weights 必须与四分量关系图的 token 轴一致")
+    if not bool(torch.isfinite(weights).all()) or bool((weights < 0.0).any()):
+        raise RuntimeError("关系 pair 权重必须为有限非负值")
     token_count = int(relation.shape[-2])
     if valid_positions is None:
         valid = torch.ones(
@@ -1822,6 +1843,8 @@ def attention_relation_component_scores(
         dtype=active_scores.dtype,
     )
     component_scores.index_copy_(-1, active_index_tensor, active_scores)
+    if not bool(torch.isfinite(component_scores).all()):
+        raise RuntimeError("注意力四分量分数必须全部有限")
     return component_scores
 
 
@@ -1851,7 +1874,12 @@ def combine_attention_relation_component_scores(
         dtype=component_scores.dtype,
     )
     active_scores = component_scores.index_select(-1, active_index_tensor)
-    return (active_scores * weights).sum(dim=-1)
+    if not bool(torch.isfinite(active_scores).all()):
+        raise RuntimeError("活动注意力分量分数必须全部有限")
+    combined = (active_scores * weights).sum(dim=-1)
+    if not bool(torch.isfinite(combined).all()):
+        raise RuntimeError("注意力组合分数必须全部有限")
+    return combined
 
 
 def attention_geometry_component_scores(
@@ -2449,7 +2477,7 @@ def optimize_attention_geometry_update(
         "maximum_backtracking_steps": maximum_backtracking_steps,
         "backtracking_step_count": backtracking_step_count,
         "candidate_composition_protocol": (
-            "ordered_float32_branch_sum_then_latent_add_single_cast_v1"
+            "ordered_float32_branch_sum_then_latent_add_single_cast"
         ),
         "returned_update_dtype": "float32",
         "original_evaluation_latent_content_sha256": (
@@ -2570,7 +2598,7 @@ def optimize_attention_geometry_update(
             "backtracking_factor": float(backtracking_factor),
             "maximum_backtracking_steps": maximum_backtracking_steps,
             "candidate_composition_protocol": (
-                "ordered_float32_branch_sum_then_latent_add_single_cast_v1"
+                "ordered_float32_branch_sum_then_latent_add_single_cast"
             ),
             "returned_update_dtype": "float32",
             "original_evaluation_latent_content_sha256": (

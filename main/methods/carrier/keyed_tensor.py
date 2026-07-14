@@ -26,7 +26,7 @@ from main.methods.subspace.jacobian_nullspace import JacobianNullSpaceResult
 
 
 LOW_FREQUENCY_CARRIER_PROTOCOL_SCHEMA = (
-    "slm_wm_low_frequency_carrier_protocol_v1"
+    "slm_wm_low_frequency_carrier_protocol"
 )
 LOW_FREQUENCY_KERNEL_SIZE = 5
 LOW_FREQUENCY_STRIDE = 1
@@ -36,7 +36,7 @@ LOW_FREQUENCY_CEIL_MODE = False
 LOW_FREQUENCY_COUNT_INCLUDE_PAD = True
 LOW_FREQUENCY_DIVISOR_OVERRIDE = None
 TAIL_ROBUST_CARRIER_PROTOCOL_SCHEMA = (
-    "slm_wm_tail_robust_carrier_protocol_v1"
+    "slm_wm_tail_robust_carrier_protocol"
 )
 
 
@@ -51,19 +51,36 @@ def _torch() -> Any:
 def _center_and_l2_normalize(template: Any) -> Any:
     """在整个 Tensor 上执行一次去均值和 L2 归一化。"""
 
-    centered = template.float() - template.float().mean()
-    norm = centered.norm().clamp_min(1e-12)
-    return centered / norm
+    values = template.float()
+    if not bool(_torch().isfinite(values).all()):
+        raise RuntimeError("载体模板必须全部有限")
+    centered = values - values.mean()
+    norm = centered.norm()
+    if not bool(_torch().isfinite(norm)):
+        raise RuntimeError("去均值载体模板能量必须有限")
+    if float(norm.item()) == 0.0:
+        raise RuntimeError("去均值载体模板没有可归一化的非零能量")
+    normalized = centered / norm
+    if not bool(_torch().isfinite(normalized).all()):
+        raise RuntimeError("载体模板归一化产生非有限值")
+    return normalized
 
 
 def _l2_normalize_without_centering(template: Any) -> Any:
     """保留模板的精确零支持, 仅执行全 Tensor L2 归一化。"""
 
     values = template.float()
+    if not bool(_torch().isfinite(values).all()):
+        raise RuntimeError("载体模板必须全部有限")
     norm = values.norm()
-    if float(norm.item()) <= 1e-12:
+    if not bool(_torch().isfinite(norm)):
+        raise RuntimeError("载体模板能量必须有限")
+    if float(norm.item()) == 0.0:
         raise RuntimeError("载体模板没有可归一化的非零能量")
-    return values / norm
+    normalized = values / norm
+    if not bool(_torch().isfinite(normalized).all()):
+        raise RuntimeError("载体模板归一化产生非有限值")
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -351,12 +368,24 @@ def normalized_correlation(observed: Any, template: Any) -> float:
     right = template.detach().float().reshape(-1)
     if left.numel() != right.numel():
         raise ValueError("observed 与 template 元素数必须一致")
+    if not bool(_torch().isfinite(left).all()) or not bool(
+        _torch().isfinite(right).all()
+    ):
+        raise RuntimeError("相关统计量输入必须全部有限")
     left = left - left.mean()
     right = right - right.mean()
-    denominator = left.norm() * right.norm()
-    if float(denominator.item()) <= 1e-12:
-        return 0.0
-    return float(((left * right).sum() / denominator).item())
+    left_norm = left.norm()
+    right_norm = right.norm()
+    if not bool(_torch().isfinite(left_norm)) or not bool(
+        _torch().isfinite(right_norm)
+    ):
+        raise RuntimeError("相关统计量的中心化能量必须有限")
+    if float(left_norm.item()) == 0.0 or float(right_norm.item()) == 0.0:
+        raise RuntimeError("相关统计量要求观测量和模板都具有非零中心化能量")
+    score = (left / left_norm * (right / right_norm)).sum()
+    if not bool(_torch().isfinite(score)):
+        raise RuntimeError("相关统计量产生非有限值")
+    return float(score.item())
 
 
 @dataclass

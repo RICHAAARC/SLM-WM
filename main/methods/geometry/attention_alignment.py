@@ -41,7 +41,7 @@ ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO = 0.50
 ATTENTION_IMAGE_RESAMPLING_MODE = "bilinear"
 ATTENTION_IMAGE_PADDING_MODE = "border"
 ATTENTION_IMAGE_QUANTIZATION_PROTOCOL = (
-    "clamp_0_1_multiply_255_floor_uint8_rgb_v1"
+    "clamp_0_1_multiply_255_floor_uint8_rgb"
 )
 _SIMILARITY_ROTATION_BOUND_DEGREES = 32.0
 _SIMILARITY_ROTATION_INTERVAL_COUNT = 4
@@ -510,17 +510,11 @@ def _relation_scores(
         component_scores,
         component_weights,
     )
-    finite_scores = torch.where(
-        torch.isfinite(scores),
-        scores,
-        torch.full_like(scores, -1.0),
-    )
-    finite_components = torch.where(
-        torch.isfinite(component_scores),
-        component_scores,
-        torch.full_like(component_scores, -1.0),
-    )
-    return finite_scores, finite_components
+    if not bool(torch.isfinite(scores).all()) or not bool(
+        torch.isfinite(component_scores).all()
+    ):
+        raise RuntimeError("注意力配准关系分数必须全部有限")
+    return scores, component_scores
 
 
 def _unique_sampling_ratios(weights: Any, valid: Any) -> Any:

@@ -43,6 +43,7 @@ from main.methods.geometry import (
     ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
+    ATTENTION_OPERATOR_SCHEDULE_INDEX,
     ATTENTION_IMAGE_PADDING_MODE,
     ATTENTION_IMAGE_QUANTIZATION_PROTOCOL,
     ATTENTION_IMAGE_RESAMPLING_MODE,
@@ -236,16 +237,14 @@ def _image_only_measurement_config(
         "width": 512,
         "height": 512,
         "inference_steps": 28,
-        "public_detection_schedule_index": 14,
+        "public_detection_schedule_index": ATTENTION_OPERATOR_SCHEDULE_INDEX,
         "public_detection_noise_prg_protocol": KEYED_PRG_VERSION,
-        "public_detection_noise_domain": "slm_wm_public_detection_noise_v1",
-        "public_detection_conditioning_protocol": "sd3_three_encoder_empty_text_v1",
+        "public_detection_noise_domain": "slm_wm_public_detection_noise",
+        "public_detection_conditioning_protocol": "sd3_three_encoder_empty_text",
         "public_detection_condition_text": "",
         "max_attention_tokens": 1024,
-        "attention_coordinate_convention": (
-            "normalized_xy_token_centers_corner_endpoints_v1"
-        ),
-        "attention_grid_align_corners": True,
+        "attention_coordinate_convention": ATTENTION_COORDINATE_CONVENTION,
+        "attention_grid_align_corners": ATTENTION_GRID_ALIGN_CORNERS,
         "attention_module_names": FROZEN_SD35_ATTENTION_MODULE_NAMES,
         "attention_anchor_count": ATTENTION_ALIGNMENT_ANCHOR_COUNT,
         "attention_residual_threshold": ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
@@ -268,6 +267,17 @@ def _image_only_measurement_config(
     }
     values.update(overrides)
     return ImageOnlyMeasurementConfig(**values)
+
+
+def _nonconstant_test_latent(channel_count: int = 2) -> torch.Tensor:
+    """构造具有非零中心化能量的轻量检测 latent。"""
+
+    return torch.linspace(
+        -1.0,
+        1.0,
+        steps=channel_count * 8 * 8,
+        dtype=torch.float32,
+    ).reshape(1, channel_count, 8, 8)
 
 
 def _formal_detection_alignment_identity(
@@ -473,7 +483,7 @@ def test_public_detection_noise_uses_canonical_gaussian_prg() -> None:
     assert torch.equal(first, second)
     assert tensor_content_sha256(first) == tensor_content_sha256(second)
     assert tensor_content_sha256(first) == (
-        "15c7795fcd10c030a8ec13c0fc4478b276f1d0bf52108f97c484dc4495f01988"
+        "c8afae09493c36d8162880ce1981d2e7a93741355b05c3b10bcd10ef851b84cf"
     )
     identity = _public_detection_noise_prg_identity(
         base,
@@ -481,7 +491,7 @@ def test_public_detection_noise_uses_canonical_gaussian_prg() -> None:
     )
     assert identity["key_material"] == base.public_detection_noise_domain
     assert identity["keyed_prg_protocol_digest"] == (
-        "a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b"
+        "e1f97fd7457893cf4d92c0ffa383b44219cf6b1034055e43dcadf1d535ab1595"
     )
     assert identity["domain_fields"] == {
         "operator": base.public_detection_noise_domain,
@@ -494,7 +504,7 @@ def test_public_detection_noise_uses_canonical_gaussian_prg() -> None:
         "latent_shape": (1, 4, 2, 2),
     }
     assert identity["public_detection_noise_prg_identity_digest"] == (
-        "87e5a8b39005a9f9ad9f5e822e4a56fad056e87df9201b31f345358c19b7f5c3"
+        "cb71138047f97e066d3c5e0a18d922392ec88ff9af57050e906c0927b1fa83ea"
     )
     source = inspect.getsource(_public_detection_noise_tensor)
     assert "build_keyed_gaussian_tensor" in source
@@ -820,6 +830,88 @@ def test_undamped_psd_cg_reports_non_convergence_without_fallback() -> None:
 
 
 @pytest.mark.quick
+def test_psd_cg_accepts_only_exact_zero_right_hand_side_without_iteration() -> None:
+    """精确零右端项应直接返回零解, 且不执行线性算子。"""
+
+    def unexpected_operator(_value: torch.Tensor) -> torch.Tensor:
+        pytest.fail("精确零右端项不应执行线性算子")
+
+    result = solve_psd_conjugate_gradient(
+        unexpected_operator,
+        torch.zeros(3),
+        maximum_iterations=64,
+        relative_tolerance=1e-6,
+    )
+
+    assert result.converged is True
+    assert result.iteration_count == 0
+    assert result.relative_residual == 0.0
+    assert torch.equal(result.solution, torch.zeros(3))
+
+
+@pytest.mark.quick
+def test_psd_cg_does_not_replace_relative_tolerance_with_absolute_residual() -> None:
+    """小尺度右端项仍必须满足同一个相对残差门禁。"""
+
+    matrix = torch.diag(torch.tensor((1.0, 1.0001), dtype=torch.float32))
+    right_hand_side = torch.tensor(
+        (7.0710678e-7, 7.0710678e-7),
+        dtype=torch.float32,
+    )
+    result = solve_psd_conjugate_gradient(
+        lambda value: matrix @ value,
+        right_hand_side,
+        maximum_iterations=1,
+        relative_tolerance=1e-6,
+    )
+    direct_residual = float(
+        (
+            torch.linalg.norm(right_hand_side - matrix @ result.solution)
+            / torch.linalg.norm(right_hand_side)
+        ).item()
+    )
+
+    assert result.converged is False
+    assert result.relative_residual == pytest.approx(direct_residual, rel=1e-6)
+    assert result.relative_residual > 1e-6
+
+
+@pytest.mark.quick
+def test_psd_cg_recomputes_residual_from_returned_solution() -> None:
+    """返回的收敛状态和残差必须由最终解重新执行算子得到。"""
+
+    matrix = torch.tensor(
+        (
+            (3747.285400390625, 4413.0615234375, 788.4710693359375, 1820.7584228515625),
+            (4413.06103515625, 5248.5869140625, 840.8630981445312, 2033.764892578125),
+            (788.4710693359375, 840.8631591796875, 328.06781005859375, 572.7334594726562),
+            (1820.7584228515625, 2033.764892578125, 572.7334594726562, 1162.7635498046875),
+        ),
+        dtype=torch.float32,
+    )
+    matrix = (matrix + matrix.transpose(0, 1)) * 0.5
+    right_hand_side = torch.tensor(
+        (-0.7192575931549072, -0.40334352850914, -0.5966353416442871, 0.18203648924827576),
+        dtype=torch.float32,
+    )
+    result = solve_psd_conjugate_gradient(
+        lambda value: matrix @ value,
+        right_hand_side,
+        maximum_iterations=64,
+        relative_tolerance=1e-6,
+    )
+    direct_residual = float(
+        (
+            torch.linalg.norm(right_hand_side - matrix @ result.solution)
+            / torch.linalg.norm(right_hand_side)
+        ).item()
+    )
+
+    assert result.relative_residual == pytest.approx(direct_residual, rel=1e-6)
+    assert result.converged is (direct_residual <= 1e-6)
+
+
+@pytest.mark.quick
 def test_candidate_matrix_preserves_preferred_carrier_direction() -> None:
     """候选矩阵必须显式包含固定载体, 避免随机低秩子空间丢失盲检能量。"""
 
@@ -896,7 +988,7 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
             "qr_condition_number": 1.0,
             "maximum_orthogonality_error": 1e-5,
             "qr_reference_solve_protocol": (
-                "right_upper_triangular_solve_without_explicit_inverse_v1"
+                "right_upper_triangular_solve_without_explicit_inverse"
             ),
             "risk_budget_operator": "explicit_diagonal_B",
         },
@@ -913,7 +1005,7 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
     tail_carrier_protocol_digest = build_stable_digest(
         {
             "tail_carrier_protocol_schema": (
-                "slm_wm_tail_robust_carrier_protocol_v1"
+                "slm_wm_tail_robust_carrier_protocol"
             ),
             "tail_fraction": config.tail_fraction,
             "tail_selection_rule": (
@@ -1098,6 +1190,11 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
         "step_index": 6,
         "scheduler_step_timestep": 6.0,
         "post_step_schedule_index": 7,
+        "post_step_schedule_timestep": 7.0,
+        "attention_operator_schedule_index": (
+            ATTENTION_OPERATOR_SCHEDULE_INDEX
+        ),
+        "attention_operator_timestep": 7.0,
         "watermark_key_material_digest_random": "0" * 64,
         **_formal_content_carrier_identity_fields(),
         "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
@@ -1434,6 +1531,23 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
     record["quantized_write_relative_jacobian_response"] = 1e-3
     assert _scientific_update_record_ready(record, config) is False
     record["quantized_write_relative_jacobian_response"] = 1e-5
+    record["null_space_records"]["lf_content"][
+        "cg_relative_residuals"
+    ][0] = 1e-5
+    record["null_space_records"]["lf_content"]["solver_digest"] = (
+        recompute_jacobian_null_space_result_digest(
+            record["null_space_records"]["lf_content"]
+        )
+    )
+    assert _scientific_update_record_ready(record, config) is False
+    record["null_space_records"]["lf_content"][
+        "cg_relative_residuals"
+    ][0] = 1e-7
+    record["null_space_records"]["lf_content"]["solver_digest"] = (
+        recompute_jacobian_null_space_result_digest(
+            record["null_space_records"]["lf_content"]
+        )
+    )
     record["keyed_prg_protocol_digest"] = "0" * 64
     assert _scientific_update_record_ready(record, config) is False
     record["keyed_prg_protocol_digest"] = keyed_prg_protocol_record()[
@@ -1587,6 +1701,56 @@ def test_tail_truncation_ablation_skips_amplitude_ranking(
 
 
 @pytest.mark.quick
+def test_normalized_correlation_preserves_scale_invariance() -> None:
+    """非零有限向量缩放后必须保持同一归一化相关分数。"""
+
+    template = torch.tensor((1.0, -1.0), dtype=torch.float32)
+    baseline = keyed_tensor_module.normalized_correlation(template, template)
+    scaled = keyed_tensor_module.normalized_correlation(
+        template * 1e-13,
+        template,
+    )
+
+    assert baseline == pytest.approx(1.0, abs=1e-6)
+    assert scaled == pytest.approx(baseline, abs=1e-6)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "observed",
+    (
+        torch.ones(4),
+        torch.tensor((1.0, float("nan"), -1.0, 0.0)),
+        torch.tensor((1.0, float("inf"), -1.0, 0.0)),
+    ),
+)
+def test_normalized_correlation_rejects_undefined_measurements(
+    observed: torch.Tensor,
+) -> None:
+    """零方差或非有限观测不得被改写为合法检测分数。"""
+
+    with pytest.raises(RuntimeError):
+        keyed_tensor_module.normalized_correlation(
+            observed,
+            torch.tensor((1.0, -1.0, 0.5, -0.5)),
+        )
+
+
+@pytest.mark.quick
+def test_low_frequency_template_rejects_zero_centered_energy() -> None:
+    """无法形成去均值方向的 LF 模板必须立即失败。"""
+
+    with pytest.raises(RuntimeError, match="非零能量"):
+        build_low_frequency_template(
+            torch.zeros(1, 1, 1, 1),
+            "degenerate_lf_key",
+            "degenerate_lf_model",
+            _FORMAL_LOW_FREQUENCY_CONFIG,
+            prg_version=KEYED_PRG_VERSION,
+        )
+
+
+@pytest.mark.quick
 def test_keyed_templates_use_versioned_device_independent_prg() -> None:
     """密钥模板必须由固定 PRG 算法生成, 设备 RNG 不得参与定义."""
 
@@ -1625,16 +1789,16 @@ def test_keyed_templates_use_versioned_device_independent_prg() -> None:
     )
 
     assert KEYED_PRG_VERSION == (
-        "sha256_counter_normal_icdf_table20_float32_v2"
+        "sha256_counter_normal_icdf_table20_float32"
     )
     assert torch.equal(first_lf, second_lf)
     assert hashlib.sha256(
         first_lf.detach().contiguous().numpy().tobytes()
-    ).hexdigest() == "2c265021651407651263b6253a6ee7dbbb540bd879f248b583963cf401629519"
+    ).hexdigest() == "3366c46c98eae477e908edec6ce38c5134ef75a18ca725064dacfbc253649b6e"
     assert hashlib.sha256(
         tail.detach().contiguous().numpy().tobytes()
-    ).hexdigest() == "9bd7ac53fec2166cd4c82accf3ed4bef1a60c3114d4f71ae2edcd95f408bdc2d"
-    assert threshold == pytest.approx(1.0803799629211426)
+    ).hexdigest() == "f4acbaf408d5c75b607468bba6ea274287634028dbc57783b2f778b242aa175e"
+    assert threshold == pytest.approx(1.460062861442566)
     assert retained_fraction == 0.25
     assert protocol["canonical_generation_device"] == "cpu"
     assert protocol["counter_initial_value"] == 0
@@ -1650,28 +1814,28 @@ def test_keyed_templates_use_versioned_device_independent_prg() -> None:
     )
     assert uniform_vector.tolist() == pytest.approx(
         (
-            0.15819059312343597,
-            0.2266322374343872,
-            0.11157729476690292,
-            0.9893344044685364,
+            0.8683275580406189,
+            0.4069617986679077,
+            0.38789626955986023,
+            0.3677476942539215,
         )
     )
     assert gaussian_vector.tolist() == pytest.approx(
         (
-            0.9188238978385925,
-            0.9646357297897339,
-            1.737541675567627,
-            0.24967548251152039,
+            -0.09923840314149857,
+            1.7385268211364746,
+            0.6552790999412537,
+            0.8304281830787659,
         )
     )
     assert protocol["keyed_prg_protocol_digest"] == (
-        "a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b"
+        "e1f97fd7457893cf4d92c0ffa383b44219cf6b1034055e43dcadf1d535ab1595"
     )
     assert tensor_content_sha256(uniform_vector) == (
-        "226041062e606ceebc26f75cda2479c32e216890495a67ef5d1ad37f76f084e5"
+        "d6412779ce634c3cae051a9d4b35f35261765821b097961f9ef858c38266ff4a"
     )
     assert tensor_content_sha256(gaussian_vector) == (
-        "2e0775d43b078333c58079eeb0b595bfd2a7491bc09ab430b5da69f323edd0dc"
+        "822447b97de192432a9074f86c984b2041d069feab8b20ef00fecce9a8ef059f"
     )
 
     first_candidates = generate_keyed_candidate_directions(
@@ -1698,8 +1862,8 @@ def test_keyed_templates_use_versioned_device_independent_prg() -> None:
     assert relation_signs.tolist() == [
         [0.0, -1.0, 1.0, 1.0],
         [-1.0, 0.0, 1.0, -1.0],
-        [1.0, 1.0, 0.0, -1.0],
-        [1.0, -1.0, -1.0, 0.0],
+        [1.0, 1.0, 0.0, 1.0],
+        [1.0, -1.0, 1.0, 0.0],
     ]
 
     source = "\n".join(
@@ -1808,13 +1972,13 @@ def test_image_alignment_uses_token_endpoint_coordinate_convention() -> None:
     aligned = _align_image(image, alignment)
 
     assert ATTENTION_COORDINATE_CONVENTION == (
-        "normalized_xy_token_centers_corner_endpoints_v1"
+        "normalized_xy_token_centers_corner_endpoints"
     )
     assert ATTENTION_GRID_ALIGN_CORNERS is True
     assert ATTENTION_IMAGE_RESAMPLING_MODE == "bilinear"
     assert ATTENTION_IMAGE_PADDING_MODE == "border"
     assert ATTENTION_IMAGE_QUANTIZATION_PROTOCOL == (
-        "clamp_0_1_multiply_255_floor_uint8_rgb_v1"
+        "clamp_0_1_multiply_255_floor_uint8_rgb"
     )
     assert [aligned.getpixel((column, 1))[0] for column in range(3)] == [
         100,
@@ -1916,10 +2080,10 @@ def test_multihead_qk_relation_matches_independent_manual_calculation() -> None:
     assert len(identity.qk_atomic_content_records) == 1
     assert len(identity.qk_atomic_content_digest) == 64
     assert identity.component_identity_digest == (
-        "d69e5a0605182aae07f610258557ad5fb6913d0c7d526ae841f41c86fe31477f"
+        "f91ba73cd36138fc1ceb13b983df38a978c5e4f650dea440cf639d257147cb13"
     )
     assert identity.keyed_projection_digest == (
-        "837034707b9ffb733c123b629aa0a013ce4416ee6b5a212b7060ab32bbdcde7c"
+        "9eb791b2af0343adea9bba9613486128967525e0f681280abeff146f820c6297"
     )
 
 
@@ -1959,6 +2123,41 @@ def test_qk_relation_requires_explicit_positive_integer_head_count(
             torch.randn(1, 4, 4),
             max_tokens=4,
             layer_name="invalid_head_count_layer",
+        )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("invalid_value", (float("nan"), float("inf")))
+def test_qk_relation_rejects_nonfinite_projection_values(
+    invalid_value: float,
+) -> None:
+    """真实 Q/K 链中的非有限值不得进入关系分数或原子摘要。"""
+
+    hidden_states = torch.randn(1, 4, 4)
+    hidden_states[0, 0, 0] = invalid_value
+    with pytest.raises(RuntimeError, match="必须全部有限"):
+        qk_self_attention(
+            _ToyAttention(4),
+            hidden_states,
+            max_tokens=4,
+            layer_name="nonfinite_qk_layer",
+        )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("invalid_value", (float("nan"), float("inf")))
+def test_attention_component_score_rejects_nonfinite_active_relation(
+    invalid_value: float,
+) -> None:
+    """活动关系通道中的数值异常不得被替换成0分或负分。"""
+
+    relation = torch.randn(1, 4, 4, 4)
+    relation[0, 0, 1, 0] = invalid_value
+    with pytest.raises(RuntimeError, match="必须全部有限"):
+        attention_relation_component_scores(
+            relation,
+            torch.randn(1, 4, 4, 4),
+            1.0 - torch.eye(4),
         )
 
 
@@ -2806,7 +3005,7 @@ def test_image_only_detector_reextracts_qk_after_alignment(
         prg_version=KEYED_PRG_VERSION,
     )[0]
     original = {
-        "latent": torch.zeros_like(reference),
+        "latent": _nonconstant_test_latent(),
         "attentions": (observed_attention, second_observed_attention),
     }
     aligned = {
@@ -3248,7 +3447,7 @@ def test_disabled_detector_carrier_is_not_built_or_scored(
         lf_weight, tail_weight = 1.0, 0.0
 
     result = measure_image_only_watermark(
-        image=torch.zeros(1, 2, 8, 8),
+        image=_nonconstant_test_latent(),
         key_material="disabled_detector_carrier_key",
         config=_image_only_measurement_config(
             lf_weight=lf_weight,
@@ -3314,7 +3513,7 @@ def test_alignment_ablation_keeps_raw_qk_and_skips_affine_recovery(
         )
 
     result = measure_image_only_watermark(
-        image=torch.zeros(1, 2, 8, 8),
+        image=_nonconstant_test_latent(),
         key_material="alignment_ablation_key",
         config=_image_only_measurement_config(),
         image_latent_encoder=lambda value: value,
@@ -3339,7 +3538,7 @@ def test_alignment_ablation_keeps_raw_qk_and_skips_affine_recovery(
 def test_measurement_digest_binds_every_alignment_gate_parameter() -> None:
     """原始测量摘要必须逐字段绑定注意力结构门禁."""
 
-    image = torch.zeros(1, 2, 8, 8)
+    image = _nonconstant_test_latent()
     baseline_config = _image_only_measurement_config(
         model_id="detector_gate_digest_model",
         attention_anchor_count=12,
@@ -3462,29 +3661,21 @@ def test_identity_alignment_cannot_propagate_into_calibrated_rescue() -> None:
 
 
 @pytest.mark.quick
-def test_measurement_digest_separates_zero_score_template_content_collisions() -> None:
-    """相同零分数摘要不得掩盖不同 shape 对应的 LF 模板身份."""
+@pytest.mark.parametrize("channel_count", (1, 2))
+def test_measurement_rejects_zero_variance_encoded_latent(
+    channel_count: int,
+) -> None:
+    """数学上未定义的常量 latent 相关统计不得形成合法检测记录。"""
 
-    config = _image_only_measurement_config(
-        model_id="detector_zero_score_collision_model"
-    )
-    first = measure_image_only_watermark(
-        image=torch.zeros(1, 1, 8, 8),
-        key_material="detector_zero_score_collision_key",
-        config=config,
-        image_latent_encoder=lambda value: value,
-    )
-    second = measure_image_only_watermark(
-        image=torch.zeros(1, 2, 8, 8),
-        key_material="detector_zero_score_collision_key",
-        config=config,
-        image_latent_encoder=lambda value: value,
-    )
-
-    assert first.content.content_score == second.content.content_score == 0.0
-    assert first.content.score_digest == second.content.score_digest
-    assert first.lf_template_content_sha256 != second.lf_template_content_sha256
-    assert first.measurement_digest != second.measurement_digest
+    with pytest.raises(RuntimeError, match="非零中心化能量"):
+        measure_image_only_watermark(
+            image=torch.zeros(1, channel_count, 8, 8),
+            key_material="detector_degenerate_correlation_key",
+            config=_image_only_measurement_config(
+                model_id="detector_degenerate_correlation_model"
+            ),
+            image_latent_encoder=lambda value: value,
+        )
 
 
 def _calibration_measurement(index: int) -> dict[str, object]:
@@ -3608,6 +3799,7 @@ def test_decision_equivalent_score_matches_complete_boolean_boundaries() -> None
     """等价分数必须覆盖窗口下界、raw 阈值和 aligned 阈值的闭区间语义。"""
 
     base_record = {
+        "raw_attention_geometry_score": 0.9,
         "attention_geometry_score": 0.9,
         "registration_confidence": 0.9,
         "attention_sync_score": 0.9,
@@ -3660,6 +3852,7 @@ def test_frozen_rescue_rejects_unbound_stable_pair_identity() -> None:
         {
             "content_score": 0.10,
             "aligned_content_score": 0.20,
+            "raw_attention_geometry_score": 0.90,
             "attention_geometry_score": 0.90,
             "registration_confidence": 0.90,
             "attention_sync_score": 0.90,
@@ -3714,8 +3907,89 @@ def test_complete_calibration_rejects_missing_geometry_atom(
         recompute_image_only_measurement_digest_payload(missing_record)
     )
 
-    with pytest.raises(ValueError, match="完整测量注意力"):
+    with pytest.raises(ValueError, match="同步分数"):
         calibrate_complete_evidence_protocol(records, target_fpr=0.1)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "field_name",
+    (
+        "raw_attention_geometry_score",
+        "attention_geometry_score",
+        "registration_confidence",
+        "attention_sync_score",
+        "aligned_content_score",
+    ),
+)
+@pytest.mark.parametrize("invalid_value", (float("nan"), float("inf")))
+def test_geometry_rescue_rejects_nonfinite_measurement_atoms(
+    field_name: str,
+    invalid_value: float,
+) -> None:
+    """test 与攻击记录不得因任一 rescue 原子异常而改用原始内容判定。"""
+
+    record = _calibration_measurement(0)
+    record["split"] = "test"
+    record[field_name] = invalid_value
+    record["measurement_digest"] = build_stable_digest(
+        recompute_image_only_measurement_digest_payload(record)
+    )
+
+    with pytest.raises(ValueError):
+        validate_image_only_measurement_digest_record(record)
+    with pytest.raises(ValueError, match="必须全部有限"):
+        complete_evidence_decision(
+            record,
+            content_threshold=0.5,
+            geometry_rescue_enabled=True,
+            rescue_margin_low=-0.1,
+            geometry_score_threshold=0.5,
+            registration_confidence_threshold=0.5,
+            attention_sync_score_threshold=0.5,
+        )
+    protocol = calibrate_complete_evidence_protocol(
+        tuple(_calibration_measurement(index) for index in range(33)),
+        target_fpr=0.1,
+    )
+    with pytest.raises(ValueError):
+        apply_frozen_evidence_protocol((record,), protocol)
+
+
+@pytest.mark.quick
+def test_alignment_and_aligned_content_measurements_require_each_other() -> None:
+    """alignment 与重新编码得到的三项 aligned 内容分数必须双向同时存在。"""
+
+    alignment_without_scores = _calibration_measurement(0)
+    alignment_without_scores["aligned_lf_score"] = None
+    alignment_without_scores["aligned_tail_robust_score"] = None
+    alignment_without_scores["aligned_content_score"] = None
+    alignment_without_scores["measurement_digest"] = build_stable_digest(
+        recompute_image_only_measurement_digest_payload(
+            alignment_without_scores
+        )
+    )
+    with pytest.raises(ValueError, match="完整 aligned 内容分数"):
+        validate_image_only_measurement_digest_record(
+            alignment_without_scores
+        )
+
+    scores_without_alignment = _raw_only_calibration_measurement(
+        0,
+        attention_geometry_enabled=True,
+    )
+    scores_without_alignment["aligned_lf_score"] = 0.2
+    scores_without_alignment["aligned_tail_robust_score"] = 0.2
+    scores_without_alignment["aligned_content_score"] = 0.2
+    scores_without_alignment["measurement_digest"] = build_stable_digest(
+        recompute_image_only_measurement_digest_payload(
+            scores_without_alignment
+        )
+    )
+    with pytest.raises(ValueError, match="无 alignment"):
+        validate_image_only_measurement_digest_record(
+            scores_without_alignment
+        )
 
 
 def _raw_only_calibration_measurement(

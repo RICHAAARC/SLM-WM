@@ -38,8 +38,13 @@ def _record(
         "attack_name": attack_name,
         "resource_profile": "clean" if attack_name == "none" else "full_main",
         "content_score": score,
-        "aligned_content_score": aligned_score,
+        "aligned_content_score": (
+            score if aligned_score is None else aligned_score
+        ),
         "geometry_reliable": geometry_reliable,
+        "raw_attention_geometry_score": (
+            0.8 if geometry_reliable else 0.0
+        ),
         "attention_geometry_score": 0.8 if geometry_reliable else 0.0,
         "registration_confidence": 0.8 if geometry_reliable else 0.0,
         "attention_sync_score": 0.8 if geometry_reliable else 0.0,

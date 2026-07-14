@@ -20,7 +20,7 @@ QUANTIZED_COMPOSITION_ORDER = (
 )
 
 QUANTIZED_COMPOSITION_EVIDENCE_VERSION = (
-    "slm_wm_quantized_composition_evidence_v1"
+    "slm_wm_quantized_composition_evidence"
 )
 
 

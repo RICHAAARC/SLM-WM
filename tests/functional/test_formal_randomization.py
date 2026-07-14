@@ -62,7 +62,7 @@ def test_formal_randomization_registry_is_exact_three_by_three_cross() -> None:
     assert protocol["watermark_key_repeat_count"] == 3
     assert protocol["crossed_repeat_count"] == 9
     assert protocol["formal_randomization_protocol_digest"] == (
-        "d09928b763c17d2c68fa2bc3921b59b76c3df2fc264fb364ae33bcc8bdeba0d5"
+        "d489cedb0f36359d589e132bface8dabb2993dd5e035ae5f806d403c2702ce6d"
     )
     assert formal_randomization_repeat_ids() == tuple(
         f"seed_{seed_index:02d}_key_{key_index:02d}"
@@ -184,7 +184,7 @@ def test_canonical_base_latent_is_byte_stable_and_seed_sensitive() -> None:
     assert not torch.equal(first, different)
     assert (
         first_identity["base_latent_content_digest_random"]
-        == "dd5f5596d163e71d6938f0ea6b656d4e68189730c318db701070c4b07329d3d7"
+        == "f8c706447476ca11b991f9c56f83b2118fc77c2f622652da59b679c63407e73c"
     )
     assert (
         first_identity["base_latent_content_digest_random"]
@@ -212,13 +212,13 @@ def test_formal_sd35_shape_base_latent_has_frozen_cpu_golden_identity() -> None:
         "cpu_dtype_cast_then_device_transfer_v2"
     )
     assert identity["base_latent_keyed_prg_protocol_digest"] == (
-        "a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b"
+        "e1f97fd7457893cf4d92c0ffa383b44219cf6b1034055e43dcadf1d535ab1595"
     )
     assert identity["base_latent_content_digest_random"] == (
-        "389678342d98601962a78b3fd03d576a7462ab294b1a6faf9d49e3d71cd1fdb1"
+        "949fb85f003c2e70ce4758e9243401df917d7716d1871072b8b82f02111010b5"
     )
     assert identity["base_latent_identity_digest_random"] == (
-        "29b0091a136f90cba887445f227b9e61cc4376c8bb90ab7fb94c0bc7de1d066d"
+        "b306016801b0528c44cd07e536beb5e93b7b1dc602ad4f8be9daf154cfd7276e"
     )
 
 

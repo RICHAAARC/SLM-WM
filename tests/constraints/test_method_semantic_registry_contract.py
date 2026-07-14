@@ -18,6 +18,7 @@ from tools.harness.lib.method_semantic_registry import (
     EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS,
     EXPECTED_RUNTIME_BINDING_SYMBOLS,
     EXPECTED_SPECIFICATION_TEST_NODES,
+    REGISTRY_SCHEMA,
     REGISTRY_SCOPE,
     load_method_semantic_registry,
     validate_method_semantic_registry,
@@ -64,6 +65,8 @@ def test_method_semantic_registry_has_exact_normative_trace_contract() -> None:
     invariants = _invariants_by_id(payload)
 
     assert _violations(payload) == []
+    assert payload["registry_schema"] == REGISTRY_SCHEMA
+    assert REGISTRY_SCHEMA == "slm_wm_method_semantic_trace_registry"
     assert payload["registry_scope"] == REGISTRY_SCOPE
     assert tuple(invariants) == EXPECTED_INVARIANT_IDS
     assert {
@@ -287,6 +290,7 @@ def test_registry_covers_required_method_atomic_roles() -> None:
         "vae_shift_factor",
         "latent_torch_dtype",
         "vision_torch_dtype",
+        "attention_operator_schedule_index",
         "public_detection_schedule_index",
     }.issubset(
         invariants["frozen_model_operator_identity"]["configuration_fields"]
@@ -294,6 +298,14 @@ def test_registry_covers_required_method_atomic_roles() -> None:
     assert "formal_method_config_digest" in invariants[
         "frozen_model_operator_identity"
     ]["runtime_evidence_fields"]
+    assert {
+        "attention_operator_schedule_index",
+        "attention_operator_timestep",
+    }.issubset(
+        invariants["frozen_model_operator_identity"][
+            "runtime_evidence_fields"
+        ]
+    )
     assert any(
         "formal_method_config_digest" in expression
         for expression in invariants["frozen_model_operator_identity"][
@@ -587,13 +599,73 @@ def test_registry_binds_preregistered_alignment_gate_evidence() -> None:
 
 
 @pytest.mark.constraint
+def test_registry_binds_complete_feature_schedule_and_geometry_domains() -> None:
+    """完整特征、固定 Q/K 时刻和五原子测量必须具有精确追踪。"""
+
+    invariants = _invariants_by_id(load_method_semantic_registry(ROOT))
+    feature = invariants["complete_716_feature_jacobian"]
+    assert (
+        {
+            "path": "main/methods/semantic/feature_protocol.py",
+            "symbol": "semantic_feature_protocol_record",
+        }
+        in feature["method_implementation_symbols"]
+    )
+    assert {
+        "semantic_feature_protocol_schema",
+        "semantic_feature_protocol_digest",
+    }.issubset(feature["runtime_evidence_fields"])
+
+    attention_update = invariants["direct_qk_monotonic_attention_update"]
+    assert {
+        "post_step_schedule_index",
+        "post_step_schedule_timestep",
+        "attention_operator_schedule_index",
+        "attention_operator_timestep",
+    }.issubset(attention_update["runtime_evidence_fields"])
+
+    five_atoms = {
+        "raw_attention_geometry_score",
+        "attention_geometry_score",
+        "registration_confidence",
+        "attention_sync_score",
+        "aligned_content_score",
+    }
+    for invariant_id in (
+        "image_only_detection_boundary",
+        "same_threshold_geometry_rescue",
+    ):
+        item = invariants[invariant_id]
+        assert five_atoms.issubset(item["runtime_evidence_fields"])
+        assert "geometry_rescue_measurement_atom_nonfinite" in item[
+            "fail_closed_conditions"
+        ]
+        assert "alignment_and_aligned_content_presence_mismatch" in item[
+            "fail_closed_conditions"
+        ]
+
+
+@pytest.mark.constraint
 def test_registry_formulas_freeze_risk_qk_null_and_actual_write_semantics() -> None:
     """规范公式必须显式覆盖关键项, 不能用宽泛算子名称代替."""
 
     invariants = _invariants_by_id(load_method_semantic_registry(ROOT))
     risk = invariants["branch_risk_bounds_written_update"]["formal_expression"]
     qk = invariants["direct_qk_four_component_relation"]["formal_expression"]
+    feature = invariants["complete_716_feature_jacobian"]["formal_expression"]
     null_space = invariants["exact_jacobian_low_response_subspace"][
+        "formal_expression"
+    ]
+    attention_update = invariants["direct_qk_monotonic_attention_update"][
+        "formal_expression"
+    ]
+    carriers = invariants[
+        "spatial_low_pass_and_amplitude_tail_carriers"
+    ]["formal_expression"]
+    image_only = invariants["image_only_detection_boundary"][
+        "formal_expression"
+    ]
+    rescue = invariants["same_threshold_geometry_rescue"][
         "formal_expression"
     ]
     actual_write = invariants["actual_dtype_write_revalidation"][
@@ -626,11 +698,31 @@ def test_registry_formulas_freeze_risk_qk_null_and_actual_write_semantics() -> N
         "pair_weighted_RowCorr",
         "mean_layers",
         "s_A=",
+        "active_qk_path_requires=finite",
     ):
         assert any(required_fragment in expression for expression in qk)
 
+    for required_fragment in (
+        "bicubic(decoded_rgb,224,align_corners_false,antialias_true)",
+        "F_CLIP=normalize(clip_vision.image_embeds)_512",
+        "rgb_population_std_3",
+        "adaptive_avgpool_rgb_chw_8x8_192",
+        "feature_protocol_identity=",
+    ):
+        assert any(required_fragment in expression for expression in feature)
+
     assert any("right_upper_triangular_solve" in expression for expression in null_space)
+    assert any("right_hand_side-operator(returned_solution)" in expression for expression in null_space)
+    assert any("norm2(cg_true_residual)/norm2(right_hand_side)" in expression for expression in null_space)
     assert all("inverse(R)" not in expression for expression in null_space)
+    assert any("correlation=dot(center(observed)/norm2" in expression for expression in carriers)
+    assert any("nonzero_centered_energies" in expression for expression in carriers)
+    assert any("attention_operator_schedule_index=7" in expression for expression in attention_update)
+    assert any("independent_of_post_step_schedule_index" in expression for expression in attention_update)
+    assert any("alignment_exists_if_and_only_if" in expression for expression in image_only)
+    assert any("raw_attention_geometry_score" in expression and "aligned_content_score" in expression for expression in image_only)
+    assert any("alignment_exists_if_and_only_if" in expression for expression in rescue)
+    assert any("raw_attention_geometry_score" in expression and "aligned_content_score" in expression for expression in rescue)
     assert all("method_numeric_epsilon" not in expression for expression in finite)
     assert any("null_space_numerical_epsilon" in expression for expression in finite)
 
@@ -664,9 +756,20 @@ def test_registry_freezes_fail_closed_model_and_qk_inputs() -> None:
     assert "clip_projected_image_embeds_missing" in complete_feature[
         "fail_closed_conditions"
     ]
+    assert {
+        "semantic_feature_protocol_identity_mismatch",
+        "semantic_feature_batch_count_not_one",
+        "clip_projected_embedding_nonfinite",
+        "clip_projected_embedding_zero_energy",
+    }.issubset(complete_feature["fail_closed_conditions"])
     assert "clip_pooler_output_substitution" in complete_feature[
         "forbidden_substitutes"
     ]
+    assert {
+        "runtime_local_clip_preprocessing_defaults",
+        "alternate_clip_resize_or_channel_normalization",
+        "zero_embedding_normalization_fallback",
+    }.issubset(complete_feature["forbidden_substitutes"])
     assert {
         "attention_heads_missing_or_invalid",
         "attention_hook_tensor_input_missing",
@@ -691,11 +794,18 @@ def test_registry_freezes_fail_closed_model_and_qk_inputs() -> None:
         "qk_outer_layer_name_mismatch",
         "qk_outer_token_indices_mismatch",
         "qk_multilayer_name_duplicate",
+        "qk_projection_or_normalization_nonfinite",
+        "qk_logits_or_probability_nonfinite",
+        "active_relation_or_projection_nonfinite",
+        "pair_weight_nonfinite_or_negative",
+        "active_component_score_nonfinite",
     }.issubset(direct_qk["fail_closed_conditions"])
     assert {
         "outer_qk_layer_renaming",
         "outer_qk_token_index_replacement",
         "same_internal_layer_clone_as_multilayer_evidence",
+        "nonfinite_qk_zero_substitution",
+        "nonfinite_relation_negative_one_substitution",
     }.issubset(direct_qk["forbidden_substitutes"])
 
 
@@ -719,12 +829,16 @@ def test_cpu_property_nodes_only_cover_independently_implemented_operators() -> 
     cpu_verified_invariants = {
         "branch_signal_origin",
         "branch_risk_bounds_written_update",
-            "exact_jacobian_low_response_subspace",
-            "versioned_key_prg_reconstruction",
-            "spatial_low_pass_and_amplitude_tail_carriers",
+        "complete_716_feature_jacobian",
+        "exact_jacobian_low_response_subspace",
+        "versioned_key_prg_reconstruction",
+        "spatial_low_pass_and_amplitude_tail_carriers",
+        "direct_qk_four_component_relation",
         "direct_qk_monotonic_attention_update",
         "three_branch_update_composition",
         "actual_dtype_write_revalidation",
+        "image_only_detection_boundary",
+        "same_threshold_geometry_rescue",
         "scientific_content_binding",
     }
     assert all(invariants[invariant_id]["cpu_property_test_nodes"] for invariant_id in cpu_verified_invariants)
@@ -759,6 +873,11 @@ def test_authority_document_freezes_risk_and_null_space_counterexamples() -> Non
     assert "`alignment_digest` 必须是完整 alignment 记录" in text
     assert "不允许用1或0补齐" in text
     assert "不允许用投影前 `pooler_output`" in text
+    assert "bicubic 缩放到224x224" in text
+    assert "按 channel-row-column 顺序展平" in text
+    assert "CLIP 投影能量精确为零" in text
+    assert "所有内容 Jacobian、风险场 Q/K、注意力梯度、回溯和写回复验" in text
+    assert "禁止把 `step_index+1` 对应的 post-step timestep" in text
     assert "必须显式公开非 bool 的正整数 `heads`" in text
     assert "没有 Tensor 输入时必须立即失败" in text
     assert "都必须接收 `QKAttentionRelation`" in text
@@ -772,6 +891,8 @@ def test_authority_document_freezes_risk_and_null_space_counterexamples() -> Non
     assert "最终三图 Q/K 不能只记录 Q/K Tensor" in text
     assert "图像像素摘要、Q/K 原子摘要、公开噪声内容摘要" in text
     assert "最终三图与检测分别构造两套公开噪声" in text
+    assert "五个连续原子必须同时完整且有限" in text
+    assert "alignment 存在当且仅当 `aligned_content_score` 存在" in text
 
 
 @pytest.mark.constraint

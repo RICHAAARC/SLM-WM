@@ -35,11 +35,15 @@ from main.methods.geometry.attention_alignment import (
 from main.methods.geometry.differentiable_attention import (
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
+    ATTENTION_OPERATOR_SCHEDULE_INDEX,
     FROZEN_SD35_ATTENTION_MODULE_NAMES,
+)
+from main.methods.semantic.feature_protocol import (
+    semantic_feature_protocol_record,
 )
 
 
-METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_v12"
+METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_definition"
 
 
 def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
@@ -76,14 +80,14 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
             "neutral_texture_value": 0.5,
             "eligibility_rule": "strict_risk_less_than_threshold",
             "budget_broadcast_protocol": (
-                "per_sample_hw_repeat_channels_nchw_v1"
+                "per_sample_hw_repeat_channels_nchw"
             ),
             "zero_support_rule": "exact_zero_direction_or_fail_closed",
             "effective_budget_rule": (
                 "configured_budget_times_eligibility_indicator"
             ),
             "risk_bounded_scale_protocol": (
-                "direction_peak_frozen_budget_ceiling_box_v1"
+                "direction_peak_frozen_budget_ceiling_box"
             ),
             "amplitude_envelope_rule": (
                 "nominal_l2_times_unit_direction_linf_times_"
@@ -116,7 +120,7 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
                 "routed_candidate_right_solve_upper_triangular_qr_factor"
             ),
             "qr_reference_solve_protocol": (
-                "right_upper_triangular_solve_without_explicit_inverse_v1"
+                "right_upper_triangular_solve_without_explicit_inverse"
             ),
             "null_space_numerical_epsilon": 1e-12,
             "maximum_qr_condition_number": 1e6,
@@ -124,6 +128,14 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
             "shared_rms_column_reference_used": False,
             "explicit_qr_factor_inverse_used": False,
             "projection_energy_rule": "squared_l2_ratio",
+            "cg_convergence_residual_rule": (
+                "recompute_right_hand_side_minus_operator_returned_solution"
+            ),
+            "cg_convergence_scale_rule": (
+                "true_residual_l2_divided_by_right_hand_side_l2"
+            ),
+            "cg_zero_iteration_rule": "exact_zero_right_hand_side_only",
+            "absolute_residual_convergence_allowed": False,
             "post_risk_direction_jvp_rule": (
                 "required_independently_for_each_active_branch"
             ),
@@ -131,6 +143,7 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
                 "unprojected_carrier_template_or_direct_qk_gradient"
             ),
         },
+        "semantic_feature_operator": semantic_feature_protocol_record(),
         "carrier_normalization": {
             "lf_carrier_protocol_schema": (
                 LOW_FREQUENCY_CARRIER_PROTOCOL_SCHEMA
@@ -161,11 +174,25 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
             "raw_aligned_template_identity_rule": (
                 "same_shape_same_key_same_protocol_exact_content_digest"
             ),
+            "content_correlation_rule": (
+                "dot_of_independently_centered_l2_normalized_vectors"
+            ),
+            "content_correlation_domain_rule": (
+                "finite_inputs_and_nonzero_centered_energy"
+            ),
+            "undefined_content_correlation_score_allowed": False,
             "fixed_fpr_carrier_identity_rule": (
                 "lf_and_tail_protocol_digests_frozen_from_calibration"
             ),
         },
         "attention_geometry": {
+            "attention_operator_schedule_index": (
+                ATTENTION_OPERATOR_SCHEDULE_INDEX
+            ),
+            "generation_and_detection_schedule_rule": (
+                "shared_fixed_attention_operator_schedule_index"
+            ),
+            "post_step_schedule_selects_attention_operator": False,
             "relation_source": "direct_to_q_to_k_sampled_image_token_subgraph",
             "probability_inverse_relation_allowed": False,
             "relation_numerical_epsilon": 1e-12,
@@ -175,6 +202,11 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
             "operator_metadata_evidence_rule": (
                 "shared_full_record_validation_and_digest_recomputation"
             ),
+            "active_relation_numerical_domain_rule": (
+                "all_qk_projection_normalization_logits_probability_relation_"
+                "projection_pair_weight_and_component_scores_finite"
+            ),
+            "nonfinite_attention_score_substitution_allowed": False,
             "risk_bounded_scale_is_backtracking_start": True,
             "acceptance_rule": (
                 "actual_candidate_score_strictly_above_original_and_content_base"
@@ -182,6 +214,8 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
             "full_joint_attention_all_tokens_optimized": False,
         },
         "image_only_alignment": {
+            "alignment_requires_attention_geometry": True,
+            "alignment_and_aligned_content_bidirectional": True,
             "attention_module_names": list(
                 FROZEN_SD35_ATTENTION_MODULE_NAMES
             ),
@@ -279,6 +313,10 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
             "geometry_ready_rule": (
                 "structural_alignment_and_stable_pair_and_three_frozen_gates"
             ),
+            "geometry_measurement_numerical_domain_rule": (
+                "raw_and_aligned_content_attention_registration_and_sync_finite"
+            ),
+            "malformed_geometry_raw_content_fallback_allowed": False,
             "decision_equivalent_score_rule": (
                 "geometry_ready_max_raw_min_aligned_raw_minus_rescue_"
                 "otherwise_raw"
@@ -307,7 +345,7 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
                 "required_on_each_materialized_active_branch_update"
             ),
             "actual_dtype_composition_protocol": (
-                "float32_ordered_branch_sum_add_float32_latent_single_cast_v1"
+                "float32_ordered_branch_sum_add_float32_latent_single_cast"
             ),
             "actual_dtype_composition_order": [
                 "lf_content",

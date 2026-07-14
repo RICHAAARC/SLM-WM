@@ -49,6 +49,7 @@ from main.methods.geometry import (
     ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
+    ATTENTION_OPERATOR_SCHEDULE_INDEX,
     ATTENTION_RELATION_COMPONENT_NAMES,
     DIRECT_QK_RELATION_SOURCE,
     attention_alignment_gate_record,
@@ -145,7 +146,7 @@ def _sha256(index: int) -> str:
 
 _PUBLIC_NOISE_CONTENT_SHA256 = _sha256(8500)
 _PUBLIC_NOISE_PRG_PAYLOAD = {
-    "keyed_prg_version": "fixture_prg_v1",
+    "keyed_prg_version": "fixture_prg_protocol",
     "domain": "public_detection",
     "shape": [1, 16, 4, 4],
 }
@@ -431,7 +432,11 @@ def _update_record(
         ),
         "scheduler_step_timestep": float(step_index),
         "post_step_schedule_index": step_index + 1,
-        "timestep": float(step_index) + 0.5,
+        "post_step_schedule_timestep": float(step_index) + 0.5,
+        "attention_operator_schedule_index": (
+            ATTENTION_OPERATOR_SCHEDULE_INDEX
+        ),
+        "attention_operator_timestep": 7.5,
         "adjacent_step_reference_index": step_index - 1,
         "adjacent_step_reference_latent_content_sha256": take_digest(),
         "adjacent_step_stability_status": (
@@ -1449,6 +1454,39 @@ def test_update_content_identity_accepts_only_actual_ablation_atoms(
             record["tail_template_element_count"]
         )
         assert record["tail_threshold"] == 0.0
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    (
+        ("post_step_schedule_index", 8),
+        ("attention_operator_schedule_index", 8),
+        ("attention_operator_timestep", float("nan")),
+    ),
+)
+def test_update_content_identity_rejects_attention_schedule_drift(
+    field_name: str,
+    invalid_value: object,
+) -> None:
+    """写回位置与固定注意力求值时刻必须作为不同字段独立复验。"""
+
+    config = SemanticWatermarkRuntimeConfig()
+    record = _update_record(
+        _BRANCHES,
+        step_index=6,
+        digest_offset=17500,
+        config=config,
+    )
+    record[field_name] = invalid_value
+
+    with pytest.raises(ValueError, match="写回位置|注意力算子"):
+        validate_scientific_update_content_identity(
+            record,
+            expected_branches=_BRANCHES,
+            null_space_enabled=True,
+            semantic_routing_enabled=True,
+        )
 
 
 @pytest.mark.quick

@@ -128,6 +128,7 @@ from main.methods.semantic import (
     BRANCH_NAMES,
     BranchRiskConfig,
     build_active_branch_risk_fields,
+    semantic_feature_protocol_record,
 )
 from main.methods.subspace import (
     ExactJacobianLinearization,
@@ -339,6 +340,9 @@ class SemanticWatermarkRuntimeConfig:
     )
     maximum_handcrafted_structure_feature_relative_drift: float = (
         _FORMAL_METHOD_CONFIG.maximum_handcrafted_structure_feature_relative_drift
+    )
+    attention_operator_schedule_index: int = (
+        _FORMAL_METHOD_CONFIG.attention_operator_schedule_index
     )
     public_detection_schedule_index: int = (
         _FORMAL_METHOD_CONFIG.public_detection_schedule_index
@@ -638,6 +642,9 @@ def load_semantic_watermark_runtime_context(
         required_usage_role="semantic_condition_encoder",
     ).to_dict()
     feature_runtime = DifferentiableSemanticFeatureRuntime(pipeline.vae, vision_model)
+    runtime_versions["semantic_feature_operator_contract"] = (
+        semantic_feature_protocol_record()
+    )
     for parameter in pipeline.transformer.parameters():
         parameter.requires_grad_(False)
     attention_modules = _attention_modules(
@@ -663,6 +670,12 @@ def load_semantic_watermark_runtime_context(
         ),
         "attention_grid_align_corners": (
             config.attention_grid_align_corners
+        ),
+        "attention_operator_schedule_index": (
+            config.attention_operator_schedule_index
+        ),
+        "public_detection_schedule_index": (
+            config.public_detection_schedule_index
         ),
     }
     unconditional_prompt, unconditional_pooled = _unconditional_embeddings(
@@ -1920,7 +1933,7 @@ def _solve_branch_subspace(
     maximum_qr_condition_number: float = 1e6,
     maximum_orthogonality_error: float = 1e-5,
     qr_reference_solve_protocol: str = (
-        "right_upper_triangular_solve_without_explicit_inverse_v1"
+        "right_upper_triangular_solve_without_explicit_inverse"
     ),
     prg_version: str = KEYED_PRG_VERSION,
 ) -> Any:
@@ -3421,6 +3434,14 @@ def _carrier_only_counterfactual_identity(
         if carrier_payload.get(field_name) is True
     )
     keyed_prg_version = str(full_payload.get("keyed_prg_version", ""))
+    attention_operator_schedule_index = full_payload.get(
+        "attention_operator_schedule_index"
+    )
+    if (
+        type(attention_operator_schedule_index) is not int
+        or attention_operator_schedule_index < 0
+    ):
+        raise RuntimeError("carrier-only 反事实缺少合法的固定注意力算子索引")
     attention_module_names = tuple(
         str(name) for name in full_payload.get("attention_module_names", ())
     )
@@ -3552,6 +3573,23 @@ def _carrier_only_counterfactual_identity(
         if (
             not isinstance(step_index, int)
             or record.get("adjacent_step_reference_index") != step_index - 1
+            or record.get("post_step_schedule_index") != step_index + 1
+            or record.get("attention_operator_schedule_index")
+            != attention_operator_schedule_index
+            or not isinstance(
+                record.get("post_step_schedule_timestep"),
+                (int, float),
+            )
+            or not math.isfinite(
+                float(record["post_step_schedule_timestep"])
+            )
+            or not isinstance(
+                record.get("attention_operator_timestep"),
+                (int, float),
+            )
+            or not math.isfinite(
+                float(record["attention_operator_timestep"])
+            )
             or record.get("adjacent_step_stability_status")
             != (
                 "measured_from_immediately_previous_scheduler_step"
@@ -3746,7 +3784,15 @@ def _carrier_only_counterfactual_identity(
                 "post_step_schedule_index": int(
                     record["post_step_schedule_index"]
                 ),
-                "method_timestep": float(record["timestep"]),
+                "post_step_schedule_timestep": float(
+                    record["post_step_schedule_timestep"]
+                ),
+                "attention_operator_schedule_index": int(
+                    record["attention_operator_schedule_index"]
+                ),
+                "attention_operator_timestep": float(
+                    record["attention_operator_timestep"]
+                ),
             }
             for record in records
         )
@@ -3757,6 +3803,18 @@ def _carrier_only_counterfactual_identity(
         tuple(item["step_index"] for item in full_trace) != expected_steps
         or tuple(item["step_index"] for item in carrier_trace) != expected_steps
         or full_trace != carrier_trace
+        or {
+            item["attention_operator_schedule_index"]
+            for item in full_trace
+        }
+        != {attention_operator_schedule_index}
+        or len(
+            {
+                item["attention_operator_timestep"]
+                for item in full_trace
+            }
+        )
+        != 1
     ):
         raise RuntimeError("carrier-only 反事实没有复现完整方法的 scheduler 轨迹")
     full_initial_latent_sha256 = str(
@@ -3821,6 +3879,33 @@ def _carrier_only_counterfactual_identity(
     return record
 
 
+def _resolve_injection_schedule_times(
+    scheduler_timesteps: Any,
+    *,
+    step_index: int,
+    attention_operator_schedule_index: int,
+) -> tuple[int, Any, Any]:
+    """分离当前写回状态与固定 Q/K 科学算子的调度时刻。"""
+
+    if (
+        type(step_index) is not int
+        or type(attention_operator_schedule_index) is not int
+    ):
+        raise TypeError("调度索引必须为精确 int")
+    post_step_schedule_index = step_index + 1
+    if (
+        post_step_schedule_index >= len(scheduler_timesteps)
+        or attention_operator_schedule_index < 0
+        or attention_operator_schedule_index >= len(scheduler_timesteps)
+    ):
+        raise RuntimeError("注入写回或冻结注意力算子索引超出真实调度序列")
+    return (
+        post_step_schedule_index,
+        scheduler_timesteps[post_step_schedule_index],
+        scheduler_timesteps[attention_operator_schedule_index],
+    )
+
+
 def run_semantic_watermark_runtime(
     config: SemanticWatermarkRuntimeConfig,
     runtime_context: SemanticWatermarkRuntimeContext | None = None,
@@ -3835,6 +3920,9 @@ def run_semantic_watermark_runtime(
     dict[str, Any],
 ]:
     """执行 clean/watermarked 生成和最终图像盲检。"""
+
+    if config.image_alignment_enabled and not config.attention_geometry_enabled:
+        raise ValueError("图像配准必须以真实注意力几何测量为前提")
 
     import torch
 
@@ -3921,11 +4009,21 @@ def run_semantic_watermark_runtime(
         adjacent_step_reference_sha256 = tensor_content_sha256(
             previous_step_latent
         )
-        post_step_index = step_index + 1
         scheduler_timesteps = pipe.scheduler.timesteps
-        if post_step_index >= len(scheduler_timesteps):
-            raise RuntimeError("post-step 注入缺少合法的下一调度时刻")
-        method_timestep = scheduler_timesteps[post_step_index]
+        attention_operator_schedule_index = (
+            active_injection_config.attention_operator_schedule_index
+        )
+        (
+            post_step_index,
+            post_step_schedule_timestep,
+            attention_operator_timestep,
+        ) = _resolve_injection_schedule_times(
+            scheduler_timesteps,
+            step_index=step_index,
+            attention_operator_schedule_index=(
+                attention_operator_schedule_index
+            ),
+        )
         with torch.enable_grad():
             active_branch_names = _active_carrier_branch_names(
                 active_injection_config
@@ -3990,7 +4088,7 @@ def run_semantic_watermark_runtime(
             if attention_work_required:
                 transformer_forward = _transformer_forward_function(
                     pipeline,
-                    method_timestep,
+                    attention_operator_timestep,
                     unconditional_prompt,
                     unconditional_pooled,
                 )
@@ -4918,6 +5016,15 @@ def run_semantic_watermark_runtime(
                 "step_index": int(step_index),
                 "scheduler_step_timestep": float(timestep.detach().float().item()),
                 "post_step_schedule_index": int(post_step_index),
+                "post_step_schedule_timestep": float(
+                    post_step_schedule_timestep.detach().float().item()
+                ),
+                "attention_operator_schedule_index": int(
+                    attention_operator_schedule_index
+                ),
+                "attention_operator_timestep": float(
+                    attention_operator_timestep.detach().float().item()
+                ),
                 "adjacent_step_reference_index": int(step_index - 1),
                 "adjacent_step_reference_latent_content_sha256": (
                     adjacent_step_reference_sha256
@@ -4927,7 +5034,6 @@ def run_semantic_watermark_runtime(
                     if active_injection_config.semantic_routing_enabled
                     else "not_applicable_semantic_routing_disabled"
                 ),
-                "timestep": float(method_timestep.detach().float().item()),
                 "latent_content_sha256_before": tensor_content_sha256(latent),
                 "latent_content_sha256_after": tensor_content_sha256(injected),
                 "combined_update_content_sha256": (

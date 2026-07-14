@@ -20,7 +20,7 @@ from main.core.normal_quantile_table import (
 )
 
 
-KEYED_PRG_VERSION = "sha256_counter_normal_icdf_table20_float32_v2"
+KEYED_PRG_VERSION = "sha256_counter_normal_icdf_table20_float32"
 _PRG_COUNTER_BYTES = 16
 _PRG_UNIFORM_BITS = 53
 

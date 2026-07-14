@@ -27,7 +27,7 @@ from main.core.keyed_prg import (
 
 TensorFeatureFunction = Callable[[Any], Any]
 JACOBIAN_NULL_SPACE_EVIDENCE_VERSION = (
-    "slm_wm_jacobian_null_space_evidence_v1"
+    "slm_wm_jacobian_null_space_evidence"
 )
 
 
@@ -396,7 +396,6 @@ def solve_psd_conjugate_gradient(
     *,
     maximum_iterations: int,
     relative_tolerance: float,
-    absolute_tolerance: float = 1e-10,
 ) -> PSDConjugateGradientResult:
     """无阻尼求解一致的半正定线性系统。
 
@@ -409,13 +408,12 @@ def solve_psd_conjugate_gradient(
         raise ValueError("maximum_iterations 必须为正数")
     if not 0.0 < relative_tolerance < 1.0:
         raise ValueError("relative_tolerance 必须位于 (0, 1)")
-    if absolute_tolerance <= 0.0:
-        raise ValueError("absolute_tolerance 必须为正数")
-
     rhs = right_hand_side.detach().float().reshape(-1)
+    if not bool(torch.isfinite(rhs).all()):
+        raise ValueError("PSD-CG 右端项必须全部有限")
     rhs_norm = float(torch.linalg.norm(rhs).item())
     solution = torch.zeros_like(rhs)
-    if rhs_norm <= absolute_tolerance:
+    if rhs_norm == 0.0:
         return PSDConjugateGradientResult(
             solution=solution,
             converged=True,
@@ -423,6 +421,19 @@ def solve_psd_conjugate_gradient(
             absolute_residual=rhs_norm,
             relative_residual=0.0,
         )
+
+    def true_residual(candidate: Any) -> tuple[Any, float, float]:
+        """以当前解重新执行线性算子, 避免递推误差伪造收敛。"""
+
+        image = operator(candidate).detach().float().reshape(-1)
+        if image.shape != rhs.shape:
+            raise ValueError("PSD-CG 算子输出宽度必须与右端项一致")
+        if not bool(torch.isfinite(image).all()):
+            raise RuntimeError("PSD-CG 算子输出必须全部有限")
+        residual_value = rhs - image
+        absolute_value = float(torch.linalg.norm(residual_value).item())
+        relative_value = absolute_value / rhs_norm
+        return residual_value, absolute_value, relative_value
 
     residual = rhs.clone()
     search = residual.clone()
@@ -435,6 +446,8 @@ def solve_psd_conjugate_gradient(
         image = operator(search).detach().float().reshape(-1)
         if image.shape != rhs.shape:
             raise ValueError("PSD-CG 算子输出宽度必须与右端项一致")
+        if not bool(torch.isfinite(image).all()):
+            raise RuntimeError("PSD-CG 算子输出必须全部有限")
         curvature = torch.dot(search, image)
         if not bool(torch.isfinite(curvature)) or float(curvature.item()) <= 0.0:
             break
@@ -443,14 +456,26 @@ def solve_psd_conjugate_gradient(
         residual = residual - step_size * image
         next_residual_square = torch.dot(residual, residual)
         absolute_residual = float(torch.sqrt(next_residual_square.clamp_min(0.0)).item())
-        relative_residual = absolute_residual / max(rhs_norm, absolute_tolerance)
-        if relative_residual <= relative_tolerance or absolute_residual <= absolute_tolerance:
-            converged = True
-            break
+        relative_residual = absolute_residual / rhs_norm
+        if relative_residual <= relative_tolerance:
+            (
+                residual,
+                absolute_residual,
+                relative_residual,
+            ) = true_residual(solution)
+            if relative_residual <= relative_tolerance:
+                converged = True
+                break
+            residual_square = torch.dot(residual, residual)
+            search = residual.clone()
+            continue
         if not bool(torch.isfinite(next_residual_square)):
             break
         search = residual + (next_residual_square / residual_square) * search
         residual_square = next_residual_square
+
+    _, absolute_residual, relative_residual = true_residual(solution)
+    converged = bool(relative_residual <= relative_tolerance)
 
     return PSDConjugateGradientResult(
         solution=solution,
@@ -612,7 +637,7 @@ def solve_jacobian_null_space(
     maximum_qr_condition_number: float = 1e6,
     maximum_orthogonality_error: float = 1e-5,
     qr_reference_solve_protocol: str = (
-        "right_upper_triangular_solve_without_explicit_inverse_v1"
+        "right_upper_triangular_solve_without_explicit_inverse"
     ),
 ) -> JacobianNullSpaceResult:
     """通过完整 Jacobian JVP/VJP 与无阻尼 PSD-CG 求解 Null Space。
@@ -645,7 +670,7 @@ def solve_jacobian_null_space(
     ):
         raise ValueError("maximum_orthogonality_error 必须为正有限数")
     if qr_reference_solve_protocol != (
-        "right_upper_triangular_solve_without_explicit_inverse_v1"
+        "right_upper_triangular_solve_without_explicit_inverse"
     ):
         raise ValueError("QR 逐列参考必须使用冻结的右侧上三角求解协议")
     if tuple(joint_feature_linearization.latent_shape) != tuple(latent.shape):
@@ -683,7 +708,11 @@ def solve_jacobian_null_space(
             maximum_iterations=cg_maximum_iterations,
             relative_tolerance=cg_relative_tolerance,
         )
-        if not cg_result.converged:
+        if (
+            not cg_result.converged
+            or not math.isfinite(cg_result.relative_residual)
+            or cg_result.relative_residual > cg_relative_tolerance
+        ):
             raise RuntimeError("完整 Jacobian 无阻尼 PSD-CG 未在冻结迭代预算内收敛")
         correction = (
             budget_square

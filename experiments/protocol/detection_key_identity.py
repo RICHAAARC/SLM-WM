@@ -7,9 +7,9 @@ from typing import Any, Mapping
 from main.core.digest import build_stable_digest
 
 
-DETECTION_KEY_PLAN_SCHEMA = "slm_wm_detection_key_plan_v1"
+DETECTION_KEY_PLAN_SCHEMA = "slm_wm_detection_key_plan"
 DETECTION_KEY_PLAN_PROTOCOL = (
-    "registered_key_and_sha256_domain_separated_wrong_key_v1"
+    "registered_key_and_sha256_domain_separated_wrong_key"
 )
 REGISTERED_WATERMARK_KEY_ROLE = "registered_watermark_key"
 REGISTERED_WRONG_KEY_ROLE = "registered_wrong_key_negative"

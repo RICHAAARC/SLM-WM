@@ -24,7 +24,12 @@ from main.methods.detection import (
     image_only_measurement_config_identity_record,
     validate_image_only_measurement_digest_record,
 )
-from main.methods.geometry import FROZEN_SD35_ATTENTION_MODULE_NAMES
+from main.methods.geometry import (
+    ATTENTION_COORDINATE_CONVENTION,
+    ATTENTION_GRID_ALIGN_CORNERS,
+    ATTENTION_OPERATOR_SCHEDULE_INDEX,
+    FROZEN_SD35_ATTENTION_MODULE_NAMES,
+)
 
 
 pytestmark = pytest.mark.quick
@@ -45,14 +50,14 @@ def _config() -> ImageOnlyMeasurementConfig:
         width=512,
         height=512,
         inference_steps=28,
-        public_detection_schedule_index=14,
+        public_detection_schedule_index=ATTENTION_OPERATOR_SCHEDULE_INDEX,
         public_detection_noise_prg_protocol=KEYED_PRG_VERSION,
-        public_detection_noise_domain="slm_wm_public_detection_noise_v1",
-        public_detection_conditioning_protocol="sd3_three_encoder_empty_text_v1",
+        public_detection_noise_domain="slm_wm_public_detection_noise",
+        public_detection_conditioning_protocol="sd3_three_encoder_empty_text",
         public_detection_condition_text="",
         max_attention_tokens=1024,
-        attention_coordinate_convention="normalized_xy_token_centers_corner_endpoints_v1",
-        attention_grid_align_corners=True,
+        attention_coordinate_convention=ATTENTION_COORDINATE_CONVENTION,
+        attention_grid_align_corners=ATTENTION_GRID_ALIGN_CORNERS,
         attention_module_names=FROZEN_SD35_ATTENTION_MODULE_NAMES,
         attention_anchor_count=12,
         attention_residual_threshold=0.20,
@@ -90,13 +95,10 @@ def _config() -> ImageOnlyMeasurementConfig:
         {"width": 520},
         {"height": 520},
         {"inference_steps": 29},
-        {"public_detection_schedule_index": 15},
         {"public_detection_noise_domain": "different_public_noise_domain"},
         {"public_detection_conditioning_protocol": "different_conditioning"},
         {"public_detection_condition_text": "different"},
         {"max_attention_tokens": 1000},
-        {"attention_coordinate_convention": "different_coordinates"},
-        {"attention_grid_align_corners": False},
         {"attention_anchor_count": 13},
         {"attention_residual_threshold": 0.21},
         {"attention_minimum_inlier_ratio": 0.51},
@@ -137,7 +139,7 @@ def test_measurement_config_digest_binds_every_runtime_parameter(
 
 @pytest.mark.parametrize(
     ("attention_geometry_enabled", "image_alignment_enabled"),
-    ((False, True), (True, False), (False, False)),
+    ((True, False), (False, False)),
 )
 def test_measurement_config_digest_binds_mechanism_switches(
     attention_geometry_enabled: bool,
@@ -161,11 +163,39 @@ def test_measurement_config_digest_binds_mechanism_switches(
     ]
 
 
+def test_measurement_identity_rejects_alignment_without_attention_geometry() -> None:
+    """仅启用配准不具备可计算的真实注意力几何输入。"""
+
+    with pytest.raises(ValueError, match="真实注意力几何"):
+        image_only_measurement_config_identity_record(
+            _config(),
+            attention_geometry_enabled=False,
+            image_alignment_enabled=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    (
+        {"public_detection_schedule_index": 8},
+        {"attention_coordinate_convention": "different_coordinates"},
+        {"attention_grid_align_corners": False},
+    ),
+)
+def test_measurement_config_rejects_frozen_geometry_identity_drift(
+    changes: dict[str, object],
+) -> None:
+    """检测时刻、token 坐标与图像采样约定不得成为可变参数。"""
+
+    with pytest.raises(ValueError, match="冻结|注意力坐标"):
+        replace(_config(), **changes)
+
+
 def test_measurement_record_rejects_embedded_calibration_parameter() -> None:
     """原始测量记录不得重新携带 calibration 决策参数。"""
 
     torch = pytest.importorskip("torch")
-    image = torch.zeros(1, 2, 8, 8)
+    image = torch.linspace(-1.0, 1.0, steps=128).reshape(1, 2, 8, 8)
     record = measure_image_only_watermark(
         image=image,
         key_material="detector-config-key",

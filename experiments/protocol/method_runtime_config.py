@@ -27,6 +27,7 @@ from main.methods.geometry import (
     ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
+    ATTENTION_OPERATOR_SCHEDULE_INDEX,
     ATTENTION_IMAGE_PADDING_MODE,
     ATTENTION_IMAGE_QUANTIZATION_PROTOCOL,
     ATTENTION_IMAGE_RESAMPLING_MODE,
@@ -39,7 +40,7 @@ from main.methods.geometry import (
 
 FORMAL_METHOD_CONFIG_RELATIVE_PATH = Path("configs/model_sd35.yaml")
 FORMAL_METHOD_PACKAGE_ROOT = Path(__file__).resolve().parents[2]
-FORMAL_METHOD_CONFIG_SCHEMA = "slm_wm_formal_method_runtime_config_v4"
+FORMAL_METHOD_CONFIG_SCHEMA = "slm_wm_formal_method_runtime_config"
 FORMAL_SD35_PIPELINE_CLASS_NAME = (
     "diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3."
     "StableDiffusion3Pipeline"
@@ -55,10 +56,10 @@ FORMAL_SD35_SCHEDULER_CLASS_NAME = (
     "FlowMatchEulerDiscreteScheduler"
 )
 FORMAL_PUBLIC_DETECTION_NOISE_DOMAIN = (
-    "public_image_only_qk_detection_noise_v1"
+    "public_image_only_qk_detection_noise"
 )
 FORMAL_PUBLIC_DETECTION_CONDITIONING_PROTOCOL = (
-    "sd3_empty_text_triplet_without_cfg_v1"
+    "sd3_empty_text_triplet_without_cfg"
 )
 
 
@@ -230,6 +231,7 @@ class FormalMethodRuntimeConfig:
     minimum_semantic_preservation_cosine: float
     maximum_handcrafted_structure_feature_relative_drift: float
     injection_step_indices: tuple[int, ...]
+    attention_operator_schedule_index: int
     public_detection_schedule_index: int
     public_detection_noise_prg_protocol: str
     public_detection_noise_domain: str
@@ -283,7 +285,7 @@ class FormalMethodRuntimeConfig:
         if self.detector_input_access_mode != "image_key_public_model_only":
             raise ValueError("正式检测器必须保持仅图像盲检输入制度")
         if self.risk_signal_calibration_protocol != (
-            "analytic_bounded_branch_signals_v1"
+            "analytic_bounded_branch_signals"
         ):
             raise ValueError("正式风险输入必须使用冻结解析范围协议")
         if (
@@ -301,7 +303,7 @@ class FormalMethodRuntimeConfig:
         if self.risk_eligibility_comparison != "strict_less_than":
             raise ValueError("正式风险资格集合必须使用严格小于阈值")
         if self.risk_budget_broadcast_protocol != (
-            "per_sample_hw_repeat_channels_nchw_v1"
+            "per_sample_hw_repeat_channels_nchw"
         ):
             raise ValueError("正式风险预算必须逐样本沿通道重复且不得混合 batch")
         if self.risk_zero_support_protocol != (
@@ -309,7 +311,7 @@ class FormalMethodRuntimeConfig:
         ):
             raise ValueError("正式零预算支持必须对应精确零方向或直接失败")
         if self.risk_bounded_scale_protocol != (
-            "direction_peak_frozen_budget_ceiling_box_v1"
+            "direction_peak_frozen_budget_ceiling_box"
         ):
             raise ValueError("正式风险写回必须使用冻结的 RiskBoundedScale 协议")
         if (
@@ -348,7 +350,7 @@ class FormalMethodRuntimeConfig:
         ):
             raise ValueError("正式 Null Space 正交误差上界必须固定为 1e-5")
         if self.qr_reference_solve_protocol != (
-            "right_upper_triangular_solve_without_explicit_inverse_v1"
+            "right_upper_triangular_solve_without_explicit_inverse"
         ):
             raise ValueError("正式 QR 列参考必须使用右侧上三角求解")
         if any(
@@ -360,13 +362,16 @@ class FormalMethodRuntimeConfig:
             )
         if (
             not self.injection_step_indices
+            or self.attention_operator_schedule_index
+            != ATTENTION_OPERATOR_SCHEDULE_INDEX
             or self.public_detection_schedule_index
             != self.injection_step_indices[0] + 1
-            or self.public_detection_schedule_index != 7
+            or self.public_detection_schedule_index
+            != self.attention_operator_schedule_index
             or self.public_detection_schedule_index >= self.inference_steps
         ):
             raise ValueError(
-                "公开检测 schedule index 必须固定为首次注入后的第7步"
+                "生成与检测注意力算子必须共享首次注入后的冻结 schedule 索引"
             )
         if type(self.tail_fraction) is not float or not 0.0 < self.tail_fraction <= 1.0:
             raise ValueError("tail_fraction 必须为 (0, 1] 内的精确 float")
@@ -451,7 +456,7 @@ class FormalMethodRuntimeConfig:
                 "maximum_quantized_write_relative_jacobian_response 必须位于 (0, 1]"
             )
         if self.quantized_branch_composition_protocol != (
-            "float32_ordered_branch_sum_add_float32_latent_single_cast_v1"
+            "float32_ordered_branch_sum_add_float32_latent_single_cast"
         ):
             raise ValueError("正式三分支实际 dtype 合成协议发生漂移")
         if self.quantized_branch_composition_order != (
@@ -662,6 +667,9 @@ class FormalMethodRuntimeConfig:
             ),
             "maximum_handcrafted_structure_feature_relative_drift": (
                 self.maximum_handcrafted_structure_feature_relative_drift
+            ),
+            "attention_operator_schedule_index": (
+                self.attention_operator_schedule_index
             ),
             "public_detection_schedule_index": (
                 self.public_detection_schedule_index
@@ -954,6 +962,9 @@ def require_formal_method_environment_consistency(config: FormalMethodRuntimeCon
             config.maximum_handcrafted_structure_feature_relative_drift
         ),
         "SLM_WM_MAX_ATTENTION_TOKENS": str(config.max_attention_tokens),
+        "SLM_WM_ATTENTION_OPERATOR_SCHEDULE_INDEX": str(
+            config.attention_operator_schedule_index
+        ),
         "SLM_WM_PUBLIC_DETECTION_SCHEDULE_INDEX": str(
             config.public_detection_schedule_index
         ),

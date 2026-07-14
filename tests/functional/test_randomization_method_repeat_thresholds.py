@@ -171,7 +171,7 @@ def _base_latent_identity(generation_seed_random: int) -> dict[str, Any]:
             "cpu_dtype_cast_then_device_transfer_v2"
         ),
         "base_latent_keyed_prg_version": (
-            "sha256_counter_normal_icdf_table20_float32_v2"
+            "sha256_counter_normal_icdf_table20_float32"
         ),
         "base_latent_keyed_prg_protocol_digest": (
             formal_randomization_protocol_record()[

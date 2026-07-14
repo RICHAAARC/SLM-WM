@@ -7,15 +7,27 @@ import math
 from typing import Any
 
 from experiments.runtime.model_sources import require_registered_model_reference
-
-
-SEMANTIC_FEATURE_SCHEMA = "full_normalized_clip_embedding"
-HANDCRAFTED_STRUCTURE_FEATURE_SCHEMA = (
-    "handcrafted_rgb_statistics_gradient_8x8_structure_vector"
+from main.methods.semantic.feature_protocol import (
+    CLIP_CLS_TOKEN_INDEX,
+    CLIP_PATCH_TOKEN_START_INDEX,
+    CLIP_PROJECTED_EMBEDDING_SOURCE,
+    CLIP_TOKEN_SEQUENCE_SOURCE,
+    CLIP_VISION_CHANNEL_MEAN,
+    CLIP_VISION_CHANNEL_STD,
+    CLIP_VISION_INPUT_SIZE,
+    CLIP_VISION_RESIZE_ALIGN_CORNERS,
+    CLIP_VISION_RESIZE_ANTIALIAS,
+    CLIP_VISION_RESIZE_MODE,
+    HANDCRAFTED_STRUCTURE_FEATURE_SCHEMA,
+    HANDCRAFTED_STRUCTURE_FEATURE_WIDTH,
+    JOINT_FEATURE_WIDTH,
+    SEMANTIC_FEATURE_PROTOCOL_SCHEMA,
+    SEMANTIC_FEATURE_SCHEMA,
+    SEMANTIC_FEATURE_WIDTH,
+    STRUCTURE_POOL_HEIGHT,
+    STRUCTURE_POOL_WIDTH,
+    semantic_feature_protocol_record,
 )
-SEMANTIC_FEATURE_WIDTH = 512
-HANDCRAFTED_STRUCTURE_FEATURE_WIDTH = 204
-JOINT_FEATURE_WIDTH = SEMANTIC_FEATURE_WIDTH + HANDCRAFTED_STRUCTURE_FEATURE_WIDTH
 
 
 def load_clip_vision_model(
@@ -62,7 +74,6 @@ class DifferentiableSemanticFeatureRuntime:
 
     vae: Any
     vision_model: Any
-    vision_input_size: int = 224
 
     def __post_init__(self) -> None:
         """冻结模型权重, 后续 autograd 只计算 latent 的方向导数。"""
@@ -73,12 +84,21 @@ class DifferentiableSemanticFeatureRuntime:
     def decode_latent(self, latent: Any) -> Any:
         """按照 diffusers VAE 缩放约定将 latent 解码为 [0, 1] 图像 tensor。"""
 
+        import torch
+
+        if not bool(torch.isfinite(latent).all()):
+            raise RuntimeError("VAE 解码输入 latent 必须全部有限")
         scaling_factor = float(self.vae.config.scaling_factor)
         shift_factor = float(self.vae.config.shift_factor)
         vae_dtype = next(self.vae.parameters()).dtype
         scaled_latent = (latent / scaling_factor + shift_factor).to(dtype=vae_dtype)
+        if not bool(torch.isfinite(scaled_latent).all()):
+            raise RuntimeError("VAE 解码缩放后的 latent 必须全部有限")
         decoded = self.vae.decode(scaled_latent, return_dict=False)[0]
-        return (decoded.float() / 2.0 + 0.5).clamp(0.0, 1.0)
+        image = (decoded.float() / 2.0 + 0.5).clamp(0.0, 1.0)
+        if not bool(torch.isfinite(image).all()):
+            raise RuntimeError("VAE 解码图像必须全部有限")
+        return image
 
     def clip_pixels(self, image: Any) -> Any:
         """用可微插值和官方 CLIP 归一化常量准备图像输入。"""
@@ -88,13 +108,21 @@ class DifferentiableSemanticFeatureRuntime:
 
         resized = functional.interpolate(
             image,
-            size=(self.vision_input_size, self.vision_input_size),
-            mode="bicubic",
-            align_corners=False,
-            antialias=True,
+            size=(CLIP_VISION_INPUT_SIZE, CLIP_VISION_INPUT_SIZE),
+            mode=CLIP_VISION_RESIZE_MODE,
+            align_corners=CLIP_VISION_RESIZE_ALIGN_CORNERS,
+            antialias=CLIP_VISION_RESIZE_ANTIALIAS,
         )
-        mean = torch.tensor((0.48145466, 0.4578275, 0.40821073), device=image.device).view(1, 3, 1, 1)
-        std = torch.tensor((0.26862954, 0.26130258, 0.27577711), device=image.device).view(1, 3, 1, 1)
+        mean = torch.tensor(
+            CLIP_VISION_CHANNEL_MEAN,
+            device=image.device,
+            dtype=resized.dtype,
+        ).view(1, 3, 1, 1)
+        std = torch.tensor(
+            CLIP_VISION_CHANNEL_STD,
+            device=image.device,
+            dtype=resized.dtype,
+        ).view(1, 3, 1, 1)
         normalized = (resized - mean) / std
         model_dtype = next(self.vision_model.parameters()).dtype
         return normalized.to(dtype=model_dtype)
@@ -103,29 +131,50 @@ class DifferentiableSemanticFeatureRuntime:
         """从 latent 端到端计算 CLIP 图像编码输出。"""
 
         image = self.decode_latent(latent)
-        return self.vision_model(pixel_values=self.clip_pixels(image), output_hidden_states=True)
+        return self.vision_model(
+            pixel_values=self.clip_pixels(image),
+            output_hidden_states=True,
+        )
 
     def semantic_features(self, latent: Any) -> Any:
         """返回归一化 CLIP 全局语义嵌入, 作为语义 Jacobian 输出。"""
 
-        import torch.nn.functional as functional
-
         outputs = self.vision_outputs(latent)
-        image_embeds = getattr(outputs, "image_embeds", None)
+        image_embeds = getattr(outputs, CLIP_PROJECTED_EMBEDDING_SOURCE, None)
         if image_embeds is None:
             raise RuntimeError("冻结 CLIP 图像模型没有返回投影后的 image_embeds")
-        return functional.normalize(image_embeds.float(), dim=-1)
+        return self._normalize_projected_embedding(image_embeds)
 
     def _semantic_features_from_image(self, image: Any) -> Any:
         """从已解码图像计算语义特征, 供联合 JVP 避免重复 VAE 解码。"""
 
-        import torch.nn.functional as functional
-
-        outputs = self.vision_model(pixel_values=self.clip_pixels(image), output_hidden_states=True)
-        image_embeds = getattr(outputs, "image_embeds", None)
+        outputs = self.vision_model(
+            pixel_values=self.clip_pixels(image),
+            output_hidden_states=True,
+        )
+        image_embeds = getattr(outputs, CLIP_PROJECTED_EMBEDDING_SOURCE, None)
         if image_embeds is None:
             raise RuntimeError("冻结 CLIP 图像模型没有返回投影后的 image_embeds")
-        return functional.normalize(image_embeds.float(), dim=-1)
+        return self._normalize_projected_embedding(image_embeds)
+
+    @staticmethod
+    def _normalize_projected_embedding(image_embeds: Any) -> Any:
+        """拒绝退化向量后执行最后一维 L2 归一化。"""
+
+        import torch
+
+        values = image_embeds.float()
+        if values.ndim != 2 or int(values.shape[-1]) != SEMANTIC_FEATURE_WIDTH:
+            raise RuntimeError("投影后 CLIP image_embeds 必须具有冻结的二维宽度")
+        if not bool(torch.isfinite(values).all()):
+            raise RuntimeError("投影后 CLIP image_embeds 必须全部有限")
+        norms = torch.linalg.vector_norm(values, dim=-1, keepdim=True)
+        if not bool(torch.isfinite(norms).all()) or bool((norms == 0.0).any()):
+            raise RuntimeError("投影后 CLIP image_embeds 必须具有有限非零能量")
+        normalized = values / norms
+        if not bool(torch.isfinite(normalized).all()):
+            raise RuntimeError("投影后 CLIP image_embeds 归一化结果必须全部有限")
+        return normalized
 
     def handcrafted_structure_features(self, latent: Any) -> Any:
         """返回固定204维 RGB 统计、梯度和8x8池化结构向量."""
@@ -140,12 +189,23 @@ class DifferentiableSemanticFeatureRuntime:
         import torch
         import torch.nn.functional as functional
 
+        if (
+            image.ndim != 4
+            or int(image.shape[0]) != 1
+            or int(image.shape[1]) != 3
+        ):
+            raise ValueError("204维结构坐标要求单样本 RGB 图像 tensor")
+        if not bool(torch.isfinite(image).all()):
+            raise RuntimeError("204维结构坐标输入图像必须全部有限")
         horizontal = image[:, :, :, 1:] - image[:, :, :, :-1]
         vertical = image[:, :, 1:, :] - image[:, :, :-1, :]
-        pooled = functional.adaptive_avg_pool2d(image, (8, 8))
+        pooled = functional.adaptive_avg_pool2d(
+            image,
+            (STRUCTURE_POOL_HEIGHT, STRUCTURE_POOL_WIDTH),
+        )
         channel_mean = image.mean(dim=(-1, -2))
         channel_std = image.std(dim=(-1, -2), unbiased=False)
-        return torch.cat(
+        features = torch.cat(
             (
                 channel_mean.reshape(-1),
                 channel_std.reshape(-1),
@@ -154,6 +214,12 @@ class DifferentiableSemanticFeatureRuntime:
                 pooled.reshape(-1),
             )
         )
+        if (
+            features.numel() != HANDCRAFTED_STRUCTURE_FEATURE_WIDTH
+            or not bool(torch.isfinite(features).all())
+        ):
+            raise RuntimeError("204维结构坐标宽度或有限性不满足冻结协议")
+        return features
 
     def joint_features(self, latent: Any) -> tuple[Any, Any]:
         """一次 VAE 解码同时返回 CLIP 语义与手工结构统计."""
@@ -164,8 +230,8 @@ class DifferentiableSemanticFeatureRuntime:
     def joint_image_features(self, image: Any) -> tuple[Any, Any]:
         """从 [0, 1] 图像 tensor 返回语义与手工结构统计."""
 
-        if image.ndim != 4 or image.shape[1] != 3:
-            raise ValueError("完整图像特征要求 [batch, 3, height, width] tensor")
+        if image.ndim != 4 or image.shape[0] != 1 or image.shape[1] != 3:
+            raise ValueError("完整图像特征要求 [1, 3, height, width] tensor")
         return (
             self._semantic_features_from_image(image),
             self._handcrafted_structure_features_from_image(image),
@@ -183,10 +249,14 @@ class DifferentiableSemanticFeatureRuntime:
                 structure.reshape(-1).float(),
             )
         )
-        if latent.shape[0] == 1 and vector.numel() != JOINT_FEATURE_WIDTH:
+        if latent.ndim != 4 or latent.shape[0] != 1:
+            raise ValueError("完整 Jacobian 特征算子只接受单样本 latent")
+        if vector.numel() != JOINT_FEATURE_WIDTH:
             raise RuntimeError(
                 "完整 Jacobian 特征宽度与冻结 CLIP/手工结构 schema 不一致"
             )
+        if not bool(torch.isfinite(vector).all()):
+            raise RuntimeError("完整 Jacobian 特征向量必须全部有限")
         return vector
 
     def feature_schema_record(self) -> dict[str, Any]:
@@ -199,7 +269,14 @@ class DifferentiableSemanticFeatureRuntime:
             semantic_width = int(getattr(projection, "out_features", 0) or 0)
         if semantic_width != SEMANTIC_FEATURE_WIDTH:
             raise ValueError("冻结 CLIP 模型 projection_dim 与正式完整特征宽度不一致")
+        protocol = semantic_feature_protocol_record()
         return {
+            "semantic_feature_protocol_schema": (
+                SEMANTIC_FEATURE_PROTOCOL_SCHEMA
+            ),
+            "semantic_feature_protocol_digest": protocol[
+                "semantic_feature_protocol_digest"
+            ],
             "semantic_feature_schema": SEMANTIC_FEATURE_SCHEMA,
             "semantic_feature_width": semantic_width,
             "handcrafted_structure_feature_schema": HANDCRAFTED_STRUCTURE_FEATURE_SCHEMA,
@@ -227,10 +304,23 @@ class DifferentiableSemanticFeatureRuntime:
                 "adjacent_step_stability 要求上一 scheduler 步的真实 latent"
             )
         image = self.decode_latent(latent)
-        outputs = self.vision_model(pixel_values=self.clip_pixels(image), output_hidden_states=True)
-        tokens = outputs.last_hidden_state.float()
-        patch_tokens = tokens[:, 1:, :]
-        cls_token = functional.normalize(tokens[:, :1, :], dim=-1)
+        outputs = self.vision_model(
+            pixel_values=self.clip_pixels(image),
+            output_hidden_states=True,
+        )
+        tokens = getattr(outputs, CLIP_TOKEN_SEQUENCE_SOURCE, None)
+        if tokens is None:
+            raise RuntimeError("冻结 CLIP 图像模型没有返回风险信号所需 token 序列")
+        tokens = tokens.float()
+        patch_tokens = tokens[:, CLIP_PATCH_TOKEN_START_INDEX:, :]
+        cls_token = functional.normalize(
+            tokens[
+                :,
+                CLIP_CLS_TOKEN_INDEX : CLIP_CLS_TOKEN_INDEX + 1,
+                :,
+            ],
+            dim=-1,
+        )
         normalized_patches = functional.normalize(patch_tokens, dim=-1)
         semantic_patch = (
             (normalized_patches * cls_token).sum(dim=-1) + 1.0
@@ -288,5 +378,9 @@ class DifferentiableSemanticFeatureRuntime:
             "current_decoded_rgb": image.detach(),
             "previous_step_decoded_rgb": previous_image.detach(),
             "clip_patch_tokens": patch_tokens.detach(),
-            "clip_cls_token": tokens[:, :1, :].detach(),
+            "clip_cls_token": tokens[
+                :,
+                CLIP_CLS_TOKEN_INDEX : CLIP_CLS_TOKEN_INDEX + 1,
+                :,
+            ].detach(),
         }

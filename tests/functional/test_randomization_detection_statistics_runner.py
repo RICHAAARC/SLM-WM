@@ -434,7 +434,7 @@ def test_source_binding_rejects_duplicate_keys_and_wrong_key_image_swap(
 def test_main_key_role_and_baseline_score_must_rebuild(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """wrong-key 身份与 baseline 分数判定属于不可绕过的 P1 边界."""
+    """wrong-key 身份与 baseline 分数判定属于不可绕过的公平性边界."""
 
     monkeypatch.setattr(
         runner,

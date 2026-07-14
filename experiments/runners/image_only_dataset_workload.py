@@ -137,6 +137,9 @@ def build_method_config(
         maximum_handcrafted_structure_feature_relative_drift=(
             method.maximum_handcrafted_structure_feature_relative_drift
         ),
+        attention_operator_schedule_index=(
+            method.attention_operator_schedule_index
+        ),
         max_attention_tokens=method.max_attention_tokens,
         attention_module_names=method.attention_module_names,
         attention_coordinate_convention=(

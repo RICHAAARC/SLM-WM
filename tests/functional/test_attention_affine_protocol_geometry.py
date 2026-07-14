@@ -120,7 +120,7 @@ def test_public_token_coordinates_use_corner_center_endpoints() -> None:
 
     assert ATTENTION_GRID_ALIGN_CORNERS is True
     assert ATTENTION_COORDINATE_CONVENTION == (
-        "normalized_xy_token_centers_corner_endpoints_v1"
+        "normalized_xy_token_centers_corner_endpoints"
     )
     assert torch.equal(
         coordinates,

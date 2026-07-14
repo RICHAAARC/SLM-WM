@@ -33,6 +33,9 @@ from main.methods.geometry.attention_alignment import (
     validate_attention_alignment_record,
 )
 from main.methods.geometry.differentiable_attention import (
+    ATTENTION_COORDINATE_CONVENTION,
+    ATTENTION_GRID_ALIGN_CORNERS,
+    ATTENTION_OPERATOR_SCHEDULE_INDEX,
     DIRECT_QK_RELATION_SOURCE,
     FROZEN_SD35_ATTENTION_MODULE_NAMES,
     attention_geometry_score,
@@ -51,19 +54,19 @@ AttentionRecord = tuple[str, Any, tuple[int, ...]]
 ImageAttentionExtractor = Callable[[Any], tuple[AttentionRecord, ...]]
 ImageAligner = Callable[[Any, AttentionAlignmentResult], Any]
 IMAGE_ONLY_MEASUREMENT_CONFIG_SCHEMA = (
-    "slm_wm_image_only_measurement_config_v2"
+    "slm_wm_image_only_measurement_config"
 )
 IMAGE_ONLY_EXTRACTION_PROFILE_SCHEMA = (
-    "slm_wm_image_only_extraction_profile_v1"
+    "slm_wm_image_only_extraction_profile"
 )
 IMAGE_ONLY_IMAGE_PREPROCESSING_PROTOCOL = (
-    "diffusers_sd3_image_processor_rgb_preprocess_v1"
+    "diffusers_sd3_image_processor_rgb_preprocess"
 )
 IMAGE_ONLY_VAE_ENCODING_PROTOCOL = (
-    "sd3_vae_latent_dist_mode_shift_then_scale_v1"
+    "sd3_vae_latent_dist_mode_shift_then_scale"
 )
 ATTENTION_ALIGNMENT_LAYER_SELECTION_RULE = (
-    "lexicographic_objective_observation_confidence_then_frozen_layer_order_v1"
+    "lexicographic_objective_observation_confidence_then_frozen_layer_order"
 )
 
 
@@ -152,13 +155,18 @@ class ImageOnlyMeasurementConfig:
             raise ValueError("盲检图像宽高必须能被8整除")
         if (
             type(self.public_detection_schedule_index) is not int
-            or not 0
-            <= self.public_detection_schedule_index
-            < self.inference_steps
+            or self.public_detection_schedule_index
+            != ATTENTION_OPERATOR_SCHEDULE_INDEX
+            or self.public_detection_schedule_index >= self.inference_steps
         ):
-            raise ValueError("公开检测 schedule 索引必须位于推理步范围内")
-        if type(self.attention_grid_align_corners) is not bool:
-            raise ValueError("attention_grid_align_corners 必须为精确 bool")
+            raise ValueError("公开检测 schedule 索引必须等于冻结注意力算子索引")
+        if (
+            self.attention_coordinate_convention
+            != ATTENTION_COORDINATE_CONVENTION
+            or self.attention_grid_align_corners
+            is not ATTENTION_GRID_ALIGN_CORNERS
+        ):
+            raise ValueError("注意力坐标与 align_corners 必须等于冻结方法约定")
         if self.attention_module_names != FROZEN_SD35_ATTENTION_MODULE_NAMES:
             raise ValueError("attention_module_names 必须等于冻结 SD3.5 层顺序")
         for field_name, value in (
@@ -276,6 +284,8 @@ def image_only_measurement_config_identity_record(
         or type(image_alignment_enabled) is not bool
     ):
         raise TypeError("检测机制开关必须为精确 bool")
+    if image_alignment_enabled and not attention_geometry_enabled:
+        raise ValueError("图像配准必须以真实注意力几何测量为前提")
     relation_protocol = attention_relation_component_protocol(
         config.attention_relation_component_weights
     )
@@ -701,7 +711,8 @@ def _validate_image_only_measurement_digest_record(
         raise ValueError("stable pair 权重身份就绪字段必须为 bool")
     if alignment is None:
         if (
-            geometry_score is not None
+            aligned_score is not None
+            or geometry_score is not None
             or registration_confidence is not None
             or sync_score is not None
             or (
@@ -717,6 +728,8 @@ def _validate_image_only_measurement_digest_record(
     else:
         if not isinstance(alignment, Mapping):
             raise ValueError("alignment 必须为 mapping 或 None")
+        if aligned_score is None:
+            raise ValueError("存在 alignment 时必须提供完整 aligned 内容分数")
         validate_attention_alignment_record(alignment)
         if alignment.get("layer_name") not in FROZEN_SD35_ATTENTION_MODULE_NAMES:
             raise ValueError("alignment 所选层不属于冻结 SD3.5 注意力层")
@@ -724,6 +737,7 @@ def _validate_image_only_measurement_digest_record(
             not _finite_number(geometry_score)
             or not _finite_number(raw_geometry_score)
             or not _finite_number(registration_confidence)
+            or not _finite_number(sync_score)
             or not math.isclose(
                 float(geometry_score),
                 float(alignment.get("relation_sync_score")),
@@ -735,7 +749,7 @@ def _validate_image_only_measurement_digest_record(
                 abs_tol=1e-12,
             )
         ):
-            raise ValueError("注意力分数或注册置信度与 alignment 不一致")
+            raise ValueError("注意力分数、同步分数或注册置信度与 alignment 不一致")
 
     forbidden_decision_fields = {
         "raw_content_margin",

@@ -44,7 +44,7 @@ def test_legacy_box_muller_protocol_is_not_accepted() -> None:
 
     with pytest.raises(ValueError, match="keyed_prg_version"):
         require_supported_keyed_prg_version(
-            "sha256_counter_box_muller_float32_v1"
+            "sha256_counter_box_muller_float32_legacy"
         )
 
 
@@ -116,13 +116,13 @@ def test_gaussian_prg_uses_no_platform_transcendental_functions(
     )
 
     assert tensor.tolist() == [
-        0.9188238978385925,
-        0.9646357297897339,
-        1.737541675567627,
-        0.24967548251152039,
+        -0.09923840314149857,
+        1.7385268211364746,
+        0.6552790999412537,
+        0.8304281830787659,
     ]
     assert hashlib.sha256(tensor.numpy().tobytes()).hexdigest() == (
-        "ad1f2e489609026abb067a92c68ae4be450a6de1a8a8474780f7a6d6ca66e06f"
+        "589a60c85b588cc14bf41151021cbac35e94edf8f9a7c5e0603f7733abcefb4c"
     )
 
 
@@ -182,12 +182,12 @@ def test_normal_indices_match_independent_concatenated_bit_string() -> None:
 @pytest.mark.parametrize(
     ("element_count", "expected_sha256"),
     (
-        (12, "53f333c50c2e1e6bd8ec551ba3c858ec0c251fbe9584606f990380e60324c2d5"),
-        (13, "1225e1cf886d1facc0a5f07ea1dc1efa9bba46aff583bf22f09d68d7f4101f4a"),
-        (16, "88fee8e501a7a81119f12fa67b237558babc932b6d80bc00a14bf975909945a7"),
-        (17, "5e1fe23d4672ef6112ecb7596979d43612ee036b95711184b7baaa4e83f8381a"),
-        (64, "3a2a95dbb4b4ec6b00eca96aaece2e73fed2f5bfd9d7c937824777a131fe80f5"),
-        (65, "df0263abeca7988b3a80f199ee350eff1a7673e3f1acb35d4893adcea37ad6fa"),
+        (12, "7c4c762ef96ee2ac30eda67551403567f8655a70ec75a75a8e15ebbd5896b450"),
+        (13, "6de15d177e58daf0e744cc26ecd315429fec21740531e47c6a034b760965f22c"),
+        (16, "3506518515b1ec120d3703af212820cc653afb9a4df700d35e3369326e2cc79a"),
+        (17, "d1c2ca640182755e7e5a0b3e1af738108e3f9d271cc350e98ca6395622d8ab37"),
+        (64, "83a4488c8c96ba631032bd4bc450c485419ccfa3cff70f643953ae6e9fe5aa9c"),
+        (65, "ddb1a19cadad158aa1c95e028b91a05296d092e32a457416ee7f2ef7c7b45de4"),
     ),
 )
 def test_gaussian_prg_known_answers_cross_sha256_block_boundaries(

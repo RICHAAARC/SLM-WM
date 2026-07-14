@@ -212,7 +212,7 @@ def test_paper_run_levels_share_method_and_fixed_fpr_protocol(tmp_path: Path, mo
     )
     assert shared_method_settings(probe_config)[
         "attention_coordinate_convention"
-    ] == "normalized_xy_token_centers_corner_endpoints_v1"
+    ] == "normalized_xy_token_centers_corner_endpoints"
     assert shared_method_settings(probe_config)[
         "attention_grid_align_corners"
     ] is True
@@ -239,19 +239,19 @@ def test_paper_run_levels_share_method_and_fixed_fpr_protocol(tmp_path: Path, mo
     ) == (1.5305, 0.0609, "float16", "float32")
     assert frozen_settings["public_detection_schedule_index"] == 7
     assert frozen_settings["public_detection_noise_prg_protocol"] == (
-        "sha256_counter_normal_icdf_table20_float32_v2"
+        "sha256_counter_normal_icdf_table20_float32"
     )
     assert frozen_settings["public_detection_noise_domain"] == (
-        "public_image_only_qk_detection_noise_v1"
+        "public_image_only_qk_detection_noise"
     )
     assert frozen_settings["public_detection_condition_text"] == ""
     assert frozen_settings["risk_signal_calibration_protocol"] == (
-        "analytic_bounded_branch_signals_v1"
+        "analytic_bounded_branch_signals"
     )
     assert frozen_settings["risk_eligibility_comparison"] == "strict_less_than"
     assert frozen_settings["risk_neutral_texture_value"] == 0.5
     assert frozen_settings["risk_budget_broadcast_protocol"] == (
-        "per_sample_hw_repeat_channels_nchw_v1"
+        "per_sample_hw_repeat_channels_nchw"
     )
     assert frozen_settings["risk_zero_support_protocol"] == (
         "exact_zero_direction_or_fail_closed"
@@ -266,10 +266,10 @@ def test_paper_run_levels_share_method_and_fixed_fpr_protocol(tmp_path: Path, mo
         "attention_instability_weight"
     ] == 0.30
     assert frozen_settings["qr_reference_solve_protocol"] == (
-        "right_upper_triangular_solve_without_explicit_inverse_v1"
+        "right_upper_triangular_solve_without_explicit_inverse"
     )
     assert frozen_settings["quantized_branch_composition_protocol"] == (
-        "float32_ordered_branch_sum_add_float32_latent_single_cast_v1"
+        "float32_ordered_branch_sum_add_float32_latent_single_cast"
     )
     assert frozen_settings["quantized_branch_composition_order"] == (
         "lf_content",

@@ -1,8 +1,8 @@
 {
-  "registry_schema": "slm_wm_method_semantic_registry_v1",
+  "registry_schema": "slm_wm_method_semantic_trace_registry",
   "registry_scope": "normative_traceability_without_scientific_conformance_decision",
-  "method_definition_schema": "slm_wm_constructive_local_tangent_v12",
-  "method_definition_digest": "1a7c52b29fe68bdc578f8e52029fdfc6dcccc669e0f2796d63e6eb2b9e91b9af",
+  "method_definition_schema": "slm_wm_constructive_local_tangent_definition",
+  "method_definition_digest": "f0c129f537b6acec36926d9a999f52ca68c749a4e3eb0cb7a25bfdd639948e4d",
   "invariants": [
     {
       "invariant_id": "constructive_local_tangent_scope",
@@ -63,8 +63,9 @@
       "invariant_id": "frozen_model_operator_identity",
       "definition_pointer": "docs/builds/method_semantic_invariants.md#frozen_model_operator_identity",
       "formal_expression": [
-        "operator_identity=(sd35_revision,clip_revision,vae_config,scheduler_class,transformer_class,latent_dtype,attention_layers,formal_method_config_digest)",
-        "vae_config_fields=required_explicit(scaling_factor,shift_factor)"
+        "operator_identity=(sd35_revision,clip_revision,vae_config,scheduler_class,transformer_class,latent_dtype,attention_layers,attention_operator_schedule_index,public_detection_schedule_index,formal_method_config_digest)",
+        "vae_config_fields=required_explicit(scaling_factor,shift_factor)",
+        "attention_operator_schedule_index=public_detection_schedule_index=7"
       ],
       "configuration_fields": [
         "model_family",
@@ -81,6 +82,7 @@
         "vae_shift_factor",
         "latent_torch_dtype",
         "vision_torch_dtype",
+        "attention_operator_schedule_index",
         "public_detection_schedule_index",
         "attention_module_names",
         "attention_coordinate_convention",
@@ -124,7 +126,9 @@
         "latent_torch_dtype",
         "vision_torch_dtype",
         "public_detection_schedule_index",
-        "formal_method_config_digest"
+        "formal_method_config_digest",
+        "attention_operator_schedule_index",
+        "attention_operator_timestep"
       ],
       "fail_closed_conditions": [
         "model_revision_missing",
@@ -134,7 +138,9 @@
         "latent_dtype_missing",
         "frozen_attention_layer_missing",
         "vae_scaling_factor_missing",
-        "vae_shift_factor_missing"
+        "vae_shift_factor_missing",
+        "attention_operator_schedule_index_drift",
+        "attention_operator_and_public_detection_index_mismatch"
       ],
       "forbidden_substitutes": [
         "mutable_model_branch",
@@ -143,14 +149,18 @@
         "unrecorded_scheduler_substitution",
         "unrecorded_dtype_substitution",
         "default_vae_scaling_factor_one",
-        "default_vae_shift_factor_zero"
+        "default_vae_shift_factor_zero",
+        "post_step_schedule_index_as_attention_operator",
+        "callback_dependent_attention_operator_timestep"
       ],
       "cpu_property_id": "exact_model_revisions_and_runtime_operator_classes_define_the_scientific_operator",
       "specification_test_nodes": [
         "tests/functional/test_model_source_registry.py::test_primary_model_config_matches_immutable_source_registry",
         "tests/functional/test_model_source_registry.py::test_sd35_pipeline_forwards_registered_revision",
         "tests/functional/test_model_source_registry.py::test_clip_loader_forwards_registered_revision",
-        "tests/functional/test_semantic_feature_conditions.py::test_latent_decoder_requires_explicit_vae_scaling_and_shift"
+        "tests/functional/test_semantic_feature_conditions.py::test_latent_decoder_requires_explicit_vae_scaling_and_shift",
+        "tests/functional/test_semantic_feature_conditions.py::test_attention_operator_timestep_is_independent_of_post_step_position",
+        "tests/functional/test_scientific_content_binding.py::test_update_content_identity_rejects_attention_schedule_drift"
       ],
       "cpu_property_test_nodes": [],
       "gpu_atomic_roles": [
@@ -159,10 +169,12 @@
         "vae_runtime_identity",
         "scheduler_runtime_identity",
         "transformer_runtime_identity",
-        "latent_dtype_identity"
+        "latent_dtype_identity",
+        "attention_operator_schedule_identity",
+        "public_detection_schedule_identity"
       ],
-      "gpu_observation_requirement": "真实 GPU 原子必须绑定精确模型 revision、实际组件类、latent dtype、冻结注意力层集合, 并证明 VAE scaling_factor 与 shift_factor 由实际 config 显式提供。",
-      "claim_boundary": "模型族名称、可变分支或 VAE 缩放和平移默认值不能替代精确权重和实际运行算子身份。"
+      "gpu_observation_requirement": "真实 GPU 原子必须绑定精确模型 revision、实际组件类、latent dtype、冻结注意力层集合、固定注意力算子索引与公开检测索引, 并证明 VAE scaling_factor 与 shift_factor 由实际 config 显式提供。",
+      "claim_boundary": "模型族名称、可变分支、VAE 缩放和平移默认值或随回调变化的 Q/K timestep 不能替代精确权重和实际运行算子身份。"
     },
     {
       "invariant_id": "branch_signal_origin",
@@ -424,16 +436,24 @@
       "invariant_id": "complete_716_feature_jacobian",
       "definition_pointer": "docs/builds/method_semantic_invariants.md#complete_716_feature_jacobian",
       "formal_expression": [
-        "F(z)=concat(normalized_clip_embedding_512,handcrafted_structure_204)",
-        "F_CLIP=normalize(projected_image_embeds_512)",
-        "handcrafted_204=rgb_mean_3+rgb_std_3+horizontal_gradient_3+vertical_gradient_3+adaptive_avgpool8x8_rgb_192",
-        "feature_width=716"
+        "decoded_rgb=clamp(vae_decode(latent/scaling_factor+shift_factor)/2+1/2,0,1)",
+        "clip_input=normalize_channels(bicubic(decoded_rgb,224,align_corners_false,antialias_true),clip_mean,clip_std)",
+        "F_CLIP=normalize(clip_vision.image_embeds)_512",
+        "handcrafted_204=rgb_mean_3+rgb_population_std_3+horizontal_abs_gradient_mean_3+vertical_abs_gradient_mean_3+adaptive_avgpool_rgb_chw_8x8_192",
+        "F(z)=concat(normalized_projected_clip_image_embedding_512,explicit_structure_coordinates_204)",
+        "feature_width=716_and_feature_compression_applied=false",
+        "feature_protocol_identity=(semantic_feature_protocol_schema,semantic_feature_protocol_digest)"
       ],
       "configuration_fields": [
         "vision_model_id",
         "vision_model_revision"
       ],
-      "method_implementation_symbols": [],
+      "method_implementation_symbols": [
+        {
+          "path": "main/methods/semantic/feature_protocol.py",
+          "symbol": "semantic_feature_protocol_record"
+        }
+      ],
       "runtime_binding_symbols": [
         {
           "path": "experiments/runtime/diffusion/semantic_features.py",
@@ -445,6 +465,8 @@
         }
       ],
       "runtime_evidence_fields": [
+        "semantic_feature_protocol_schema",
+        "semantic_feature_protocol_digest",
         "semantic_feature_schema",
         "semantic_feature_width",
         "handcrafted_structure_feature_schema",
@@ -454,12 +476,16 @@
         "vision_model_revision"
       ],
       "fail_closed_conditions": [
+        "semantic_feature_protocol_identity_mismatch",
+        "semantic_feature_batch_count_not_one",
         "clip_feature_width_mismatch",
         "handcrafted_feature_width_mismatch",
         "joint_feature_width_mismatch",
         "feature_compression_detected",
         "feature_coordinate_nonfinite",
-        "clip_projected_image_embeds_missing"
+        "clip_projected_image_embeds_missing",
+        "clip_projected_embedding_nonfinite",
+        "clip_projected_embedding_zero_energy"
       ],
       "forbidden_substitutes": [
         "coordinate_selection",
@@ -468,24 +494,37 @@
         "compressed_jacobian_output",
         "handcrafted_features_as_general_perceptual_metric",
         "clip_pooler_output_substitution",
-        "hidden_state_as_projected_clip_embedding"
+        "hidden_state_as_projected_clip_embedding",
+        "runtime_local_clip_preprocessing_defaults",
+        "alternate_clip_resize_or_channel_normalization",
+        "zero_embedding_normalization_fallback"
       ],
       "cpu_property_id": "jacobian_uses_all_512_clip_and_204_declared_structure_coordinates_without_compression",
       "specification_test_nodes": [
         "tests/functional/test_semantic_feature_conditions.py::test_formal_jacobian_keeps_clip_and_handcrafted_structure_coordinates",
+        "tests/functional/test_semantic_feature_conditions.py::test_full_feature_schema_declares_no_compression",
+        "tests/functional/test_semantic_feature_conditions.py::test_runtime_consumes_the_frozen_clip_preprocessing_protocol",
         "tests/functional/test_semantic_feature_conditions.py::test_handcrafted_structure_vector_preserves_declared_coordinates",
         "tests/functional/test_semantic_feature_conditions.py::test_complete_feature_vector_supports_exact_jvp_and_vjp",
-        "tests/functional/test_semantic_feature_conditions.py::test_semantic_features_require_projected_clip_image_embedding"
+        "tests/functional/test_semantic_feature_conditions.py::test_complete_feature_vector_rejects_multiple_samples",
+        "tests/functional/test_semantic_feature_conditions.py::test_semantic_features_require_projected_clip_image_embedding",
+        "tests/functional/test_semantic_feature_conditions.py::test_projected_clip_embedding_requires_finite_nonzero_energy"
       ],
-      "cpu_property_test_nodes": [],
+      "cpu_property_test_nodes": [
+        "tests/functional/test_semantic_feature_conditions.py::test_runtime_consumes_the_frozen_clip_preprocessing_protocol",
+        "tests/functional/test_semantic_feature_conditions.py::test_handcrafted_structure_vector_preserves_declared_coordinates",
+        "tests/functional/test_semantic_feature_conditions.py::test_complete_feature_vector_supports_exact_jvp_and_vjp",
+        "tests/functional/test_semantic_feature_conditions.py::test_complete_feature_vector_rejects_multiple_samples",
+        "tests/functional/test_semantic_feature_conditions.py::test_projected_clip_embedding_requires_finite_nonzero_energy"
+      ],
       "gpu_atomic_roles": [
         "clip_embedding_tensor",
         "handcrafted_structure_tensor",
         "joint_feature_tensor",
-        "feature_schema_identity"
+        "semantic_feature_protocol_identity"
       ],
-      "gpu_observation_requirement": "真实线性化必须记录由投影后 image_embeds 构造的完整512维 CLIP 特征、204维结构特征、联合716维特征及两个冻结模型身份。",
-      "claim_boundary": "CLIP 分量只使用投影后 image_embeds; pooler_output 和隐藏状态不能替代。204维结构坐标只用于明确结构保持, 不代表一般感知质量。"
+      "gpu_observation_requirement": "真实线性化必须绑定完整特征协议摘要, 并记录由投影后 image_embeds 构造的完整512维 CLIP 特征、按冻结坐标顺序构造的204维结构特征、联合716维特征及两个冻结模型身份。",
+      "claim_boundary": "CLIP 分量只使用冻结预处理后的投影 image_embeds; pooler_output、隐藏状态、运行时局部预处理或零能量归一化不能替代。204维结构坐标只用于明确结构保持, 不代表一般感知质量。"
     },
     {
       "invariant_id": "exact_jacobian_low_response_subspace",
@@ -500,7 +539,10 @@
         "V_tilde=right_upper_triangular_solve(V,R)",
         "V_tilde*R=V",
         "column_reference=J*V_tilde",
-        "column_residual_j=norm2(J*N[:,j])/max(norm2(column_reference[:,j]),null_space_numerical_epsilon)"
+        "column_residual_j=norm2(J*N[:,j])/max(norm2(column_reference[:,j]),null_space_numerical_epsilon)",
+        "cg_true_residual=right_hand_side-operator(returned_solution)",
+        "cg_relative_residual=norm2(cg_true_residual)/norm2(right_hand_side)",
+        "cg_zero_iteration_requires=norm2(right_hand_side)==0"
       ],
       "configuration_fields": [
         "jacobian_candidate_count",
@@ -552,7 +594,10 @@
         "projection_energy_retentions",
         "orthogonality_error",
         "projected_direction_matrix_content_sha256",
-        "projected_direction_response_matrix_content_sha256"
+        "projected_direction_response_matrix_content_sha256",
+        "cg_relative_residuals",
+        "cg_iteration_counts",
+        "cg_converged"
       ],
       "fail_closed_conditions": [
         "exact_autodiff_unavailable",
@@ -561,7 +606,9 @@
         "projection_energy_below_minimum",
         "independent_column_residual_above_maximum",
         "basis_orthogonality_violation",
-        "solver_digest_mismatch"
+        "solver_digest_mismatch",
+        "psd_cg_true_relative_residual_nonfinite",
+        "psd_cg_true_relative_residual_above_tolerance"
       ],
       "forbidden_substitutes": [
         "finite_difference_jacobian",
@@ -570,14 +617,19 @@
         "shared_rms_column_reference",
         "amplitude_norm_retention",
         "silent_solver_substitution",
-        "explicit_qr_factor_inverse"
+        "explicit_qr_factor_inverse",
+        "absolute_residual_convergence_substitute",
+        "recursive_residual_without_returned_solution_recheck"
       ],
       "cpu_property_id": "exact_jvp_vjp_projection_has_independent_column_residuals",
       "specification_test_nodes": [
         "tests/functional/test_real_scientific_operators.py::test_full_jacobian_constraint_projection_recovers_null_direction",
         "tests/functional/test_real_scientific_operators.py::test_null_projection_energy_retention_uses_squared_l2_ratio",
         "tests/functional/test_real_scientific_operators.py::test_undamped_psd_cg_reports_non_convergence_without_fallback",
-        "tests/functional/test_real_scientific_operators.py::test_scientific_operator_gate_requires_all_real_operator_evidence"
+        "tests/functional/test_real_scientific_operators.py::test_scientific_operator_gate_requires_all_real_operator_evidence",
+        "tests/functional/test_real_scientific_operators.py::test_psd_cg_accepts_only_exact_zero_right_hand_side_without_iteration",
+        "tests/functional/test_real_scientific_operators.py::test_psd_cg_does_not_replace_relative_tolerance_with_absolute_residual",
+        "tests/functional/test_real_scientific_operators.py::test_psd_cg_recomputes_residual_from_returned_solution"
       ],
       "cpu_property_test_nodes": [
         "tests/functional/test_semantic_feature_conditions.py::test_complete_feature_vector_supports_exact_jvp_and_vjp",
@@ -705,7 +757,9 @@
         "tail_order=descending(abs(value),ascending(flat_index))",
         "tail_nonselected_coordinates=exact_zero",
         "tail_template=global_l2_normalize_without_centering(amplitude_truncated_gaussian)",
-        "carrier_direction=project_to_branch_subspace(canonical_template)"
+        "carrier_direction=project_to_branch_subspace(canonical_template)",
+        "correlation=dot(center(observed)/norm2(center(observed)),center(template)/norm2(center(template)))",
+        "correlation_defined_requires=finite_inputs_and_nonzero_centered_energies"
       ],
       "configuration_fields": [
         "lf_kernel_size",
@@ -808,7 +862,11 @@
         "wrong_key_role_or_plan_identity_mismatch",
         "tail_retained_count_mismatch",
         "carrier_projection_energy_below_minimum",
-        "carrier_direction_zero"
+        "carrier_direction_zero",
+        "carrier_template_nonfinite",
+        "carrier_template_zero_normalization_energy",
+        "correlation_input_nonfinite",
+        "correlation_centered_energy_zero_or_nonfinite"
       ],
       "forbidden_substitutes": [
         "fft_frequency_mask",
@@ -818,17 +876,25 @@
         "channel_axis_low_pass",
         "implicit_avg_pool2d_defaults",
         "detector_side_hardcoded_lf_protocol",
-        "unprojected_canonical_embedding"
+        "unprojected_canonical_embedding",
+        "epsilon_denominator_correlation_substitute",
+        "undefined_correlation_zero_score_substitute"
       ],
       "cpu_property_id": "lf_is_two_dimensional_low_pass_and_tail_is_amplitude_order_statistic",
       "specification_test_nodes": [
         "tests/functional/test_real_scientific_operators.py::test_tail_robust_template_records_amplitude_tail_semantics",
-        "tests/functional/test_real_scientific_operators.py::test_keyed_templates_use_versioned_device_independent_prg"
+        "tests/functional/test_real_scientific_operators.py::test_keyed_templates_use_versioned_device_independent_prg",
+        "tests/functional/test_real_scientific_operators.py::test_normalized_correlation_preserves_scale_invariance",
+        "tests/functional/test_real_scientific_operators.py::test_normalized_correlation_rejects_undefined_measurements",
+        "tests/functional/test_real_scientific_operators.py::test_low_frequency_template_rejects_zero_centered_energy"
       ],
       "cpu_property_test_nodes": [
         "tests/functional/test_risk_bounded_composition.py::test_low_frequency_template_consumes_frozen_spatial_pooling_parameters",
         "tests/functional/test_risk_bounded_composition.py::test_tail_template_preserves_exact_sparse_support_without_centering",
-        "tests/functional/test_risk_bounded_composition.py::test_carrier_templates_remain_canonical_float32_for_float16_latent"
+        "tests/functional/test_risk_bounded_composition.py::test_carrier_templates_remain_canonical_float32_for_float16_latent",
+        "tests/functional/test_real_scientific_operators.py::test_normalized_correlation_preserves_scale_invariance",
+        "tests/functional/test_real_scientific_operators.py::test_normalized_correlation_rejects_undefined_measurements",
+        "tests/functional/test_real_scientific_operators.py::test_low_frequency_template_rejects_zero_centered_energy"
       ],
       "gpu_atomic_roles": [
         "lf_canonical_template",
@@ -868,7 +934,8 @@
         "s_A=sum_c(attention_relation_component_weights_c*layer_component_score_c)",
         "probability_consumer_input=QKAttentionRelation(DIRECT_QK,complete_operator_metadata,complete_qk_atom_content)",
         "qk_record_identity=(outer_layer_name==relation.metadata.record_layer_name)_and_(outer_token_indices==relation.metadata.sampled_token_indices)",
-        "multilayer_qk_identity=unique(relation.metadata.record_layer_name)"
+        "multilayer_qk_identity=unique(relation.metadata.record_layer_name)",
+        "active_qk_path_requires=finite(query,key,normalized_query,normalized_key,logits,probability,relation,projection,pair_weight,component_score)"
       ],
       "configuration_fields": [
         "attention_module_names",
@@ -939,7 +1006,12 @@
         "qk_relation_atom_content_incomplete",
         "qk_outer_layer_name_mismatch",
         "qk_outer_token_indices_mismatch",
-        "qk_multilayer_name_duplicate"
+        "qk_multilayer_name_duplicate",
+        "qk_projection_or_normalization_nonfinite",
+        "qk_logits_or_probability_nonfinite",
+        "active_relation_or_projection_nonfinite",
+        "pair_weight_nonfinite_or_negative",
+        "active_component_score_nonfinite"
       ],
       "forbidden_substitutes": [
         "hidden_state_relation_proxy",
@@ -956,7 +1028,9 @@
         "qk_relation_without_atom_content_identity",
         "outer_qk_layer_renaming",
         "outer_qk_token_index_replacement",
-        "same_internal_layer_clone_as_multilayer_evidence"
+        "same_internal_layer_clone_as_multilayer_evidence",
+        "nonfinite_qk_zero_substitution",
+        "nonfinite_relation_negative_one_substitution"
       ],
       "cpu_property_id": "direct_qk_subgraph_uses_the_frozen_four_component_relation_formula",
       "specification_test_nodes": [
@@ -969,9 +1043,17 @@
         "tests/functional/test_real_scientific_operators.py::test_attention_recorder_rejects_missing_hidden_state_tensor",
         "tests/functional/test_real_scientific_operators.py::test_attention_stability_and_selection_require_direct_qk_identity",
         "tests/functional/test_real_scientific_operators.py::test_attention_records_bind_outer_layer_and_token_identity",
-        "tests/functional/test_real_scientific_operators.py::test_attention_stability_rejects_duplicate_layer_identity"
+        "tests/functional/test_real_scientific_operators.py::test_attention_stability_rejects_duplicate_layer_identity",
+        "tests/functional/test_real_scientific_operators.py::test_qk_relation_rejects_nonfinite_projection_values",
+        "tests/functional/test_real_scientific_operators.py::test_attention_component_score_rejects_nonfinite_active_relation"
       ],
-      "cpu_property_test_nodes": [],
+      "cpu_property_test_nodes": [
+        "tests/functional/test_real_scientific_operators.py::test_multihead_qk_relation_matches_independent_manual_calculation",
+        "tests/functional/test_real_scientific_operators.py::test_each_attention_relation_component_changes_keyed_score",
+        "tests/functional/test_real_scientific_operators.py::test_attention_row_correlation_uses_independent_energy_thresholds",
+        "tests/functional/test_real_scientific_operators.py::test_qk_relation_rejects_nonfinite_projection_values",
+        "tests/functional/test_real_scientific_operators.py::test_attention_component_score_rejects_nonfinite_active_relation"
+      ],
       "gpu_atomic_roles": [
         "sampled_query_tensor",
         "sampled_key_tensor",
@@ -1001,7 +1083,11 @@
         "accepted_attention_update_content_sha256=attention_branch_written_update_content_sha256",
         "probability_consumer_input=QKAttentionRelation(DIRECT_QK,complete_operator_metadata,complete_qk_atom_content)",
         "qk_record_identity=(outer_layer_name==relation.metadata.record_layer_name)_and_(outer_token_indices==relation.metadata.sampled_token_indices)",
-        "multilayer_qk_identity=unique(relation.metadata.record_layer_name)"
+        "multilayer_qk_identity=unique(relation.metadata.record_layer_name)",
+        "post_step_schedule_index=step_index+1",
+        "attention_operator_schedule_index=7",
+        "attention_operator_timestep=scheduler.timesteps[attention_operator_schedule_index]",
+        "all_qk_method_evaluations_use=attention_operator_timestep_independent_of_post_step_schedule_index"
       ],
       "configuration_fields": [
         "attention_module_names",
@@ -1011,7 +1097,10 @@
         "attention_relation_component_weights",
         "attention_backtracking_factor",
         "attention_backtracking_maximum_steps",
-        "attention_relative_strength"
+        "attention_relative_strength",
+        "injection_step_indices",
+        "attention_operator_schedule_index",
+        "public_detection_schedule_index"
       ],
       "method_implementation_symbols": [
         {
@@ -1047,7 +1136,13 @@
         "attention_score_gain",
         "attention_update_unit_direction_content_sha256",
         "attention_update_content_sha256",
-        "attention_backtracking_step_count"
+        "attention_backtracking_step_count",
+        "step_index",
+        "scheduler_step_timestep",
+        "post_step_schedule_index",
+        "post_step_schedule_timestep",
+        "attention_operator_schedule_index",
+        "attention_operator_timestep"
       ],
       "fail_closed_conditions": [
         "frozen_attention_layer_missing",
@@ -1067,7 +1162,10 @@
         "qk_relation_atom_content_incomplete",
         "qk_outer_layer_name_mismatch",
         "qk_outer_token_indices_mismatch",
-        "qk_multilayer_name_duplicate"
+        "qk_multilayer_name_duplicate",
+        "attention_operator_schedule_index_drift",
+        "attention_operator_timestep_nonfinite",
+        "post_step_schedule_identity_mismatch"
       ],
       "forbidden_substitutes": [
         "hidden_state_similarity_proxy",
@@ -1085,7 +1183,9 @@
         "qk_relation_without_atom_content_identity",
         "outer_qk_layer_renaming",
         "outer_qk_token_index_replacement",
-        "same_internal_layer_clone_as_multilayer_evidence"
+        "same_internal_layer_clone_as_multilayer_evidence",
+        "post_step_schedule_timestep_as_attention_operator_timestep",
+        "callback_dependent_attention_operator_timestep"
       ],
       "cpu_property_id": "direct_to_q_to_k_probabilities_and_backtracking_are_formula_exact",
       "specification_test_nodes": [
@@ -1097,7 +1197,9 @@
         "tests/functional/test_real_scientific_operators.py::test_attention_recorder_rejects_missing_hidden_state_tensor",
         "tests/functional/test_real_scientific_operators.py::test_attention_stability_and_selection_require_direct_qk_identity",
         "tests/functional/test_real_scientific_operators.py::test_attention_records_bind_outer_layer_and_token_identity",
-        "tests/functional/test_real_scientific_operators.py::test_attention_stability_rejects_duplicate_layer_identity"
+        "tests/functional/test_real_scientific_operators.py::test_attention_stability_rejects_duplicate_layer_identity",
+        "tests/functional/test_semantic_feature_conditions.py::test_attention_operator_timestep_is_independent_of_post_step_position",
+        "tests/functional/test_scientific_content_binding.py::test_update_content_identity_rejects_attention_schedule_drift"
       ],
       "cpu_property_test_nodes": [
         "tests/functional/test_attention_risk_step.py::test_attention_risk_step_starts_at_maximum_and_consumes_factor",
@@ -1112,10 +1214,12 @@
         "centered_qk_logits_tensor",
         "qk_probabilities_tensor",
         "sampled_token_indices_tensor",
-        "accepted_attention_update_tensor"
+        "accepted_attention_update_tensor",
+        "attention_operator_schedule_identity",
+        "post_step_schedule_identity"
       ],
-      "gpu_observation_requirement": "冻结的两个 SD3.5 attention 层必须显式提供正整数 heads 和 hidden_states Tensor, 产生真实 Q、K、logit、逐头概率、token 索引和单调回溯证据; stability、稳定 token、pair weight、graph identity 和 geometry score 均须复验内外身份及多层唯一性。",
-      "claim_boundary": "注意力算子只声明两个冻结层上最多64个抽样图像 token 的直接 Q/K 子图，不声明完整 joint-attention 全 token 优化。"
+      "gpu_observation_requirement": "冻结的两个 SD3.5 attention 层必须在固定 scheduler 索引7显式提供正整数 heads 和 hidden_states Tensor, 产生真实 Q、K、logit、逐头概率、token 索引和单调回溯证据；每条更新还必须区分 callback、post-step 与固定 Q/K 算子时刻。",
+      "claim_boundary": "注意力算子只声明两个冻结层上最多64个抽样图像 token 的直接 Q/K 子图, 且所有注入使用同一冻结 Q/K timestep；不声明完整 joint-attention 全 token 优化, 也不允许让算子随 post-step 改变。"
     },
     {
       "invariant_id": "three_branch_update_composition",
@@ -1456,11 +1560,15 @@
         "aligned_rgb_uint8=floor(255*clip(grid_sample(image,bilinear,border,align_corners_true),0,1))",
         "registration_objective_margin=registration_objective_score-identity_registration_objective_score",
         "registration_geometry_reliable_requires=registration_objective_margin>0",
-        "measurement_config_schema=slm_wm_image_only_measurement_config_v2",
-        "extraction_profile_schema=slm_wm_image_only_extraction_profile_v1",
-        "image_preprocessing_protocol=diffusers_sd3_image_processor_rgb_preprocess_v1",
-        "vae_encoding_protocol=sd3_vae_latent_dist_mode_shift_then_scale_v1",
-        "applied_record_recalibration=explicit_threshold_free_measurement_projection"
+        "measurement_config_schema=slm_wm_image_only_measurement_config",
+        "extraction_profile_schema=slm_wm_image_only_extraction_profile",
+        "image_preprocessing_protocol=diffusers_sd3_image_processor_rgb_preprocess",
+        "vae_encoding_protocol=sd3_vae_latent_dist_mode_shift_then_scale",
+        "applied_record_recalibration=explicit_threshold_free_measurement_projection",
+        "attention_coordinate_convention=normalized_xy_token_centers_corner_endpoints_and_grid_align_corners_true",
+        "image_alignment_enabled_requires=attention_geometry_enabled",
+        "alignment_exists_if_and_only_if=aligned_content_score_exists",
+        "geometry_rescue_measurements_require=finite(raw_attention_geometry_score,attention_geometry_score,registration_confidence,attention_sync_score,aligned_content_score)"
       ],
       "configuration_fields": [
         "detector_input_access_mode",
@@ -1484,6 +1592,7 @@
         "attention_minimum_inlier_ratio",
         "attention_coordinate_convention",
         "attention_grid_align_corners",
+        "attention_operator_schedule_index",
         "public_detection_schedule_index",
         "public_detection_noise_prg_protocol",
         "public_detection_noise_domain",
@@ -1594,7 +1703,10 @@
         "lf_weight",
         "tail_carrier_protocol_digest",
         "tail_robust_weight",
-        "tail_fraction"
+        "tail_fraction",
+        "raw_attention_geometry_score",
+        "attention_coordinate_convention",
+        "attention_grid_align_corners"
       ],
       "fail_closed_conditions": [
         "private_generation_state_requested",
@@ -1610,7 +1722,11 @@
         "registration_objective_margin_formula_mismatch",
         "identity_alignment_declares_positive_objective_margin",
         "measurement_digest_mismatch",
-        "post_apply_decision_record_reused_as_calibration_measurement"
+        "post_apply_decision_record_reused_as_calibration_measurement",
+        "geometry_rescue_measurement_atom_nonfinite",
+        "alignment_and_aligned_content_presence_mismatch",
+        "image_alignment_without_attention_geometry",
+        "attention_coordinate_or_grid_convention_mismatch"
       ],
       "forbidden_substitutes": [
         "prompt_conditioned_detection",
@@ -1624,22 +1740,37 @@
         "implicit_callback_order_alignment_tie_break",
         "alternate_aligned_image_padding_or_quantization",
         "runner_up_registration_objective_margin",
-        "nearest_distinct_transform_registration_objective_margin"
+        "nearest_distinct_transform_registration_objective_margin",
+        "raw_content_fallback_for_malformed_geometry_measurement",
+        "alignment_only_execution",
+        "alternate_attention_coordinate_convention"
       ],
       "cpu_property_id": "detector_signature_and_runtime_reject_generation_private_state",
       "specification_test_nodes": [
         "tests/functional/test_real_scientific_operators.py::test_image_only_detector_interface_and_positive_content_path",
         "tests/functional/test_image_only_measurement_config_identity.py::test_measurement_record_rejects_embedded_calibration_parameter",
         "tests/functional/test_image_only_measurement_config_identity.py::test_measurement_config_digest_binds_every_runtime_parameter",
+        "tests/functional/test_image_only_measurement_config_identity.py::test_measurement_identity_rejects_alignment_without_attention_geometry",
+        "tests/functional/test_image_only_measurement_config_identity.py::test_measurement_config_rejects_frozen_geometry_identity_drift",
         "tests/functional/test_attention_affine_protocol_geometry.py::test_identity_alignment_cannot_pass_positive_objective_gain_gate",
         "tests/functional/test_attention_affine_protocol_geometry.py::test_alignment_fails_closed_when_exact_identity_candidate_is_missing",
         "tests/functional/test_attention_affine_protocol_geometry.py::test_complete_alignment_record_digest_rebuild_rejects_field_mutations",
         "tests/functional/test_attention_affine_protocol_geometry.py::test_cross_layer_alignment_selection_uses_frozen_lexicographic_rule",
+        "tests/functional/test_real_scientific_operators.py::test_image_alignment_uses_token_endpoint_coordinate_convention",
         "tests/functional/test_real_scientific_operators.py::test_image_alignment_quantizes_fractional_rgb_with_floor",
+        "tests/functional/test_real_scientific_operators.py::test_alignment_and_aligned_content_measurements_require_each_other",
+        "tests/functional/test_real_scientific_operators.py::test_geometry_rescue_rejects_nonfinite_measurement_atoms",
         "tests/functional/test_attack_matrix.py::test_attack_matrix_rejects_non_blind_detection_records",
-        "tests/functional/test_model_source_registry.py::test_runtime_detector_config_consumes_formal_alignment_gate"
+        "tests/functional/test_model_source_registry.py::test_runtime_detector_config_consumes_formal_alignment_gate",
+        "tests/functional/test_semantic_feature_conditions.py::test_runtime_entry_rejects_alignment_without_attention_geometry"
       ],
-      "cpu_property_test_nodes": [],
+      "cpu_property_test_nodes": [
+        "tests/functional/test_real_scientific_operators.py::test_image_alignment_uses_token_endpoint_coordinate_convention",
+        "tests/functional/test_real_scientific_operators.py::test_alignment_and_aligned_content_measurements_require_each_other",
+        "tests/functional/test_real_scientific_operators.py::test_geometry_rescue_rejects_nonfinite_measurement_atoms",
+        "tests/functional/test_image_only_measurement_config_identity.py::test_measurement_identity_rejects_alignment_without_attention_geometry",
+        "tests/functional/test_image_only_measurement_config_identity.py::test_measurement_config_rejects_frozen_geometry_identity_drift"
+      ],
       "gpu_atomic_roles": [
         "input_image_identity",
         "reencoded_image_latent",
@@ -1650,10 +1781,12 @@
         "measurement_config_identity",
         "measurement_digest",
         "public_detection_noise_tensor",
-        "public_detection_noise_evidence_bundle"
+        "public_detection_noise_evidence_bundle",
+        "five_atom_geometry_measurement",
+        "alignment_aligned_content_presence_identity"
       ],
-      "gpu_observation_requirement": "真实测量记录只能绑定待检图像、密钥、公开模型和阈值无关连续证据；冻结阈值与判定必须由外层协议独立应用。",
-      "claim_boundary": "测量器不得读取 Prompt、源 latent、采样轨迹、样本级 Null Space 或生成端注意力原子；测量记录不得包含 calibration 参数或决策；calibration 与 test 必须绑定同一 measurement config 摘要。"
+      "gpu_observation_requirement": "真实测量记录只能绑定待检图像、密钥、公开模型和阈值无关连续证据；执行 alignment 时必须保存完整有限的五原子几何测量并重编码 aligned 图像, 冻结阈值与判定由外层协议独立应用。",
+      "claim_boundary": "测量器不得读取 Prompt、源 latent、采样轨迹、样本级 Null Space 或生成端注意力原子；alignment 与 aligned 内容分数必须双向一致, 单独开启 alignment 无效；calibration 与 test 必须绑定同一 measurement config 摘要。"
     },
     {
       "invariant_id": "same_threshold_geometry_rescue",
@@ -1676,7 +1809,9 @@
         "registration_geometry_reliable_requires=registration_objective_margin>0",
         "geometry_rescue_enabled=attention_geometry_enabled_and_image_alignment_enabled",
         "geometry_rescue_disabled_implies=raw_content_only_effective_score_and_no_rescue_parameters",
-        "applied_record_recalibration=explicit_threshold_free_measurement_projection"
+        "applied_record_recalibration=explicit_threshold_free_measurement_projection",
+        "alignment_exists_if_and_only_if=aligned_content_score_exists",
+        "geometry_rescue_measurements_require=finite(raw_attention_geometry_score,attention_geometry_score,registration_confidence,attention_sync_score,aligned_content_score)"
       ],
       "configuration_fields": [
         "detector_input_access_mode",
@@ -1702,6 +1837,7 @@
         "width",
         "height",
         "inference_steps",
+        "attention_operator_schedule_index",
         "public_detection_schedule_index",
         "public_detection_noise_prg_protocol",
         "public_detection_noise_domain",
@@ -1848,7 +1984,12 @@
         "calibration_negative_count",
         "calibration_false_positive_count",
         "calibration_false_positive_rate",
-        "target_fpr"
+        "target_fpr",
+        "raw_attention_geometry_score",
+        "aligned_content_score",
+        "attention_geometry_score",
+        "registration_confidence",
+        "attention_sync_score"
       ],
       "fail_closed_conditions": [
         "calibration_source_missing_or_role_mixed",
@@ -1867,7 +2008,9 @@
         "detector_guided_attack_protocol_digest_mismatch",
         "exact_identity_alignment_candidate_missing",
         "post_apply_decision_record_reused_as_calibration_measurement",
-        "ablation_mechanism_switch_and_rescue_atom_mismatch"
+        "ablation_mechanism_switch_and_rescue_atom_mismatch",
+        "geometry_rescue_measurement_atom_nonfinite",
+        "alignment_and_aligned_content_presence_mismatch"
       ],
       "forbidden_substitutes": [
         "hardcoded_rescue_margin_low",
@@ -1882,7 +2025,8 @@
         "calibration_parameter_inside_measurement",
         "raw_and_aligned_separate_thresholds",
         "runner_up_registration_objective_margin",
-        "synthetic_geometry_atoms_for_disabled_ablation"
+        "synthetic_geometry_atoms_for_disabled_ablation",
+        "raw_content_fallback_for_malformed_geometry_measurement"
       ],
       "cpu_property_id": "geometry_rescue_reuses_the_calibrated_content_threshold_and_cannot_vote_positive_alone",
       "specification_test_nodes": [
@@ -1893,10 +2037,17 @@
         "tests/functional/test_real_scientific_operators.py::test_frozen_rescue_rejects_unbound_stable_pair_identity",
         "tests/functional/test_real_scientific_operators.py::test_frozen_protocol_application_rejects_protocol_drift",
         "tests/functional/test_real_scientific_operators.py::test_identity_alignment_cannot_propagate_into_calibrated_rescue",
+        "tests/functional/test_real_scientific_operators.py::test_geometry_rescue_rejects_nonfinite_measurement_atoms",
+        "tests/functional/test_real_scientific_operators.py::test_alignment_and_aligned_content_measurements_require_each_other",
         "tests/functional/test_fixed_fpr_threshold_audit.py::test_main_method_threshold_audit_recomputes_complete_rescue_protocol",
         "tests/functional/test_image_only_measurement_config_identity.py::test_measurement_record_rejects_embedded_calibration_parameter"
       ],
-      "cpu_property_test_nodes": [],
+      "cpu_property_test_nodes": [
+        "tests/functional/test_real_scientific_operators.py::test_decision_equivalent_score_matches_complete_boolean_boundaries",
+        "tests/functional/test_real_scientific_operators.py::test_frozen_rescue_rejects_unbound_stable_pair_identity",
+        "tests/functional/test_real_scientific_operators.py::test_geometry_rescue_rejects_nonfinite_measurement_atoms",
+        "tests/functional/test_real_scientific_operators.py::test_alignment_and_aligned_content_measurements_require_each_other"
+      ],
       "gpu_atomic_roles": [
         "calibration_source_measurements",
         "window_fit_prompt_identity",
@@ -1908,10 +2059,12 @@
         "frozen_protocol_digest",
         "same_threshold_decision",
         "detector_guided_attack_threshold_digest",
-        "public_detection_noise_evidence_bundle"
+        "public_detection_noise_evidence_bundle",
+        "five_atom_geometry_measurement",
+        "alignment_aligned_content_presence_identity"
       ],
-      "gpu_observation_requirement": "真实 calibration 必须先产生阈值无关 measurement，再由互斥 window-fit 与 threshold-freeze 子集冻结唯一协议；test 和 detector-guided attack 只消费该协议。",
-      "claim_boundary": "几何只负责恢复参考系，不能独立产生 positive；rescue window、几何阈值和最终内容阈值只能由 registered-key clean negatives 的确定性嵌套 calibration 派生；主方法、baseline 与消融共享 threshold-freeze Prompt 身份。"
+      "gpu_observation_requirement": "真实 calibration 必须先产生阈值无关且数值完整的五原子 geometry measurement, 再由互斥 window-fit 与 threshold-freeze 子集冻结唯一协议；test 和 detector-guided attack 只消费该协议。",
+      "claim_boundary": "几何只负责恢复参考系, 不能独立产生 positive；任一几何原子异常不得退回 raw-only；rescue window、几何阈值和最终内容阈值只能由 registered-key clean negatives 的确定性嵌套 calibration 派生。"
     },
     {
       "invariant_id": "scientific_content_binding",

@@ -21,6 +21,7 @@ from main.core.digest import (
 )
 from main.methods.detection import validate_image_only_measurement_digest_record
 from main.methods.geometry import (
+    ATTENTION_OPERATOR_SCHEDULE_INDEX,
     qk_atomic_evaluation_records_digest,
     qk_atomic_evaluation_records_ready,
     qk_operator_metadata_records_digest,
@@ -35,9 +36,9 @@ from main.methods.update_composition import (
 
 
 SCIENTIFIC_CONTENT_BINDING_SCHEMA = (
-    "slm_wm_scientific_content_binding_v6"
+    "slm_wm_scientific_content_binding"
 )
-IMAGE_RGB_UINT8_CONTENT_SCHEMA = "slm_wm_image_rgb_uint8_content_v1"
+IMAGE_RGB_UINT8_CONTENT_SCHEMA = "slm_wm_image_rgb_uint8_content"
 
 _BRANCH_NAMES = (
     "lf_content",
@@ -742,14 +743,41 @@ def _update_content_identity(
             "attention_relation_qk_operator_metadata_digest": "",
             "attention_qk_evaluation_records_digest": "",
         }
+    step_index = resolved.get("step_index")
+    post_step_schedule_index = resolved.get("post_step_schedule_index")
+    attention_operator_schedule_index = resolved.get(
+        "attention_operator_schedule_index"
+    )
+    post_step_schedule_timestep = resolved.get(
+        "post_step_schedule_timestep"
+    )
+    attention_operator_timestep = resolved.get(
+        "attention_operator_timestep"
+    )
+    if (
+        type(step_index) is not int
+        or type(post_step_schedule_index) is not int
+        or post_step_schedule_index != step_index + 1
+        or type(attention_operator_schedule_index) is not int
+        or attention_operator_schedule_index
+        != ATTENTION_OPERATOR_SCHEDULE_INDEX
+        or not isinstance(post_step_schedule_timestep, (int, float))
+        or not math.isfinite(float(post_step_schedule_timestep))
+        or not isinstance(attention_operator_timestep, (int, float))
+        or not math.isfinite(float(attention_operator_timestep))
+    ):
+        raise ValueError("注入记录的写回位置或冻结注意力算子时刻无效")
     return {
-        "step_index": int(resolved.get("step_index")),
+        "step_index": step_index,
         "scheduler_step_timestep": float(
             resolved.get("scheduler_step_timestep")
         ),
-        "post_step_schedule_index": int(
-            resolved.get("post_step_schedule_index")
+        "post_step_schedule_index": post_step_schedule_index,
+        "post_step_schedule_timestep": float(post_step_schedule_timestep),
+        "attention_operator_schedule_index": (
+            attention_operator_schedule_index
         ),
+        "attention_operator_timestep": float(attention_operator_timestep),
         "watermark_key_material_digest_random": (
             watermark_key_material_digest_random
         ),

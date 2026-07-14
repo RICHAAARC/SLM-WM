@@ -10,11 +10,6 @@ import pytest
 import torch
 
 from experiments.runtime.diffusion.semantic_features import (
-    JOINT_FEATURE_WIDTH,
-    SEMANTIC_FEATURE_SCHEMA,
-    SEMANTIC_FEATURE_WIDTH,
-    HANDCRAFTED_STRUCTURE_FEATURE_SCHEMA,
-    HANDCRAFTED_STRUCTURE_FEATURE_WIDTH,
     DifferentiableSemanticFeatureRuntime,
 )
 from experiments.runners.semantic_watermark_runtime import (
@@ -28,8 +23,10 @@ from experiments.runners.semantic_watermark_runtime import (
     _final_image_preservation_record,
     _quantized_write_jacobian_response_record,
     _quantized_write_update_nonzero,
+    _resolve_injection_schedule_times,
     _runtime_public_detection_noise_identity,
     _three_way_final_image_preservation_records,
+    run_semantic_watermark_runtime,
 )
 from experiments.runners.image_only_dataset_runtime import (
     _final_image_attention_observability_ready,
@@ -38,6 +35,7 @@ from experiments.runtime.repository_environment import file_digest
 from main.methods.geometry.differentiable_attention import (
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
+    ATTENTION_OPERATOR_SCHEDULE_INDEX,
     ATTENTION_RELATION_COMPONENT_NAMES,
     QKAttentionRelation,
     attention_relation_component_protocol,
@@ -54,6 +52,21 @@ from main.core.digest import (
     tensor_content_sha256,
 )
 from main.methods.subspace import build_exact_jacobian_linearization
+from main.methods.semantic.feature_protocol import (
+    CLIP_VISION_CHANNEL_MEAN,
+    CLIP_VISION_CHANNEL_STD,
+    CLIP_VISION_INPUT_SIZE,
+    CLIP_VISION_RESIZE_ALIGN_CORNERS,
+    CLIP_VISION_RESIZE_ANTIALIAS,
+    CLIP_VISION_RESIZE_MODE,
+    HANDCRAFTED_STRUCTURE_FEATURE_SCHEMA,
+    HANDCRAFTED_STRUCTURE_FEATURE_WIDTH,
+    JOINT_FEATURE_WIDTH,
+    SEMANTIC_FEATURE_PROTOCOL_SCHEMA,
+    SEMANTIC_FEATURE_SCHEMA,
+    SEMANTIC_FEATURE_WIDTH,
+    semantic_feature_protocol_record,
+)
 
 
 def _counterfactual_update_records(
@@ -307,7 +320,11 @@ def _counterfactual_update_records(
                 **risk_signal_content_records,
                 "scheduler_step_timestep": float(100 - step_index),
                 "post_step_schedule_index": step_index + 1,
-                "timestep": float(99 - step_index),
+                "post_step_schedule_timestep": float(99 - step_index),
+                "attention_operator_schedule_index": (
+                    ATTENTION_OPERATOR_SCHEDULE_INDEX
+                ),
+                "attention_operator_timestep": 92.0,
                 "latent_content_sha256_before": before_sha,
                 "latent_content_sha256_after": "9" * 64,
                 "combined_update_content_sha256": "a" * 64,
@@ -462,6 +479,62 @@ def test_formal_jacobian_keeps_clip_and_handcrafted_structure_coordinates() -> N
 
 
 @pytest.mark.quick
+def test_runtime_entry_rejects_alignment_without_attention_geometry() -> None:
+    """非法机制组合必须在加载模型和执行 GPU 工作前失败。"""
+
+    config = replace(
+        SemanticWatermarkRuntimeConfig(),
+        attention_geometry_enabled=False,
+        image_alignment_enabled=True,
+    )
+
+    with pytest.raises(ValueError, match="真实注意力几何"):
+        run_semantic_watermark_runtime(
+            config,
+            runtime_context=object(),  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.quick
+def test_attention_operator_timestep_is_independent_of_post_step_position() -> None:
+    """三个写回位置必须共享索引7的同一个 Q/K 科学算子时刻。"""
+
+    timesteps = torch.arange(20, 0, -1, dtype=torch.float32)
+    resolved = tuple(
+        _resolve_injection_schedule_times(
+            timesteps,
+            step_index=step_index,
+            attention_operator_schedule_index=(
+                ATTENTION_OPERATOR_SCHEDULE_INDEX
+            ),
+        )
+        for step_index in (6, 10, 14)
+    )
+
+    assert tuple(item[0] for item in resolved) == (7, 11, 15)
+    assert tuple(float(item[1]) for item in resolved) == (13.0, 9.0, 5.0)
+    assert tuple(float(item[2]) for item in resolved) == (13.0, 13.0, 13.0)
+
+
+@pytest.mark.quick
+def test_complete_feature_vector_rejects_multiple_samples() -> None:
+    """正式 Jacobian 算子必须保持每个科学单元恰好716维。"""
+
+    runtime = SimpleNamespace(
+        joint_features=lambda _latent: (
+            torch.ones((2, SEMANTIC_FEATURE_WIDTH)),
+            torch.ones(2 * HANDCRAFTED_STRUCTURE_FEATURE_WIDTH),
+        )
+    )
+
+    with pytest.raises(ValueError, match="单样本"):
+        DifferentiableSemanticFeatureRuntime.full_joint_feature_vector(
+            runtime,
+            torch.zeros(2, 1, 1, 1),
+        )
+
+
+@pytest.mark.quick
 def test_full_feature_schema_declares_no_compression() -> None:
     """完整特征 schema 必须冻结宽度并显式声明未压缩。"""
 
@@ -473,8 +546,13 @@ def test_full_feature_schema_declares_no_compression() -> None:
     )
 
     record = runtime.feature_schema_record()
+    protocol = semantic_feature_protocol_record()
 
     assert record == {
+        "semantic_feature_protocol_schema": SEMANTIC_FEATURE_PROTOCOL_SCHEMA,
+        "semantic_feature_protocol_digest": protocol[
+            "semantic_feature_protocol_digest"
+        ],
         "semantic_feature_schema": SEMANTIC_FEATURE_SCHEMA,
         "semantic_feature_width": SEMANTIC_FEATURE_WIDTH,
         "handcrafted_structure_feature_schema": HANDCRAFTED_STRUCTURE_FEATURE_SCHEMA,
@@ -483,8 +561,43 @@ def test_full_feature_schema_declares_no_compression() -> None:
         "feature_compression_applied": False,
     }
     assert HANDCRAFTED_STRUCTURE_FEATURE_SCHEMA == (
-        "handcrafted_rgb_statistics_gradient_8x8_structure_vector"
+        "explicit_rgb_statistics_gradient_spatial_pool_structure_vector"
     )
+
+
+@pytest.mark.quick
+def test_runtime_consumes_the_frozen_clip_preprocessing_protocol() -> None:
+    """运行层必须直接消费核心协议中的尺寸、插值和通道归一化常量。"""
+
+    class _Vision(torch.nn.Module):
+        """只提供 dtype 锚点的轻量冻结视觉模块。"""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.anchor = torch.nn.Parameter(torch.zeros(()))
+
+    runtime = object.__new__(DifferentiableSemanticFeatureRuntime)
+    object.__setattr__(runtime, "vision_model", _Vision())
+    image = torch.linspace(
+        0.0,
+        1.0,
+        steps=3 * 16 * 16,
+        dtype=torch.float32,
+    ).reshape(1, 3, 16, 16)
+
+    actual = runtime.clip_pixels(image)
+    resized = torch.nn.functional.interpolate(
+        image,
+        size=(CLIP_VISION_INPUT_SIZE, CLIP_VISION_INPUT_SIZE),
+        mode=CLIP_VISION_RESIZE_MODE,
+        align_corners=CLIP_VISION_RESIZE_ALIGN_CORNERS,
+        antialias=CLIP_VISION_RESIZE_ANTIALIAS,
+    )
+    mean = torch.tensor(CLIP_VISION_CHANNEL_MEAN).view(1, 3, 1, 1)
+    std = torch.tensor(CLIP_VISION_CHANNEL_STD).view(1, 3, 1, 1)
+
+    assert actual.shape == (1, 3, 224, 224)
+    assert torch.equal(actual, (resized - mean) / std)
 
 
 @pytest.mark.quick
@@ -615,6 +728,26 @@ def test_semantic_features_require_projected_clip_image_embedding() -> None:
     with pytest.raises(RuntimeError, match="image_embeds"):
         runtime._semantic_features_from_image(
             torch.zeros((1, 3, 16, 16))
+        )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "invalid_embedding",
+    (
+        torch.zeros((1, SEMANTIC_FEATURE_WIDTH)),
+        torch.full((1, SEMANTIC_FEATURE_WIDTH), float("nan")),
+        torch.full((1, SEMANTIC_FEATURE_WIDTH), float("inf")),
+    ),
+)
+def test_projected_clip_embedding_requires_finite_nonzero_energy(
+    invalid_embedding: torch.Tensor,
+) -> None:
+    """投影后 CLIP 向量退化时不得生成伪造的全零语义坐标。"""
+
+    with pytest.raises(RuntimeError, match="有限|非零"):
+        DifferentiableSemanticFeatureRuntime._normalize_projected_embedding(
+            invalid_embedding
         )
 
 
@@ -1035,7 +1168,7 @@ def test_final_image_attention_gate_uses_reencoded_real_qk_scores() -> None:
 
         evidence_records: list[dict[str, object]] = []
         prg_payload = {
-            "keyed_prg_version": "fixture_prg_v1",
+            "keyed_prg_version": "fixture_prg_protocol",
             "shape": [1, 16, 4, 4],
         }
         prg_digest = build_stable_digest(prg_payload)
@@ -1396,7 +1529,7 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
         role="carrier_only_counterfactual",
         attention_enabled=False,
     )
-    drifted_records[0]["timestep"] = -1.0
+    drifted_records[0]["attention_operator_timestep"] = -1.0
     with pytest.raises(RuntimeError, match="scheduler 轨迹"):
         _carrier_only_counterfactual_identity(
             full_config,

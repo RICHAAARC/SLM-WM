@@ -201,6 +201,9 @@ DEFAULT_MINIMUM_SEMANTIC_PRESERVATION_COSINE = (
 DEFAULT_MAXIMUM_HANDCRAFTED_STRUCTURE_FEATURE_RELATIVE_DRIFT = (
     _FORMAL_METHOD_DEFAULTS.maximum_handcrafted_structure_feature_relative_drift
 )
+DEFAULT_ATTENTION_OPERATOR_SCHEDULE_INDEX = (
+    _FORMAL_METHOD_DEFAULTS.attention_operator_schedule_index
+)
 DEFAULT_PUBLIC_DETECTION_SCHEDULE_INDEX = (
     _FORMAL_METHOD_DEFAULTS.public_detection_schedule_index
 )
@@ -427,6 +430,9 @@ class PaperRunConfig:
     )
     maximum_handcrafted_structure_feature_relative_drift: float = (
         DEFAULT_MAXIMUM_HANDCRAFTED_STRUCTURE_FEATURE_RELATIVE_DRIFT
+    )
+    attention_operator_schedule_index: int = (
+        DEFAULT_ATTENTION_OPERATOR_SCHEDULE_INDEX
     )
     public_detection_schedule_index: int = (
         DEFAULT_PUBLIC_DETECTION_SCHEDULE_INDEX

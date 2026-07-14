@@ -212,7 +212,7 @@ Notebook 与 repository module 的跨边界数据
 | attention_anchor_count | protocol | none | true | true | false | 注意力仿射配准请求使用的预注册锚点数量, 正式方法固定为12。 |
 | attention_residual_threshold | protocol | none | true | true | false | 注意力仿射配准在归一化 xy 坐标中的预注册内点残差上界, 正式方法固定为0.20。 |
 | attention_minimum_inlier_ratio | protocol | none | true | true | false | 注意力仿射配准相对有效覆盖锚点的预注册最小内点比例, 正式方法固定为0.50。 |
-| attention_residual_coordinate_unit | protocol | none | true | true | false | 注意力配准残差采用 normalized_xy_token_centers_corner_endpoints_v1 坐标中的 xy 欧氏距离。 |
+| attention_residual_coordinate_unit | protocol | none | true | true | false | 注意力配准残差采用 normalized_xy_token_centers_corner_endpoints 坐标中的 xy 欧氏距离。 |
 | gate_parameter_source | protocol | none | true | true | false | 注意力结构门禁来自预注册正式方法配置而非 calibration 或 test 调参。 |
 | calibration_data_used_for_gate_parameters | governance | none | true | true | false | 是否使用 calibration 数据选择锚点、残差或内点比例结构门禁, 正式方法固定为 false。 |
 | alignment_digest_binds_gate_parameters | governance | none | true | true | false | 对齐摘要是否直接绑定锚点、残差与最小内点比例三项门禁。 |
@@ -2873,7 +2873,11 @@ Notebook 与 repository module 的跨边界数据
 | attention_final_combined_score | metric | none | true | true | false | 三分支共同缩放并按实际 latent dtype 量化后, 写入 LF、尾部与 attention 组合 latent 的真实 Q/K 分数。 |
 | attention_score_gain | metric | none | true | true | false | `attention_final_combined_score` 减去 `attention_score_before` 得到的实际写回 Q/K 增益。 |
 | scheduler_step_timestep | runtime | none | true | false | false | callback-on-step-end 当前刚完成采样步对应的 scheduler timestep。 |
-| post_step_schedule_index | protocol | none | true | false | false | post-step latent 在公开 scheduler 序列中用于方法前向与盲检复现的下一索引。 |
+| step_index | protocol | none | true | false | false | 当前扩散回调的零基 scheduler 步索引; 正式注入位置由方法配置冻结。 |
+| post_step_schedule_index | protocol | none | true | false | false | post-step latent 在公开 scheduler 序列中的状态索引, 精确等于当前回调 `step_index + 1`; 该字段不选择注意力科学算子的求值时刻。 |
+| post_step_schedule_timestep | protocol | none | true | false | false | `post_step_schedule_index` 对应的 scheduler timestep, 只描述写回前 latent 所在的采样状态。 |
+| attention_operator_schedule_index | protocol | none | true | true | false | 生成端全部注入位置和检测端共同使用的冻结注意力科学算子索引, 正式值为7, 不随 post-step 状态变化。 |
+| attention_operator_timestep | protocol | none | true | true | false | 由 `scheduler.timesteps[attention_operator_schedule_index]` 取得的真实 Q/K 求值 timestep; 同一运行的全部注入记录必须相同。 |
 | registration_calibration_negative_count | metric | none | true | true | false | window-fit 子集中参与配准置信度阈值冻结的 clean negative 数量。 |
 | registration_calibration_exceedance_count | metric | none | true | true | false | 在冻结配准置信度门限上达到或超过门限的 calibration clean negative 数量。 |
 | sync_calibration_negative_count | metric | none | true | true | false | window-fit 子集中参与对齐后 Q/K 同步阈值冻结的 clean negative 数量。 |
@@ -2979,12 +2983,14 @@ Notebook 与 repository module 的跨边界数据
 | attention_unstable_pair_weight | protocol | none | true | false | false | 稳定 token 集合外规则网格关系在 Q/K 目标中保留的冻结支撑权重。 |
 | max_attention_tokens | protocol | none | true | false | false | 每个冻结注意力层按规则二维网格抽样时允许保留的最大 token 数量。 |
 | attention_module_names | method | none | true | true | false | 方法配置、逐注入原子与最终成图 Q/K 记录共同绑定的精确 Transformer 注意力层名称有序集合。 |
-| attention_coordinate_convention | protocol | none | true | true | false | 配置与运行原子使用的归一化 token 坐标约定, 正式值为 normalized_xy_token_centers_corner_endpoints_v1。 |
+| attention_coordinate_convention | protocol | none | true | true | false | 配置与运行原子使用的归一化 token 坐标约定, 正式值为 normalized_xy_token_centers_corner_endpoints。 |
 | attention_grid_align_corners | protocol | none | true | true | false | token 稳定图插值与图像仿射重采样是否统一使用角点中心端点语义, 正式值为 true。 |
 | minimum_final_image_attention_score_gain | protocol | none | true | true | false | 完整方法相对 carrier-only 的两类最终图像 attention 归因增益共同采用的严格正下界。 |
 | minimum_semantic_preservation_cosine | protocol | none | true | true | false | 单次实际写回和最终成图累计保持共同采用的完整 CLIP cosine 冻结下界。 |
 | maximum_handcrafted_structure_feature_relative_drift | protocol | none | true | true | false | 单次实际写回和最终成图累计保持共同采用的手工结构统计特征相对漂移冻结上界。 |
 | semantic_feature_schema | method | none | true | false | false | 正式 Jacobian 直接使用投影后 `image_embeds` 的完整归一化 CLIP embedding 定义; 缺失时失败, `pooler_output` 不得替代。 |
+| semantic_feature_protocol_schema | method | none | true | false | false | 冻结 VAE 解码变换、CLIP 预处理、投影输出来源、204维结构坐标顺序和716维连接顺序的完整特征算子身份。 |
+| semantic_feature_protocol_digest | provenance | none | true | true | false | 对完整语义条件特征算子纯数据协议正文计算的稳定 SHA-256, 用于证明 Jacobian 运行消费同一预处理和坐标顺序。 |
 | semantic_feature_width | protocol | none | true | false | false | 进入完整 Jacobian 的 CLIP embedding 坐标数量, 当前冻结为512。 |
 | handcrafted_structure_feature_schema | method | none | true | false | false | 正式 Jacobian 使用的 RGB 通道均值/标准差、绝对梯度均值和8x8 RGB 平均池化手工结构统计定义。 |
 | handcrafted_structure_feature_width | protocol | none | true | false | false | 进入完整 Jacobian 的手工结构统计坐标数量, 当前冻结为204。 |
@@ -3263,7 +3269,7 @@ Notebook 与 repository module 的跨边界数据
 | gpu_atomic_roles | protocol | none | true | false | false | 真实 SD3.5 CUDA 运行必须物化的科学原子角色集合。 |
 | gpu_observation_requirement | protocol | none | true | false | false | 单个不变量只能由真实 GPU 观察完成的验证职责。 |
 | claim_boundary | governance | none | true | false | false | 单个不变量允许支持的最强论文解释及禁止外推边界。 |
-| formal_method_config_schema | protocol | none | true | true | false | 完整方法运行配置规范 payload 的 schema 身份, 当前固定为 slm_wm_formal_method_runtime_config_v4。 |
+| formal_method_config_schema | protocol | none | true | true | false | 完整方法运行配置规范 payload 的 schema 身份, 当前固定为 slm_wm_formal_method_runtime_config。 |
 | formal_method_config_digest | provenance | none | true | true | false | `configs/model_sd35.yaml` 经完整解析和规范化后的稳定方法配置摘要, 包含预注册注意力配准三项结构常量。 |
 | sd35_operator_identity | provenance | none | true | true | false | 实际加载 SD3.5 pipeline 的组件类、VAE 常量和参数 dtype 联合身份记录。 |
 | component_class_names | provenance | none | true | true | false | 实际加载 pipeline、VAE、Transformer 与 scheduler 的完整 Python 类名映射。 |

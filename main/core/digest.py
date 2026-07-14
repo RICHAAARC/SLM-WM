@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 
-TENSOR_CONTENT_DIGEST_VERSION = "slm_wm_tensor_content_v1"
+TENSOR_CONTENT_DIGEST_VERSION = "slm_wm_tensor_content"
 
 
 def stable_json_dumps(value: Any) -> str:

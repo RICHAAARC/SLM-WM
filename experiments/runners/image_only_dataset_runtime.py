@@ -683,6 +683,7 @@ def _scientific_update_record_ready(
                 column_residuals = subspace.get(
                     "column_relative_response_residuals"
                 )
+                cg_residuals = subspace.get("cg_relative_residuals")
                 if (
                     subspace.get("cg_converged") is not True
                     or subspace.get("basis_rank") != config.null_rank
@@ -710,6 +711,13 @@ def _scientific_update_record_ready(
                         or float(value)
                         > config.maximum_relative_response_residual
                         for value in column_residuals
+                    )
+                    or not isinstance(cg_residuals, list)
+                    or len(cg_residuals) != config.null_rank
+                    or any(
+                        not finite_number(value)
+                        or float(value) > config.null_space_cg_relative_tolerance
+                        for value in cg_residuals
                     )
                 ):
                     return False

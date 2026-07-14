@@ -73,13 +73,13 @@ def test_primary_model_config_matches_immutable_source_registry() -> None:
         method_config.injection_step_indices[0] + 1
     )
     assert method_config.public_detection_noise_prg_protocol == (
-        "sha256_counter_normal_icdf_table20_float32_v2"
+        "sha256_counter_normal_icdf_table20_float32"
     )
     assert method_config.public_detection_noise_domain == (
-        "public_image_only_qk_detection_noise_v1"
+        "public_image_only_qk_detection_noise"
     )
     assert method_config.public_detection_conditioning_protocol == (
-        "sd3_empty_text_triplet_without_cfg_v1"
+        "sd3_empty_text_triplet_without_cfg"
     )
     assert method_config.public_detection_condition_text == ""
     assert (
@@ -114,11 +114,11 @@ def test_primary_model_config_matches_immutable_source_registry() -> None:
     )
     assert config.attention_module_names == method_config.attention_module_names
     assert config.attention_coordinate_convention == (
-        "normalized_xy_token_centers_corner_endpoints_v1"
+        "normalized_xy_token_centers_corner_endpoints"
     )
     assert config.attention_grid_align_corners is True
     assert method_config.risk_signal_calibration_protocol == (
-        "analytic_bounded_branch_signals_v1"
+        "analytic_bounded_branch_signals"
     )
     assert (
         method_config.risk_image_signal_interpolation_mode,
@@ -129,13 +129,13 @@ def test_primary_model_config_matches_immutable_source_registry() -> None:
     assert method_config.risk_neutral_texture_value == 0.5
     assert method_config.risk_eligibility_comparison == "strict_less_than"
     assert method_config.risk_budget_broadcast_protocol == (
-        "per_sample_hw_repeat_channels_nchw_v1"
+        "per_sample_hw_repeat_channels_nchw"
     )
     assert method_config.risk_zero_support_protocol == (
         "exact_zero_direction_or_fail_closed"
     )
     assert method_config.risk_bounded_scale_protocol == (
-        "direction_peak_frozen_budget_ceiling_box_v1"
+        "direction_peak_frozen_budget_ceiling_box"
     )
     assert method_config.risk_bounded_scale_direction_epsilon == 1e-12
     assert asdict(method_config.lf_content_risk_config) == {
@@ -183,7 +183,7 @@ def test_primary_model_config_matches_immutable_source_registry() -> None:
         1e-12,
         1e6,
         1e-5,
-        "right_upper_triangular_solve_without_explicit_inverse_v1",
+        "right_upper_triangular_solve_without_explicit_inverse",
     )
     assert (
         method_config.lf_kernel_size,
@@ -204,7 +204,7 @@ def test_primary_model_config_matches_immutable_source_registry() -> None:
         method_config.quantized_budget_envelope_backtracking_factor,
         method_config.quantized_budget_envelope_backtracking_maximum_steps,
     ) == (
-        "float32_ordered_branch_sum_add_float32_latent_single_cast_v1",
+        "float32_ordered_branch_sum_add_float32_latent_single_cast",
         ("lf_content", "tail_robust", "attention_geometry"),
         "sum_active_branch_envelopes",
         0.0,
@@ -300,14 +300,14 @@ def test_paper_method_settings_include_frozen_risk_and_write_protocols() -> None
     assert settings["risk_eligibility_comparison"] == "strict_less_than"
     assert settings["risk_neutral_texture_value"] == 0.5
     assert settings["risk_budget_broadcast_protocol"] == (
-        "per_sample_hw_repeat_channels_nchw_v1"
+        "per_sample_hw_repeat_channels_nchw"
     )
     assert settings["lf_content_risk_config"]["budget_ceiling"] == 1.0
     assert settings["qr_reference_solve_protocol"] == (
-        "right_upper_triangular_solve_without_explicit_inverse_v1"
+        "right_upper_triangular_solve_without_explicit_inverse"
     )
     assert settings["quantized_branch_composition_protocol"] == (
-        "float32_ordered_branch_sum_add_float32_latent_single_cast_v1"
+        "float32_ordered_branch_sum_add_float32_latent_single_cast"
     )
     assert settings["quantized_budget_envelope_backtracking_maximum_steps"] == 24
     assert settings["attention_anchor_count"] == 12

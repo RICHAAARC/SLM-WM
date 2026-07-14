@@ -403,7 +403,7 @@ def test_attention_risk_step_uses_one_actual_dtype_cast(
     assert not torch.equal(recorder.candidates[0], separately_quantized)
     assert result.update.dtype == torch.float32
     assert result.metadata["candidate_composition_protocol"] == (
-        "ordered_float32_branch_sum_then_latent_add_single_cast_v1"
+        "ordered_float32_branch_sum_then_latent_add_single_cast"
     )
     assert result.metadata["returned_update_dtype"] == "float32"
 

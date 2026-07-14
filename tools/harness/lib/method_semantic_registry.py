@@ -16,10 +16,10 @@ from tools.harness.lib.field_rules import load_field_registry
 
 REGISTRY_RELATIVE_PATH = PurePosixPath("configs/method_semantic_registry.json")
 METHOD_CONFIG_RELATIVE_PATH = PurePosixPath("configs/model_sd35.yaml")
-REGISTRY_SCHEMA = "slm_wm_method_semantic_registry_v1"
+REGISTRY_SCHEMA = "slm_wm_method_semantic_trace_registry"
 REGISTRY_SCOPE = "normative_traceability_without_scientific_conformance_decision"
 EXPECTED_NORMATIVE_TRACE_DIGEST = (
-    "edba851e5cb7a9f1eab3f4ce4239cf7f3f117ebcfe7bb6d63e1e15fc5810f197"
+    "7581d916fe320ad68aba5f10969b6da9fe37b9a7280a875940b1b07026462057"
 )
 EXPECTED_INVARIANT_IDS = (
     "constructive_local_tangent_scope",
@@ -201,7 +201,12 @@ EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS = {
             "recompute_jacobian_null_space_result_digest",
         ),
     ),
-    "complete_716_feature_jacobian": (),
+    "complete_716_feature_jacobian": _bindings(
+        (
+            "main/methods/semantic/feature_protocol.py",
+            "semantic_feature_protocol_record",
+        ),
+    ),
     "spatial_low_pass_and_amplitude_tail_carriers": _bindings(
         ("main/methods/carrier/keyed_tensor.py", "build_low_frequency_template"),
         ("main/methods/carrier/keyed_tensor.py", "LowFrequencyCarrierConfig"),
@@ -548,6 +553,10 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
         "test_clip_loader_forwards_registered_revision",
         "tests/functional/test_semantic_feature_conditions.py::"
         "test_latent_decoder_requires_explicit_vae_scaling_and_shift",
+        "tests/functional/test_semantic_feature_conditions.py::"
+        "test_attention_operator_timestep_is_independent_of_post_step_position",
+        "tests/functional/test_scientific_content_binding.py::"
+        "test_update_content_identity_rejects_attention_schedule_drift",
     ),
     "branch_signal_origin": (
         "tests/functional/test_semantic_feature_conditions.py::"
@@ -578,22 +587,42 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
         "test_undamped_psd_cg_reports_non_convergence_without_fallback",
         "tests/functional/test_real_scientific_operators.py::"
         "test_scientific_operator_gate_requires_all_real_operator_evidence",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_psd_cg_accepts_only_exact_zero_right_hand_side_without_iteration",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_psd_cg_does_not_replace_relative_tolerance_with_absolute_residual",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_psd_cg_recomputes_residual_from_returned_solution",
     ),
     "complete_716_feature_jacobian": (
         "tests/functional/test_semantic_feature_conditions.py::"
         "test_formal_jacobian_keeps_clip_and_handcrafted_structure_coordinates",
         "tests/functional/test_semantic_feature_conditions.py::"
+        "test_full_feature_schema_declares_no_compression",
+        "tests/functional/test_semantic_feature_conditions.py::"
+        "test_runtime_consumes_the_frozen_clip_preprocessing_protocol",
+        "tests/functional/test_semantic_feature_conditions.py::"
         "test_handcrafted_structure_vector_preserves_declared_coordinates",
         "tests/functional/test_semantic_feature_conditions.py::"
         "test_complete_feature_vector_supports_exact_jvp_and_vjp",
         "tests/functional/test_semantic_feature_conditions.py::"
+        "test_complete_feature_vector_rejects_multiple_samples",
+        "tests/functional/test_semantic_feature_conditions.py::"
         "test_semantic_features_require_projected_clip_image_embedding",
+        "tests/functional/test_semantic_feature_conditions.py::"
+        "test_projected_clip_embedding_requires_finite_nonzero_energy",
     ),
     "spatial_low_pass_and_amplitude_tail_carriers": (
         "tests/functional/test_real_scientific_operators.py::"
         "test_tail_robust_template_records_amplitude_tail_semantics",
         "tests/functional/test_real_scientific_operators.py::"
         "test_keyed_templates_use_versioned_device_independent_prg",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_normalized_correlation_preserves_scale_invariance",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_normalized_correlation_rejects_undefined_measurements",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_low_frequency_template_rejects_zero_centered_energy",
     ),
     "direct_qk_four_component_relation": (
         "tests/functional/test_real_scientific_operators.py::"
@@ -616,6 +645,10 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
         "test_attention_records_bind_outer_layer_and_token_identity",
         "tests/functional/test_real_scientific_operators.py::"
         "test_attention_stability_rejects_duplicate_layer_identity",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_qk_relation_rejects_nonfinite_projection_values",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_attention_component_score_rejects_nonfinite_active_relation",
     ),
     "direct_qk_monotonic_attention_update": (
         "tests/functional/test_real_scientific_operators.py::"
@@ -636,6 +669,10 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
         "test_attention_records_bind_outer_layer_and_token_identity",
         "tests/functional/test_real_scientific_operators.py::"
         "test_attention_stability_rejects_duplicate_layer_identity",
+        "tests/functional/test_semantic_feature_conditions.py::"
+        "test_attention_operator_timestep_is_independent_of_post_step_position",
+        "tests/functional/test_scientific_content_binding.py::"
+        "test_update_content_identity_rejects_attention_schedule_drift",
     ),
     "actual_dtype_write_revalidation": (
         "tests/functional/test_semantic_feature_conditions.py::"
@@ -664,6 +701,10 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
         "test_measurement_record_rejects_embedded_calibration_parameter",
         "tests/functional/test_image_only_measurement_config_identity.py::"
         "test_measurement_config_digest_binds_every_runtime_parameter",
+        "tests/functional/test_image_only_measurement_config_identity.py::"
+        "test_measurement_identity_rejects_alignment_without_attention_geometry",
+        "tests/functional/test_image_only_measurement_config_identity.py::"
+        "test_measurement_config_rejects_frozen_geometry_identity_drift",
         "tests/functional/test_attention_affine_protocol_geometry.py::"
         "test_identity_alignment_cannot_pass_positive_objective_gain_gate",
         "tests/functional/test_attention_affine_protocol_geometry.py::"
@@ -673,11 +714,19 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
         "tests/functional/test_attention_affine_protocol_geometry.py::"
         "test_cross_layer_alignment_selection_uses_frozen_lexicographic_rule",
         "tests/functional/test_real_scientific_operators.py::"
+        "test_image_alignment_uses_token_endpoint_coordinate_convention",
+        "tests/functional/test_real_scientific_operators.py::"
         "test_image_alignment_quantizes_fractional_rgb_with_floor",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_alignment_and_aligned_content_measurements_require_each_other",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_geometry_rescue_rejects_nonfinite_measurement_atoms",
         "tests/functional/test_attack_matrix.py::"
         "test_attack_matrix_rejects_non_blind_detection_records",
         "tests/functional/test_model_source_registry.py::"
         "test_runtime_detector_config_consumes_formal_alignment_gate",
+        "tests/functional/test_semantic_feature_conditions.py::"
+        "test_runtime_entry_rejects_alignment_without_attention_geometry",
     ),
     "versioned_key_prg_reconstruction": (
         "tests/functional/test_real_scientific_operators.py::"
@@ -704,6 +753,10 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
         "test_frozen_protocol_application_rejects_protocol_drift",
         "tests/functional/test_real_scientific_operators.py::"
         "test_identity_alignment_cannot_propagate_into_calibrated_rescue",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_geometry_rescue_rejects_nonfinite_measurement_atoms",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_alignment_and_aligned_content_measurements_require_each_other",
         "tests/functional/test_fixed_fpr_threshold_audit.py::"
         "test_main_method_threshold_audit_recomputes_complete_rescue_protocol",
         "tests/functional/test_image_only_measurement_config_identity.py::"
@@ -744,6 +797,18 @@ EXPECTED_CPU_PROPERTY_TEST_NODES["exact_jacobian_low_response_subspace"] = (
     "test_qr_basis_uses_independent_routed_candidate_references",
     "tests/functional/test_real_scientific_operators.py::"
     "test_exact_jacobian_linearization_satisfies_adjoint_identity",
+)
+EXPECTED_CPU_PROPERTY_TEST_NODES["complete_716_feature_jacobian"] = (
+    "tests/functional/test_semantic_feature_conditions.py::"
+    "test_runtime_consumes_the_frozen_clip_preprocessing_protocol",
+    "tests/functional/test_semantic_feature_conditions.py::"
+    "test_handcrafted_structure_vector_preserves_declared_coordinates",
+    "tests/functional/test_semantic_feature_conditions.py::"
+    "test_complete_feature_vector_supports_exact_jvp_and_vjp",
+    "tests/functional/test_semantic_feature_conditions.py::"
+    "test_complete_feature_vector_rejects_multiple_samples",
+    "tests/functional/test_semantic_feature_conditions.py::"
+    "test_projected_clip_embedding_requires_finite_nonzero_energy",
 )
 EXPECTED_CPU_PROPERTY_TEST_NODES["branch_signal_origin"] = (
     "tests/functional/test_branch_risk_formula.py::"
@@ -786,6 +851,24 @@ EXPECTED_CPU_PROPERTY_TEST_NODES[
     "test_tail_template_preserves_exact_sparse_support_without_centering",
     "tests/functional/test_risk_bounded_composition.py::"
     "test_carrier_templates_remain_canonical_float32_for_float16_latent",
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_normalized_correlation_preserves_scale_invariance",
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_normalized_correlation_rejects_undefined_measurements",
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_low_frequency_template_rejects_zero_centered_energy",
+)
+EXPECTED_CPU_PROPERTY_TEST_NODES["direct_qk_four_component_relation"] = (
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_multihead_qk_relation_matches_independent_manual_calculation",
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_each_attention_relation_component_changes_keyed_score",
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_attention_row_correlation_uses_independent_energy_thresholds",
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_qk_relation_rejects_nonfinite_projection_values",
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_attention_component_score_rejects_nonfinite_active_relation",
 )
 EXPECTED_CPU_PROPERTY_TEST_NODES["direct_qk_monotonic_attention_update"] = (
     "tests/functional/test_attention_risk_step.py::"
@@ -822,6 +905,28 @@ EXPECTED_CPU_PROPERTY_TEST_NODES["actual_dtype_write_revalidation"] = (
     "test_quantized_write_jacobian_gate_rechecks_actual_float16_delta",
     "tests/functional/test_semantic_feature_conditions.py::"
     "test_quantized_write_jacobian_gate_rejects_update_lost_to_quantization",
+)
+EXPECTED_CPU_PROPERTY_TEST_NODES["image_only_detection_boundary"] = (
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_image_alignment_uses_token_endpoint_coordinate_convention",
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_alignment_and_aligned_content_measurements_require_each_other",
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_geometry_rescue_rejects_nonfinite_measurement_atoms",
+    "tests/functional/test_image_only_measurement_config_identity.py::"
+    "test_measurement_identity_rejects_alignment_without_attention_geometry",
+    "tests/functional/test_image_only_measurement_config_identity.py::"
+    "test_measurement_config_rejects_frozen_geometry_identity_drift",
+)
+EXPECTED_CPU_PROPERTY_TEST_NODES["same_threshold_geometry_rescue"] = (
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_decision_equivalent_score_matches_complete_boolean_boundaries",
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_frozen_rescue_rejects_unbound_stable_pair_identity",
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_geometry_rescue_rejects_nonfinite_measurement_atoms",
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_alignment_and_aligned_content_measurements_require_each_other",
 )
 EXPECTED_CPU_PROPERTY_TEST_NODES["scientific_content_binding"] = (
     "tests/functional/test_scientific_content_binding.py::"
