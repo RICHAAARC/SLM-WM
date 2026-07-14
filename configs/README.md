@@ -9,14 +9,14 @@
 | 配置文件 | prompt 数量 | 目标 FPR | 支持主张 | 用途 |
 | --- | ---: | ---: | --- | --- |
 | `paper_main_probe_paper_prompts.txt` | 70 | 0.1 | `probe_claim` | 小规模正式结果包, test 包含34个独立 Prompt。 |
-| `paper_main_pilot_paper_prompts.txt` | 700 | 0.1 | `pilot_claim` | 中等规模正式结果包, test 包含340个独立 Prompt。 |
-| `paper_main_full_paper_prompts.txt` | 7000 | 0.1 | `full_claim` | 全规模正式结果包, test 包含3400个独立 Prompt。 |
+| `paper_main_pilot_paper_prompts.txt` | 700 | 0.01 | `pilot_claim` | 中等规模正式结果包, test 包含340个独立 Prompt。 |
+| `paper_main_full_paper_prompts.txt` | 7000 | 0.001 | `full_claim` | 全规模正式结果包, test 包含3400个独立 Prompt。 |
 
 正式 Prompt bank 由 Microsoft COCO 2017 train captions 与 Google Research PartiPrompts 的固定字节版本构造。`configs/prompt_selection_manifest.jsonl` 保存6000条 COCO caption 与1000条 PartiPrompt 的来源记录身份、原始文本和选择摘要；三级 Prompt 文件分别是该清单的前70、前700和前7000条, 并保持 6:1 来源比例。Prompt ID 由统一清单索引和原始文本构造, split 在每个连续70条块内固定分配3/33/34, 因而相同前缀在三级运行中保持相同 Prompt ID 与 split。`configs/prompt_source_registry.json` 固定来源 revision、文件大小、SHA-256、选择清单摘要和三个 Prompt 文件摘要。运行入口会从清单前缀逐字节重建当前 Prompt 文件, 不接受未登记文本、来源改写或独立重新抽样。
 
-三组配置统一使用 FPR=0.1, 只允许样本数量和统计强度不同; 方法参数、攻击协议、baseline 入口、Wilson 单侧 FPR 上界、Hoeffding 结果区间、随机种子和结果闭合逻辑必须保持一致。共同协议结果记录必须拒绝 proxy、placeholder、fallback、synthetic 和 formal-null 证据。
+三组配置使用同构 fixed-FPR 统计协议, 目标 FPR 分别为0.1、0.01和0.001；方法参数、攻击协议、baseline 入口、Wilson 单侧 FPR 上界算法、Hoeffding 结果区间、随机种子和结果闭合逻辑必须保持一致。共同协议结果记录必须拒绝 proxy、placeholder、fallback、synthetic 和 formal-null 证据。
 
-生成随机性由 `crossed_generation_seed_watermark_key_v2` 协议统一治理。协议登记3个生成 seed 偏移与3个密钥索引形成9个交叉重复, 三类论文运行层级使用完全相同的重复注册表。单次执行通过 `SLM_WM_RANDOMIZATION_REPEAT_ID` 选择一个重复；主方法和4个主表 baseline 对同一 Prompt 使用相同生成 seed、相同模型 revision、相同 latent shape 以及由 `sha256_counter_normal_icdf_table20_float32` 生成的同一个基础 latent。高斯用途把 SHA-256 大端计数器块解释为 MSB-first 连续比特流, 跨块连续提取20位索引并查询 $q_i=\operatorname{round}_{\mathrm{binary32}}\!\left(\Phi^{-1}((i+0.5)/2^{20})\right)$。规范 float32 生成和目标 dtype 转换都在 CPU 完成, 随后才搬运到执行设备。实际目标 dtype Tensor 的内容摘要与身份摘要必须进入 observation, 配对优势门禁逐字段核验一致性。生成 seed 和密钥重复可以改变运行实例, 但不得改变冻结方法参数、攻击协议或 fixed-FPR 统计定义。
+生成随机性由 `crossed_generation_seed_watermark_key` 协议统一治理。协议登记3个生成 seed 偏移与3个密钥索引形成9个交叉重复, 三类论文运行层级使用完全相同的重复注册表。单次执行通过 `SLM_WM_RANDOMIZATION_REPEAT_ID` 选择一个重复；主方法和4个主表 baseline 对同一 Prompt 使用相同生成 seed、相同模型 revision、相同 latent shape 以及由 `sha256_counter_normal_icdf_table20_float32` 生成的同一个基础 latent。高斯用途把 SHA-256 大端计数器块解释为 MSB-first 连续比特流, 跨块连续提取20位索引并查询 $q_i=\operatorname{round}_{\mathrm{binary32}}\!\left(\Phi^{-1}((i+0.5)/2^{20})\right)$。规范 float32 生成和目标 dtype 转换都在 CPU 完成, 随后才搬运到执行设备。实际目标 dtype Tensor 的内容摘要与身份摘要必须进入 observation, 配对优势门禁逐字段核验一致性。生成 seed 和密钥重复可以改变运行实例, 但不得改变冻结方法参数、攻击协议或 fixed-FPR 统计定义。
 
 当前统一方法参数位于 `configs/model_sd35.yaml`。正式数据集入口通过 `experiments/protocol/method_runtime_config.py` 直接解析该文件, 目标根目录缺少该文件时直接失败, 不从 Python 包目录回退。完整配置值产生稳定的 `formal_method_config_digest`, 并进入三级论文配置和每个科学运行配置摘要。该 YAML 同时精确冻结 SD3 pipeline、VAE、Transformer 和 FlowMatch scheduler 的完整类名, VAE `scaling_factor=1.5305`、`shift_factor=0.0609`、latent `float16` 与视觉编码 `float32`；模型加载后必须复验实际对象和参数 dtype, 不能只验证传给 `from_pretrained` 的参数。环境变量只用于设备、数据访问凭据、输出位置和单次 session 调度等运行控制, 已登记变量若声明不同的模型或算子身份会在下载前失败。
 

@@ -845,6 +845,7 @@ def _expected_fixed_fpr_config(
     try:
         return PilotPaperFixedFprConfig(
             paper_run_name=bundle.expected_paper_claim_scale,
+            protocol_profile=str(defaults["protocol_profile"]),
             prompt_set=bundle.expected_paper_claim_scale,
             prompt_file=str(defaults["prompt_file"]),
             prompt_protocol_name=prompt_protocol_name_for_run(

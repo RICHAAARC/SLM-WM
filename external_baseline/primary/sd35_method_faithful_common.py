@@ -531,7 +531,7 @@ def derive_threshold(
     )
     for threshold in sorted({math.nextafter(score, math.inf) for score in negative_scores}):
         if sum(score >= threshold for score in negative_scores) <= allowed_false_positives:
-            return threshold, "nested_calibration_threshold_freeze_conformal_v1"
+            return threshold, "nested_calibration_threshold_freeze_conformal"
     raise RuntimeError("无法从 calibration clean negative 冻结 fixed-FPR 阈值")
 
 

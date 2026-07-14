@@ -14,6 +14,7 @@ from experiments.protocol.formal_randomization import (
     formal_randomization_protocol_record,
     resolve_formal_randomization_repeat,
 )
+from experiments.protocol.paper_run_config import RUN_DEFAULTS
 from paper_experiments.analysis.paper_claim_field_policy import (
     find_component_paper_claim_violation,
     find_zip_paper_claim_violation,
@@ -30,7 +31,7 @@ from paper_experiments.runners.randomization_repeat_evidence import (
 pytestmark = pytest.mark.quick
 
 PAPER_RUN_NAME = "probe_paper"
-TARGET_FPR = 0.1
+TARGET_FPR = float(RUN_DEFAULTS[PAPER_RUN_NAME]["target_fpr"])
 REPEAT_ID = "seed_01_key_02"
 CODE_VERSION = "a" * 40
 
@@ -730,7 +731,7 @@ def test_repeat_writer_rejects_run_fpr_drift_before_reading_inputs(
         write_randomization_repeat_evidence_package(
             tmp_path / "missing_inputs",
             paper_run_name="pilot_paper",
-            target_fpr=0.01,
+            target_fpr=TARGET_FPR,
             randomization_repeat_id=REPEAT_ID,
             root=tmp_path,
         )

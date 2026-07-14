@@ -14,35 +14,35 @@ from main.core.keyed_prg import (
 )
 
 
-FORMAL_RANDOMIZATION_PROTOCOL = "crossed_generation_seed_watermark_key_v2"
+FORMAL_RANDOMIZATION_PROTOCOL = "crossed_generation_seed_watermark_key"
 FORMAL_GENERATION_SEED_DERIVATION_PROTOCOL = (
-    "base_seed_plus_repeat_offset_plus_prompt_index_v1"
+    "base_seed_plus_repeat_offset_plus_prompt_index"
 )
 FORMAL_GENERATION_SEED_OFFSETS = (0, 1_000_003, 2_000_003)
 FORMAL_WATERMARK_KEY_INDICES = (0, 1, 2)
-FORMAL_WATERMARK_KEY_PLAN_PROTOCOL = "fixed_three_key_commitment_v1"
+FORMAL_WATERMARK_KEY_PLAN_PROTOCOL = "fixed_three_key_commitment"
 FORMAL_BASE_LATENT_GENERATION_PROTOCOL = (
     "device_independent_sha256_normal_icdf_table20_"
-    "cpu_dtype_cast_then_device_transfer_v2"
+    "cpu_dtype_cast_then_device_transfer"
 )
 FORMAL_WATERMARK_KEY_PLAN_DIGEST = (
-    "04317bbace506a90fcf289cc398216033e7805bf61f947a8872b9621fe2a8b2a"
+    "2a950250416fd0ec2f3a3aa4c5415e75554d826afd17217074eff8306df12ad3"
 )
 FORMAL_WATERMARK_KEY_PLAN = (
     (
         0,
-        6_942_440_944_665_458_254,
-        "e3939356c714fd2e05570549b1c13611f49207a206b29e7f4b4c3f91602d9006",
+        8_704_188_491_423_828_510,
+        "84a96fe8d4b96a94443b227b134e0dde761be8dc0d23bd1c897fc0945f20aed7",
     ),
     (
         1,
-        897_838_034_882_004_676,
-        "4a831610d9ab6ba8839ad34b8eb3a98bed5ec89aad9f6d36db12544583247235",
+        9_001_591_660_004_305_097,
+        "95ab7a3334d9d25add02de5c2f2a6f12061df3ab502d281fd736195583e929a1",
     ),
     (
         2,
-        2_380_276_531_915_020_814,
-        "d49b2a3012084807d91c65326401aa889b1a225ef8e71207f09cbfe9391dcf9c",
+        2_607_648_379_522_823_460,
+        "4d576053318c518c9031f0d4377c05ea02ca10fcd0bc0933f1cae7a349a78242",
     ),
 )
 DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID = "seed_00_key_00"

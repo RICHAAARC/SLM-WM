@@ -113,6 +113,33 @@ def _mean(values: Iterable[float]) -> float:
     return sum(resolved) / len(resolved) if resolved else 0.0
 
 
+def _shared_runtime_context_config(
+    base_configs: tuple[SemanticWatermarkRuntimeConfig, ...],
+    specs: tuple[RuntimeRerunAblationSpec, ...],
+    output_root: str,
+) -> SemanticWatermarkRuntimeConfig:
+    """合并全部消融运行对共享模型上下文的能力要求.
+
+    共享上下文只加载一次模型, 但其扩散攻击运行时必须覆盖所有 Prompt 与
+    消融配置. 不能使用首个 calibration 配置推断能力, 否则后续 test 配置
+    启用再扩散攻击时会得到缺失运行时的错误共享上下文.
+    """
+
+    if not base_configs or not specs:
+        raise ValueError("共享消融运行上下文要求非空配置和机制规范")
+    expanded_configs = tuple(
+        spec.apply(base_config, output_root)
+        for base_config in base_configs
+        for spec in specs
+    )
+    return replace(
+        expanded_configs[0],
+        diffusion_attacks_enabled=any(
+            config.diffusion_attacks_enabled for config in expanded_configs
+        ),
+    )
+
+
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     """用所有结果行的稳定列集合写出 CSV。"""
 
@@ -564,6 +591,11 @@ def run_runtime_rerun_ablations(
     resolved_base_configs = tuple(base_configs)
     if not resolved_base_configs:
         raise ValueError("真实重运行消融至少需要一个 Prompt 配置")
+    shared_context_config = _shared_runtime_context_config(
+        resolved_base_configs,
+        resolved_specs,
+        output_dir,
+    )
     prompt_contract, canonical_prompt_index_by_id = _canonical_prompt_contract(
         root_path,
         paper_run,
@@ -667,7 +699,9 @@ def run_runtime_rerun_ablations(
                 continue
             else:
                 if shared_context is None:
-                    shared_context = load_semantic_watermark_runtime_context(resolved_base_configs[0])
+                    shared_context = load_semantic_watermark_runtime_context(
+                        shared_context_config
+                    )
                 result = write_semantic_watermark_runtime_outputs(
                     run_config,
                     root=root_path,

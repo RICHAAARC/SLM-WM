@@ -55,6 +55,17 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _require_repeat_component_ready(
+    summary: Mapping[str, Any],
+    *,
+    artifact_role: str,
+) -> None:
+    """阻止未完成当前 seed-key 正式证据单元的产物进入闭合."""
+
+    if summary.get("repeat_component_ready") is not True:
+        raise RuntimeError(f"{artifact_role} 尚未形成可聚合的重复证据组件")
+
+
 def _mirror_archive(source_path: Path, destination_dir: Path) -> str:
     """以临时副本、摘要校验和原子 rename 镜像闭合结果包."""
 
@@ -346,6 +357,10 @@ def _write_bindings(
         )
     bindings: dict[str, dict[str, Any]] = {}
     for artifact_role, artifact_dir, summary_file_name in specifications:
+        _require_repeat_component_ready(
+            _read_json(artifact_dir / summary_file_name),
+            artifact_role=artifact_role,
+        )
         binding, binding_path = write_scientific_execution_binding(
             artifact_dir,
             artifact_role=artifact_role,
@@ -484,6 +499,30 @@ def _archive_paths_from_packaging(
     return resolved
 
 
+def _validate_packaged_archives(
+    archives: Mapping[str, Path],
+    *,
+    root_path: Path,
+    paper_run_name: str,
+    target_fpr: float,
+    randomization_repeat_id: str,
+) -> None:
+    """以闭合包生产检查器复验归档, 不信任打包命令的自报状态."""
+
+    for artifact_role, archive_path in archives.items():
+        candidate = inspect_closure_package(
+            archive_path,
+            spec=_semantic_package_spec(artifact_role),
+            paper_run_name=paper_run_name,
+            target_fpr=target_fpr,
+            randomization_repeat_id=randomization_repeat_id,
+        )
+        if not _candidate_matches_repository(candidate, root_path):
+            raise RuntimeError(
+                f"{artifact_role} 结果包与当前代码锁或科学依赖身份不一致"
+            )
+
+
 def run_semantic_watermark_image_only_session(
     root: str | Path = ".",
     *,
@@ -525,6 +564,7 @@ def run_semantic_watermark_image_only_session(
             ),
             "formal_ablation_requested": run_formal_ablation,
             "closed_archive_recovery_ready": True,
+            "repeat_component_ready": True,
             **closed_archive_recovery,
         }
     runtime_output_dir = root_path / "outputs" / "image_only_dataset_runtime" / paper_run_name
@@ -590,6 +630,14 @@ def run_semantic_watermark_image_only_session(
         raise RuntimeError("仅图像数据集运行未生成通过协议的正式摘要")
     if quality_summary.get("formal_fid_kid_component_ready") is not True:
         raise RuntimeError("数据集运行完成, 但规范 Inception FID/KID 尚未闭合")
+    _require_repeat_component_ready(
+        runtime_summary,
+        artifact_role="image_only_dataset_runtime",
+    )
+    _require_repeat_component_ready(
+        quality_summary,
+        artifact_role="dataset_level_quality",
+    )
 
     ablation_progress_path = ablation_output_dir / "runtime_rerun_progress.json"
     ablation_complete = False
@@ -612,6 +660,10 @@ def run_semantic_watermark_image_only_session(
         ablation_summary = _read_json(ablation_output_dir / "ablation_component_summary.json")
         if ablation_summary.get("protocol_decision") != "pass":
             raise RuntimeError("正式机制消融未生成通过协议的摘要")
+        _require_repeat_component_ready(
+            ablation_summary,
+            artifact_role="runtime_rerun_ablation",
+        )
         ablation_complete = True
 
     bindings = _write_bindings(
@@ -637,6 +689,13 @@ def run_semantic_watermark_image_only_session(
         root_path,
         packaging_execution,
         expected_roles=expected_packaged_roles,
+    )
+    _validate_packaged_archives(
+        archives,
+        root_path=root_path,
+        paper_run_name=paper_run_name,
+        target_fpr=paper_run.target_fpr,
+        randomization_repeat_id=paper_run.randomization_repeat_id,
     )
     local_archives = {role: str(path) for role, path in archives.items()}
     mirrored_archives: dict[str, str] = {}
@@ -667,6 +726,7 @@ def run_semantic_watermark_image_only_session(
             "workflow_decision": "dataset_complete",
             "active_workflow": "image_only_dataset_runtime",
             "formal_ablation_requested": False,
+            "repeat_component_ready": True,
             "supports_paper_claim": False,
             **common_result,
         }
@@ -675,11 +735,7 @@ def run_semantic_watermark_image_only_session(
         "active_workflow": "runtime_rerun_ablation",
         "ablation_summary": ablation_summary,
         "formal_ablation_requested": True,
-        "repeat_component_ready": bool(
-            runtime_summary.get("repeat_component_ready", False)
-            and quality_summary.get("repeat_component_ready", False)
-            and ablation_summary.get("repeat_component_ready", False)
-        ),
+        "repeat_component_ready": True,
         "randomization_aggregate_ready": False,
         "supports_paper_claim": False,
         **common_result,

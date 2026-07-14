@@ -37,9 +37,6 @@ from main.methods.geometry import validate_attention_alignment_gate
 PILOT_PAPER_RUN_NAME = "pilot_paper"
 PROBE_PAPER_RUN_NAME = "probe_paper"
 FULL_PAPER_RUN_NAME = "full_paper"
-DEFAULT_TARGET_FPR = 0.1
-DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT = 34
-DEFAULT_DATASET_LEVEL_QUALITY_MINIMUM_COUNT = 70
 DEFAULT_DRIVE_ROOT = "/content/drive/MyDrive/SLM"
 _FORMAL_METHOD_DEFAULTS = load_formal_method_runtime_config(
     FORMAL_METHOD_PACKAGE_ROOT
@@ -265,16 +262,16 @@ RUN_DEFAULTS: dict[str, dict[str, Any]] = {
         "prompt_set": PILOT_PAPER_RUN_NAME,
         "prompt_file": PROMPT_FILES[PILOT_PAPER_RUN_NAME].as_posix(),
         "drive_result_root": f"{DEFAULT_DRIVE_ROOT}/pilot_paper_results",
-        "protocol_profile": "paper_fixed_fpr_0_1",
-        "target_fpr": 0.1,
+        "protocol_profile": "paper_fixed_fpr_0_01",
+        "target_fpr": 0.01,
         "sample_count": "all",
     },
     FULL_PAPER_RUN_NAME: {
         "prompt_set": FULL_PAPER_RUN_NAME,
         "prompt_file": PROMPT_FILES[FULL_PAPER_RUN_NAME].as_posix(),
         "drive_result_root": f"{DEFAULT_DRIVE_ROOT}/full_paper_results",
-        "protocol_profile": "paper_fixed_fpr_0_1",
-        "target_fpr": 0.1,
+        "protocol_profile": "paper_fixed_fpr_0_001",
+        "target_fpr": 0.001,
         "sample_count": "all",
     },
 }
@@ -296,9 +293,9 @@ class PaperRunConfig:
     prompt_count: int
     sample_count: int
     drive_result_root: str
-    target_fpr: float = DEFAULT_TARGET_FPR
-    minimum_clean_negative_count: int = DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT
-    dataset_level_quality_minimum_count: int = DEFAULT_DATASET_LEVEL_QUALITY_MINIMUM_COUNT
+    target_fpr: float
+    minimum_clean_negative_count: int
+    dataset_level_quality_minimum_count: int
     randomization_repeat_id: str = DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID
     generation_seed_index: int = 0
     generation_seed_offset: int = 0
@@ -476,6 +473,24 @@ class PaperRunConfig:
         fixed-FPR 阈值, 造成真实 positive 难以越过阈值。
         """
 
+        validate_paper_run_protocol_identity(
+            self.run_name,
+            self.protocol_profile,
+            self.target_fpr,
+        )
+        run_name = normalize_paper_run_name(self.run_name)
+        expected_prompt_count = RUN_EXPECTED_PROMPT_COUNTS[run_name]
+        expected_test_count = int(
+            build_group_split_counts(expected_prompt_count)["test"]
+        )
+        if self.minimum_clean_negative_count != expected_test_count:
+            raise ValueError(
+                "minimum_clean_negative_count 必须等于当前运行层级完整 test split 数量"
+            )
+        if self.dataset_level_quality_minimum_count != expected_prompt_count:
+            raise ValueError(
+                "dataset_level_quality_minimum_count 必须等于当前运行层级完整 Prompt 数量"
+            )
         validate_attention_alignment_gate(
             self.attention_anchor_count,
             self.attention_residual_threshold,
@@ -681,6 +696,32 @@ def validate_frozen_paper_run_target_fpr(
     return expected
 
 
+def validate_paper_run_protocol_identity(
+    paper_run_name: str,
+    protocol_profile: str,
+    target_fpr: float,
+) -> tuple[str, float]:
+    """校验运行层级、协议画像与目标 FPR 的唯一对应关系。
+
+    三个论文层级复用同一执行拓扑, 但统计工作点分别冻结为
+    0.1、0.01和0.001。该校验集中拒绝把一个层级的协议画像或数值
+    与另一个层级组合, 避免后续主方法和 baseline 形成不可比较结果。
+    """
+
+    run_name = normalize_paper_run_name(paper_run_name)
+    expected_profile = str(RUN_DEFAULTS[run_name]["protocol_profile"])
+    resolved_profile = str(protocol_profile).strip()
+    if resolved_profile != expected_profile:
+        raise ValueError(
+            f"{run_name} 的 protocol_profile 必须使用冻结值 {expected_profile}"
+        )
+    expected_target_fpr = validate_frozen_paper_run_target_fpr(
+        run_name,
+        target_fpr,
+    )
+    return expected_profile, expected_target_fpr
+
+
 def _file_sha256(path: Path) -> str:
     """计算 Prompt 文件的字节级 SHA-256。"""
 
@@ -791,8 +832,8 @@ def derive_minimum_clean_negative_count(prompt_count: int, target_fpr: float) ->
 
     该函数属于配置解析层。probe_paper、pilot_paper 与 full_paper 不再各自硬编码
     clean negative 门禁, 而是统一要求完整 test split。70、700、7000个 Prompt
-    分别对应34、340、3400个 test 样本。三个运行层级使用同一 FPR=0.1
-    工作点; 更大样本只提高统计强度, 不改变 detector 决策协议。
+    分别对应34、340、3400个 test 样本。三个运行层级复用同一 detector
+    与 fixed-FPR 统计拓扑, 但工作点依次为0.1、0.01和0.001。
     """
 
     if prompt_count <= 0:
@@ -852,7 +893,21 @@ def build_paper_run_config(
         prompt_count=prompt_count,
         default_value=str(defaults["sample_count"]),
     )
-    target_fpr = float(defaults.get("target_fpr", DEFAULT_TARGET_FPR))
+    protocol_profile = os.environ.get(
+        "SLM_WM_PROTOCOL_PROFILE",
+        str(defaults["protocol_profile"]),
+    )
+    target_fpr = float(
+        os.environ.get(
+            "SLM_WM_PAPER_RUN_TARGET_FPR",
+            str(defaults["target_fpr"]),
+        )
+    )
+    protocol_profile, target_fpr = validate_paper_run_protocol_identity(
+        run_name,
+        protocol_profile,
+        target_fpr,
+    )
     expected_prompt_count = RUN_EXPECTED_PROMPT_COUNTS[run_name]
     derived_minimum_clean_negative_count = derive_minimum_clean_negative_count(expected_prompt_count, target_fpr)
     derived_dataset_level_quality_minimum_count = derive_dataset_level_quality_minimum_count(expected_prompt_count)
@@ -865,7 +920,7 @@ def build_paper_run_config(
     randomization_protocol = formal_randomization_protocol_record()
     return PaperRunConfig(
         run_name=run_name,
-        protocol_profile=str(defaults["protocol_profile"]),
+        protocol_profile=protocol_profile,
         prompt_set=prompt_set,
         prompt_file=prompt_file,
         prompt_count=prompt_count,
@@ -910,8 +965,8 @@ def shared_method_settings(config: PaperRunConfig) -> dict[str, Any]:
     """返回应在各论文运行层级间保持一致的方法级设置。
 
     fixed-FPR 门禁需要的最小样本数属于协议规模约束, 不属于方法机制本身。
-    probe_paper、pilot_paper 与 full_paper 均使用同一方法设置和 FPR=0.1
-    工作点; 三者只通过 Prompt 数量表达不同统计强度。
+    probe_paper、pilot_paper 与 full_paper 使用同一方法设置。三级运行的
+    fixed-FPR 工作点属于实验协议字段, 不属于此处返回的方法机制设置。
     """
 
     payload = config.to_dict()

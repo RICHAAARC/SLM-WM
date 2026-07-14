@@ -17,6 +17,10 @@ from experiments.protocol.attacks import attack_config_digest, resolve_formal_at
 from experiments.protocol.image_only_evidence import (
     partition_calibration_prompt_ids,
 )
+from experiments.protocol.pilot_paper_fixed_fpr import (
+    FULL_PAPER_FIXED_FPR,
+    PILOT_PAPER_FIXED_FPR,
+)
 from main.core.digest import build_stable_digest
 from paper_experiments.baselines import (
     build_primary_baseline_formal_evidence_collection_rows,
@@ -35,8 +39,8 @@ from tests.helpers.formal_prompt_source import copy_governed_prompt_file
 
 PAPER_RUN_PARAMETERS = {
     "probe_paper": {"calibration": 33, "test": 34, "target_fpr": 0.1},
-    "pilot_paper": {"calibration": 330, "test": 340, "target_fpr": 0.1},
-    "full_paper": {"calibration": 3300, "test": 3400, "target_fpr": 0.1},
+    "pilot_paper": {"calibration": 330, "test": 340, "target_fpr": 0.01},
+    "full_paper": {"calibration": 3300, "test": 3400, "target_fpr": 0.001},
 }
 
 
@@ -228,7 +232,7 @@ def test_formal_import_validator_accepts_governed_full_main_record(tmp_path: Pat
 
     row, _ = write_formal_tree_ring_row(tmp_path)
 
-    report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=0.1)
+    report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=PILOT_PAPER_FIXED_FPR)
 
     assert report["overall_decision"] == "pass"
     assert report["accepted_formal_import_count"] == 1
@@ -249,7 +253,7 @@ def test_formal_import_validator_recomputes_reported_metrics_from_observations(
     report = validate_primary_baseline_formal_import_rows(
         [row],
         evidence_root=tmp_path,
-        target_fpr=0.1,
+        target_fpr=PILOT_PAPER_FIXED_FPR,
     )
 
     issue_fields = {
@@ -273,7 +277,7 @@ def test_formal_import_validator_rejects_forged_result_source_digest(
     report = validate_primary_baseline_formal_import_rows(
         [row],
         evidence_root=tmp_path,
-        target_fpr=0.1,
+        target_fpr=PILOT_PAPER_FIXED_FPR,
     )
 
     assert "baseline_result_source_sha256_mismatch" in {
@@ -291,7 +295,7 @@ def test_formal_import_validator_rejects_duplicate_formal_template_key(tmp_path:
     report = validate_primary_baseline_formal_import_rows(
         [row, dict(row)],
         evidence_root=tmp_path,
-        target_fpr=0.1,
+        target_fpr=PILOT_PAPER_FIXED_FPR,
     )
 
     assert report["formal_import_validation_ready"] is False
@@ -312,10 +316,10 @@ def test_formal_import_validator_requires_complete_scale_and_fixed_fpr_confidenc
     high_upper_bound_row["clean_false_positive_rate"] = 25 / 340
 
     incomplete_report = validate_primary_baseline_formal_import_rows(
-        [incomplete_row], evidence_root=tmp_path, target_fpr=0.1
+        [incomplete_row], evidence_root=tmp_path, target_fpr=PILOT_PAPER_FIXED_FPR
     )
     upper_bound_report = validate_primary_baseline_formal_import_rows(
-        [high_upper_bound_row], evidence_root=tmp_path, target_fpr=0.1
+        [high_upper_bound_row], evidence_root=tmp_path, target_fpr=PILOT_PAPER_FIXED_FPR
     )
 
     assert "complete_test_positive_count_required" in {
@@ -338,7 +342,7 @@ def test_formal_import_validator_recomputes_threshold_from_bound_observations(tm
     row["threshold_digest"] = "f" * 64
     row["fixed_fpr_observation_evidence_digest"] = "e" * 64
 
-    report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=0.1)
+    report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=PILOT_PAPER_FIXED_FPR)
     reasons = {issue["reason"] for issue in report["issues"]}
 
     assert report["accepted_formal_import_count"] == 0
@@ -359,7 +363,7 @@ def test_formal_import_validator_rejects_explicit_target_fpr_drift(
     report = validate_primary_baseline_formal_import_rows(
         [row],
         evidence_root=tmp_path,
-        target_fpr=0.1,
+        target_fpr=PILOT_PAPER_FIXED_FPR,
     )
 
     assert "frozen_target_fpr_required" in {
@@ -385,7 +389,7 @@ def test_formal_import_validator_requires_exact_attack_prompt_coverage(tmp_path:
     evidence_path.write_text(json.dumps(observations, ensure_ascii=False), encoding="utf-8")
     row["fixed_fpr_observation_evidence_digest"] = build_stable_digest(observations)
 
-    report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=0.1)
+    report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=PILOT_PAPER_FIXED_FPR)
     reasons = {issue["reason"] for issue in report["issues"]}
 
     assert report["accepted_formal_import_count"] == 0
@@ -406,8 +410,8 @@ def test_formal_import_protocol_switches_prompt_schema_to_full_paper(
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "full_paper")
     row, _ = write_formal_tree_ring_row(tmp_path, paper_run_name="full_paper")
 
-    schema = build_primary_baseline_formal_import_schema(target_fpr=0.1, root=tmp_path)
-    report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=0.1)
+    schema = build_primary_baseline_formal_import_schema(target_fpr=FULL_PAPER_FIXED_FPR, root=tmp_path)
+    report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=FULL_PAPER_FIXED_FPR)
 
     assert schema["paper_claim_scale"] == "full_paper"
     assert schema["prompt_protocol_name"] == "paper_main_full_paper_prompt_protocol"
@@ -424,7 +428,7 @@ def test_formal_import_validator_rejects_incomplete_adapter_boundary_and_missing
     row["adapter_boundary"] = "sd35_method_faithful_adapter_not_formal_external_baseline_evidence"
     row["fixed_fpr_baseline_calibration_ready"] = False
 
-    report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=0.1)
+    report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=PILOT_PAPER_FIXED_FPR)
     reasons = {issue["reason"] for issue in report["issues"]}
 
     assert report["overall_decision"] == "fail"
@@ -468,7 +472,7 @@ def test_t2smark_candidate_records_remain_rejected_until_attack_and_threshold_re
 
     records = build_t2smark_formal_candidate_records(
         observation_rows=observations,
-        target_fpr=0.1,
+        target_fpr=PILOT_PAPER_FIXED_FPR,
         baseline_result_source="outputs/t2smark_formal_reproduction/results.json",
         baseline_result_source_digest=hashlib.sha256(evidence_path.read_bytes()).hexdigest(),
         evidence_paths=["outputs/t2smark_formal_reproduction/results.json"],
@@ -477,7 +481,7 @@ def test_t2smark_candidate_records_remain_rejected_until_attack_and_threshold_re
         fixed_fpr_baseline_calibration_ready=False,
         attack_matrix_baseline_detection_ready=False,
     )
-    report = validate_primary_baseline_formal_import_rows(records, evidence_root=tmp_path, target_fpr=0.1)
+    report = validate_primary_baseline_formal_import_rows(records, evidence_root=tmp_path, target_fpr=PILOT_PAPER_FIXED_FPR)
     reasons = {issue["reason"] for issue in report["issues"]}
 
     assert len(records) == 2
@@ -499,7 +503,7 @@ def test_tree_ring_method_faithful_candidate_records_are_schema_compatible(tmp_p
 
     records = build_tree_ring_method_faithful_candidate_records(
         observation_rows=observations,
-        target_fpr=0.1,
+        target_fpr=PILOT_PAPER_FIXED_FPR,
         baseline_result_source="outputs/tree_ring_method_faithful/baseline_observations.json",
         baseline_result_source_digest=hashlib.sha256(evidence_path.read_bytes()).hexdigest(),
         evidence_paths=["outputs/tree_ring_method_faithful/baseline_observations.json"],
@@ -508,7 +512,7 @@ def test_tree_ring_method_faithful_candidate_records_are_schema_compatible(tmp_p
         fixed_fpr_baseline_calibration_ready=True,
         attack_matrix_baseline_detection_ready=True,
     )
-    report = validate_primary_baseline_formal_import_rows(records, evidence_root=tmp_path, target_fpr=0.1)
+    report = validate_primary_baseline_formal_import_rows(records, evidence_root=tmp_path, target_fpr=PILOT_PAPER_FIXED_FPR)
 
     assert len(records) == 1
     assert records[0]["baseline_id"] == "tree_ring"
@@ -537,7 +541,7 @@ def test_candidate_builder_rejects_post_labeled_attack_identity(
     with pytest.raises(ValueError, match="AttackConfig"):
         build_tree_ring_method_faithful_candidate_records(
             observation_rows=observations,
-            target_fpr=0.1,
+            target_fpr=PILOT_PAPER_FIXED_FPR,
             baseline_result_source="outputs/tree_ring/observations.json",
             baseline_result_source_digest=hashlib.sha256(
                 evidence_path.read_bytes()
@@ -562,7 +566,7 @@ def test_formal_template_coverage_requires_matching_formal_attack_records(tmp_pa
             "gaussian_noise",
             "full_main",
         ),
-        "comparable_operating_point": "fixed_fpr_0.1",
+        "comparable_operating_point": "fixed_fpr_0.01",
     }
     template_rows = [
         {
@@ -572,11 +576,11 @@ def test_formal_template_coverage_requires_matching_formal_attack_records(tmp_pa
                 "jpeg_compression",
                 "full_main",
             ),
-            "comparable_operating_point": "fixed_fpr_0.1",
+            "comparable_operating_point": "fixed_fpr_0.01",
         },
         missing_template,
     ]
-    report = validate_primary_baseline_formal_import_rows([accepted_row], evidence_root=tmp_path, target_fpr=0.1)
+    report = validate_primary_baseline_formal_import_rows([accepted_row], evidence_root=tmp_path, target_fpr=PILOT_PAPER_FIXED_FPR)
 
     coverage_rows = build_primary_baseline_formal_template_coverage_rows(template_rows, [accepted_row], report)
     coverage_summary = build_primary_baseline_formal_template_coverage_summary(coverage_rows)
@@ -600,7 +604,7 @@ def test_formal_template_coverage_rejects_forged_attack_identity() -> None:
             "jpeg_compression",
             "full_main",
         ),
-        "comparable_operating_point": "fixed_fpr_0.1",
+        "comparable_operating_point": "fixed_fpr_0.01",
     }
     forged_record = {
         **template,
@@ -632,7 +636,7 @@ def test_formal_template_coverage_rejects_unexpected_and_duplicate_accepted_reco
             "jpeg_compression",
             "full_main",
         ),
-        "comparable_operating_point": "fixed_fpr_0.1",
+        "comparable_operating_point": "fixed_fpr_0.01",
     }
     unexpected = {
         "baseline_id": "tree_ring",
@@ -641,7 +645,7 @@ def test_formal_template_coverage_rejects_unexpected_and_duplicate_accepted_reco
             "gaussian_noise",
             "full_main",
         ),
-        "comparable_operating_point": "fixed_fpr_0.1",
+        "comparable_operating_point": "fixed_fpr_0.01",
     }
     accepted_records = [template, dict(template), unexpected]
     report = {"accepted_records": accepted_records}
@@ -676,10 +680,10 @@ def test_formal_template_coverage_separates_candidate_and_accepted_matches(tmp_p
                 "jpeg_compression",
                 "full_main",
             ),
-            "comparable_operating_point": "fixed_fpr_0.1",
+            "comparable_operating_point": "fixed_fpr_0.01",
         }
     ]
-    report = validate_primary_baseline_formal_import_rows([candidate_row], evidence_root=tmp_path, target_fpr=0.1)
+    report = validate_primary_baseline_formal_import_rows([candidate_row], evidence_root=tmp_path, target_fpr=PILOT_PAPER_FIXED_FPR)
 
     coverage_rows = build_primary_baseline_formal_template_coverage_rows(template_rows, [candidate_row], report)
     coverage_summary = build_primary_baseline_formal_template_coverage_summary(coverage_rows)
@@ -704,7 +708,7 @@ def test_formal_evidence_collection_plan_marks_missing_templates(tmp_path: Path)
             "gaussian_noise",
             "full_main",
         ),
-        "comparable_operating_point": "fixed_fpr_0.1",
+        "comparable_operating_point": "fixed_fpr_0.01",
         "required_metric_fields": ["true_positive_rate"],
         "required_source_fields": ["baseline_result_source"],
     }
@@ -716,13 +720,13 @@ def test_formal_evidence_collection_plan_marks_missing_templates(tmp_path: Path)
                 "jpeg_compression",
                 "full_main",
             ),
-            "comparable_operating_point": "fixed_fpr_0.1",
+            "comparable_operating_point": "fixed_fpr_0.01",
             "required_metric_fields": ["true_positive_rate"],
             "required_source_fields": ["baseline_result_source"],
         },
         missing_template,
     ]
-    report = validate_primary_baseline_formal_import_rows([accepted_row], evidence_root=tmp_path, target_fpr=0.1)
+    report = validate_primary_baseline_formal_import_rows([accepted_row], evidence_root=tmp_path, target_fpr=PILOT_PAPER_FIXED_FPR)
 
     collection_rows = build_primary_baseline_formal_evidence_collection_rows(
         template_rows,
@@ -774,7 +778,7 @@ def test_formal_import_protocol_writer_outputs_schema_template_and_validation(tm
     attack_manifest_path = attack_dir / "attack_manifest.json"
     attack_metrics_path = attack_dir / "attack_family_metrics.csv"
     attack_manifest_path.write_text(
-        json.dumps({"evaluation_boundary": {"target_fpr": 0.1}}, ensure_ascii=False),
+        json.dumps({"evaluation_boundary": {"target_fpr": PILOT_PAPER_FIXED_FPR}}, ensure_ascii=False),
         encoding="utf-8",
     )
     with attack_metrics_path.open("w", encoding="utf-8", newline="") as handle:
@@ -844,7 +848,7 @@ def test_formal_import_protocol_writer_outputs_schema_template_and_validation(tm
     summary = json.loads((output_dir / "primary_baseline_formal_import_summary.json").read_text(encoding="utf-8"))
 
     assert manifest["artifact_id"] == "primary_baseline_formal_import_protocol_manifest"
-    assert schema == build_primary_baseline_formal_import_schema(target_fpr=0.1)
+    assert schema == build_primary_baseline_formal_import_schema(target_fpr=PILOT_PAPER_FIXED_FPR)
     assert schema["required_threshold_fields"] == [
         "evaluation_split",
         "target_fpr",

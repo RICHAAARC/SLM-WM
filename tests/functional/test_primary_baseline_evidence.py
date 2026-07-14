@@ -140,7 +140,7 @@ def write_t2smark_formal_evidence(
                 "strict_pair_quality_ready": True,
                 "missing_result_indices": [],
                 "formal_attack_names": required_attacks,
-                "threshold_source": "nested_calibration_threshold_freeze_conformal_v1",
+                "threshold_source": "nested_calibration_threshold_freeze_conformal",
             },
         ),
         (

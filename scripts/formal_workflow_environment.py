@@ -144,6 +144,7 @@ def _configure_common_paper_run_environment(
     _set_env("SLM_WM_DRIVE_RESULT_ROOT", defaults["drive_result_root"])
     _set_env("SLM_WM_PAPER_RUN_SAMPLE_COUNT", sample_count_token)
     _set_env("SLM_WM_PAPER_RUN_TARGET_FPR", defaults["target_fpr"])
+    _set_env("SLM_WM_PROTOCOL_PROFILE", defaults["protocol_profile"])
     os.environ.pop("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT", None)
     os.environ.pop("SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT", None)
     os.environ.pop("SLM_WM_RESUME_CHECKPOINT_DIR", None)

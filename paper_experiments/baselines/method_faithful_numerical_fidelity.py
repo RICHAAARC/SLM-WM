@@ -24,7 +24,7 @@ from main.core.digest import build_stable_digest
 
 
 METHOD_FAITHFUL_NUMERICAL_FIDELITY_SCHEMA = (
-    "method_faithful_numerical_fidelity_v1"
+    "method_faithful_numerical_fidelity"
 )
 METHOD_FAITHFUL_NUMERICAL_FIDELITY_BASELINE_IDS = (
     "tree_ring",

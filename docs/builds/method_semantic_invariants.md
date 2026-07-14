@@ -805,7 +805,7 @@ raw 与 aligned 必须复用同一个 $\tau_c$；几何分数不能独立产生 
 
 $$
 h_{rgb}=\operatorname{SHA256}(
-\texttt{slm\_wm\_image\_rgb\_uint8\_content\_v1}
+\texttt{slm\_wm\_image\_rgb\_uint8\_content}
 \Vert \operatorname{uint64be}(W)
 \Vert \operatorname{uint64be}(H)
 \Vert \operatorname{RGBBytes}_{uint8}).

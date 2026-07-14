@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import MISSING, fields, replace
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +18,27 @@ from scripts import semantic_watermark_scientific_workflow as scientific_workflo
 
 
 pytestmark = pytest.mark.quick
+
+
+@pytest.mark.parametrize(
+    "config_type",
+    (
+        ExternalBaselineMethodFaithfulConfig,
+        t2smark.T2SMarkFormalReproductionConfig,
+    ),
+)
+def test_baseline_configs_require_explicit_target_fpr(
+    config_type: type,
+) -> None:
+    """baseline 配置不得发布隐式 probe 或 pilot 数值回退。"""
+
+    target_field = next(
+        field_info
+        for field_info in fields(config_type)
+        if field_info.name == "target_fpr"
+    )
+    assert target_field.default is MISSING
+    assert target_field.default_factory is MISSING
 
 
 def test_scientific_dispatcher_uses_probe_default_without_environment(
@@ -101,7 +122,10 @@ def test_outer_scientific_entry_uses_resolved_config_for_recovery(
 def test_external_baseline_config_defaults_match_probe_scale() -> None:
     """公开 baseline 配置默认值必须与统一 probe_paper 入口一致."""
 
-    config = ExternalBaselineMethodFaithfulConfig(primary_baseline_id="tree_ring")
+    config = ExternalBaselineMethodFaithfulConfig(
+        target_fpr=0.1,
+        primary_baseline_id="tree_ring",
+    )
 
     assert config.prompt_set == "probe_paper"
     assert Path(config.prompt_file).name == "paper_main_probe_paper_prompts.txt"
@@ -113,8 +137,8 @@ def test_external_baseline_config_defaults_match_probe_scale() -> None:
     ("paper_run_name", "expected_prompt_count", "expected_target_fpr"),
     (
         ("probe_paper", 70, 0.1),
-        ("pilot_paper", 700, 0.1),
-        ("full_paper", 7000, 0.1),
+        ("pilot_paper", 700, 0.01),
+        ("full_paper", 7000, 0.001),
     ),
 )
 def test_t2smark_default_identity_tracks_paper_run_scale(

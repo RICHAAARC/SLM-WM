@@ -766,7 +766,7 @@ def test_tree_ring_official_reference_package_embeds_archive_self_description(
             {
                 "baseline_id": "tree_ring",
                 "paper_claim_scale": "pilot_paper",
-                "target_fpr": 0.1,
+                "target_fpr": 0.01,
                 "run_decision": "pass",
                 "tree_ring_official_reference_ready": True,
                 "reference_import_ready": True,
@@ -947,7 +947,7 @@ def test_tree_ring_official_reference_package_embeds_archive_self_description(
             archive_path,
             spec=spec,
             paper_run_name="pilot_paper",
-            target_fpr=0.1,
+            target_fpr=0.01,
         )
 
 

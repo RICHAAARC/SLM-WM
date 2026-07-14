@@ -56,7 +56,7 @@ def _write_paired_superiority_inputs(root: Path) -> None:
         "paired_superiority_rows_digest": "b" * 64,
         "paired_superiority_protocol_digest": "c" * 64,
         "quality_matching_protocol_schema": (
-            "paired_prompt_embedding_ssim_caliper_v1"
+            "paired_prompt_embedding_ssim_caliper"
         ),
         "quality_matching_protocol_digest": "1" * 64,
         "quality_metric_name": "embedding_pair_ssim",
@@ -76,7 +76,7 @@ def _write_paired_superiority_inputs(root: Path) -> None:
         "threshold_audit_rows_digest": "f" * 64,
         "claim_p_value_method": "bounded_hoeffding_prompt_cluster_mean",
         "sharp_null_diagnostic_method": "exact_prompt_cluster_sign_flip_dp",
-        "bootstrap_analysis_schema": "paired_prompt_cluster_bootstrap_v1",
+        "bootstrap_analysis_schema": "paired_prompt_cluster_bootstrap",
         "bootstrap_bit_generator": "PCG64",
         "bootstrap_quantile_method": "linear",
         "bootstrap_resample_count": 100_000,
@@ -138,7 +138,7 @@ def _write_paired_superiority_inputs(root: Path) -> None:
                 "confidence_level": 0.95,
                 "bootstrap_resample_count": 100_000,
                 "bootstrap_seed_digest_random": "3" * 64,
-                "bootstrap_analysis_schema": "paired_prompt_cluster_bootstrap_v1",
+                "bootstrap_analysis_schema": "paired_prompt_cluster_bootstrap",
                 "bootstrap_bit_generator": "PCG64",
                 "bootstrap_quantile_method": "linear",
                 "proposed_method_threshold_digest": "6" * 64,
@@ -149,7 +149,7 @@ def _write_paired_superiority_inputs(root: Path) -> None:
                 "protocol_digest": "c" * 64,
                 "paired_superiority_ready": True,
                 "quality_matching_protocol_schema": (
-                    "paired_prompt_embedding_ssim_caliper_v1"
+                    "paired_prompt_embedding_ssim_caliper"
                 ),
                 "quality_matching_protocol_digest": "1" * 64,
                 "quality_metric_name": "embedding_pair_ssim",

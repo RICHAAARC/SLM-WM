@@ -7,7 +7,7 @@
 - 权威方法定义: `docs/builds/method_semantic_invariants.md`。
 - 可机读方法定义摘要: `f0c129f537b6acec36926d9a999f52ca68c749a4e3eb0cb7a25bfdd639948e4d`。
 - 密钥 PRG 算法摘要: `e1f97fd7457893cf4d92c0ffa383b44219cf6b1034055e43dcadf1d535ab1595`。
-- 正式随机化协议摘要: `d489cedb0f36359d589e132bface8dabb2993dd5e035ae5f806d403c2702ce6d`。
+- 正式随机化协议摘要: `d03d6ef0d58f2fd02f54aa85e3cd695dbab391586d48001524a95ef62ec97630`。
 - 方法追踪规范摘要: `7581d916fe320ad68aba5f10969b6da9fe37b9a7280a875940b1b07026462057`。
 
 本报告只判断静态实现、CPU 公式性质、反例拒绝和跨模块身份绑定。它不把尚未执行的 SD3.5 CUDA 运行、论文统计或结果包解释为已经完成的证据。

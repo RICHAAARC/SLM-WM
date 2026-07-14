@@ -25,7 +25,6 @@ from paper_experiments.baselines.t2smark_pair_quality import (
     write_t2smark_strict_pair_quality_outputs,
 )
 from experiments.protocol.paper_run_config import (
-    DEFAULT_TARGET_FPR as DEFAULT_PAPER_RUN_TARGET_FPR,
     build_paper_run_config,
     normalize_paper_run_name,
     resolve_count_from_environment,
@@ -81,7 +80,6 @@ DEFAULT_OUTPUT_DIR = "outputs/t2smark_formal_reproduction"
 DEFAULT_DRIVE_OUTPUT_DIR = ""
 DEFAULT_PROMPT_FILE = "configs/paper_main_probe_paper_prompts.txt"
 DEFAULT_RUN_NAME = "t2smark_sd35_medium_probe_paper"
-DEFAULT_TARGET_FPR = DEFAULT_PAPER_RUN_TARGET_FPR
 DEFAULT_PROMPT_LIMIT = 70
 DEFAULT_T2SMARK_CLIP_MODEL_ID = "openai/clip-vit-base-patch32"
 DEFAULT_T2SMARK_LPIPS_NETWORK = "alex"
@@ -102,6 +100,7 @@ DEFAULT_T2SMARK_WATERMARK_KEY_SEED_RANDOM = formal_watermark_key_seed_random(
 class T2SMarkFormalReproductionConfig:
     """描述 T2SMark formal 真实复现所需的最小配置。"""
 
+    target_fpr: float
     output_dir: str = DEFAULT_OUTPUT_DIR
     drive_output_dir: str = field(
         default_factory=lambda: build_paper_run_config(".").drive_dir("external_baseline_official_reference")
@@ -129,7 +128,6 @@ class T2SMarkFormalReproductionConfig:
     num_inference_steps: int = FORMAL_T2SMARK_NUM_INFERENCE_STEPS
     num_inversion_steps: int = FORMAL_T2SMARK_NUM_INVERSION_STEPS
     guidance_scale: float = FORMAL_T2SMARK_GUIDANCE_SCALE
-    target_fpr: float = DEFAULT_TARGET_FPR
     minimum_prompt_protocol_count: int = DEFAULT_PROMPT_LIMIT
     reuse_existing: bool = True
     force_generate: bool = False

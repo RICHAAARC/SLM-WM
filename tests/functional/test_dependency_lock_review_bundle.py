@@ -18,7 +18,7 @@ import scripts.write_dependency_lock_review_bundle as review_bundle
 
 
 FORMAL_EXECUTION_LOCK = {
-    "formal_execution_lock_schema": "clean_detached_git_commit_v1",
+    "formal_execution_lock_schema": "clean_detached_git_commit",
     "formal_execution_commit": "a" * 40,
     "formal_execution_head_detached": True,
     "formal_execution_worktree_clean": True,

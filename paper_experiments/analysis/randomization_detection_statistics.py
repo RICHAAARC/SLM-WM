@@ -641,8 +641,16 @@ def build_randomization_detection_statistics(
         run_name,
         target_fpr,
     )
-    if not 0.0 < float(confidence_level) < 1.0:
-        raise RandomizationDetectionStatisticsError("confidence_level 必须位于 (0, 1)")
+    if not math.isclose(
+        float(confidence_level),
+        float(PILOT_PAPER_CONFIDENCE_LEVEL),
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise RandomizationDetectionStatisticsError(
+            "正式检测统计必须使用冻结的单侧 Wilson 95% 置信水平"
+        )
+    confidence_level = float(PILOT_PAPER_CONFIDENCE_LEVEL)
     expected_prompt_count = build_group_split_counts(
         RUN_EXPECTED_PROMPT_COUNTS[run_name]
     )["test"]
@@ -1219,9 +1227,16 @@ def build_randomization_detection_statistics(
         row["attacked_fixed_fpr_ready"] is True
         for row in canonical_per_attack
     )
-    universal_per_attack_superiority_claim_ready = bool(
+    main_method_wrong_key_fixed_fpr_ready = bool(
+        wrong_key_rows[0]["wrong_key_fixed_fpr_ready"]
+    )
+    all_test_negative_populations_fixed_fpr_ready = bool(
         all_methods_clean_fixed_fpr_ready
+        and main_method_wrong_key_fixed_fpr_ready
         and all_per_attack_fixed_fpr_ready
+    )
+    universal_per_attack_superiority_claim_ready = bool(
+        all_test_negative_populations_fixed_fpr_ready
         and all(
             row["superiority_claim_ready"] is True
             for row in canonical_comparisons
@@ -1273,10 +1288,13 @@ def build_randomization_detection_statistics(
             for row in canonical_operating
             if row["method_id"] == PROPOSED_METHOD_ID
         ),
-        "main_method_wrong_key_fixed_fpr_ready": wrong_key_rows[0][
-            "wrong_key_fixed_fpr_ready"
-        ],
+        "main_method_wrong_key_fixed_fpr_ready": (
+            main_method_wrong_key_fixed_fpr_ready
+        ),
         "all_per_attack_fixed_fpr_ready": all_per_attack_fixed_fpr_ready,
+        "all_test_negative_populations_fixed_fpr_ready": (
+            all_test_negative_populations_fixed_fpr_ready
+        ),
         "universal_per_attack_superiority_claim_ready": (
             universal_per_attack_superiority_claim_ready
         ),

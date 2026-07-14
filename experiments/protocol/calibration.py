@@ -8,7 +8,6 @@ import math
 from typing import Any, Iterable, Mapping
 
 from experiments.protocol.events import EventProtocolRecord
-from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from experiments.protocol.prompts import PromptProtocolRecord
 from experiments.protocol.splits import assert_disjoint_calibration_and_test, group_prompt_ids_by_split
 
@@ -83,7 +82,7 @@ class FixedFprCalibrationConfig:
     让不含几何救回的 baseline 统计函数只关注阈值和指标计算。
     """
 
-    target_fpr: float = PILOT_PAPER_FIXED_FPR
+    target_fpr: float
     calibration_split: str = "calibration"
     evaluation_split: str = "test"
     positive_role: str = "positive_source"
@@ -190,9 +189,10 @@ def binomial_rate_upper_confidence_bound(
 ) -> float:
     """计算 false positive rate 的单侧置信上界。
 
-    该函数属于统计协议层: 三个论文运行层级统一使用 FPR=0.1, 仅报告
-    observed FPR 仍不足以支撑正式论文结论。因此这里提供一个无需外部依赖的
-    Wilson 单侧上界, 用于选择更保守的 calibration false positive 预算。
+    该函数属于统计协议层: 三个论文运行层级使用同一上界计算方式, 但分别
+    对应 FPR=0.1、FPR=0.01和 FPR=0.001。仅报告 observed FPR 仍不足以
+    支撑正式论文结论, 因此这里提供一个无需外部依赖的 Wilson 单侧上界,
+    用于选择更保守的 calibration false positive 预算。
     """
 
     if negative_count <= 0:

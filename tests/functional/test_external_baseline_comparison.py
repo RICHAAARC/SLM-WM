@@ -16,7 +16,10 @@ from experiments.protocol.fixed_fpr_observation_audit import (
     conformal_threshold_from_clean_negative_scores,
 )
 from main.core.digest import build_stable_digest
-from paper_experiments.baselines import default_baseline_specs
+from paper_experiments.baselines import (
+    build_baseline_observations,
+    default_baseline_specs,
+)
 from scripts.write_external_baseline_comparison_outputs import (
     align_comparison_table_claim_scope,
     build_runtime_report,
@@ -45,7 +48,7 @@ FORMAL_REGENERATION_IDENTITY = {
 
 @pytest.fixture(autouse=True)
 def _select_pilot_paper(monkeypatch: pytest.MonkeyPatch) -> None:
-    """本模块使用 pilot_paper 的统一 FPR=0.1 夹具."""
+    """本模块使用 pilot_paper 的统一 FPR=0.01 夹具."""
 
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
 
@@ -58,7 +61,7 @@ def write_pilot_threshold_observation_evidence(
     """写出可重算阈值且逐 Prompt 覆盖的 pilot_paper observation evidence。"""
 
     calibration_scores = [index / 330.0 for index in range(330)]
-    threshold = conformal_threshold_from_clean_negative_scores(calibration_scores, target_fpr=0.1)
+    threshold = conformal_threshold_from_clean_negative_scores(calibration_scores, target_fpr=0.01)
 
     def observation(
         *,
@@ -145,7 +148,7 @@ def write_pilot_threshold_observation_evidence(
     path.write_text(json.dumps(observations, ensure_ascii=False), encoding="utf-8")
     audit = audit_fixed_fpr_observation_threshold(
         observations,
-        target_fpr=0.1,
+        target_fpr=0.01,
         expected_calibration_source_negative_count=330,
     )
     assert audit.fixed_fpr_ready is True
@@ -174,6 +177,14 @@ def test_default_baseline_specs_keep_missing_results_unsupported() -> None:
     assert {spec.unsupported_reason for spec in specs} == {"external_baseline_result_missing"}
 
 
+@pytest.mark.quick
+def test_baseline_observations_require_explicit_target_fpr() -> None:
+    """共同 baseline 观测不得从缺失边界回退到任一数值工作点。"""
+
+    with pytest.raises(ValueError, match="显式提供 target_fpr"):
+        build_baseline_observations((), (), {})
+
+
 def write_input_artifacts(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     """写出外部 baseline 对比脚本需要的最小上游输入。"""
     attack_dir = tmp_path / "outputs" / "attack_matrix"
@@ -190,7 +201,7 @@ def write_input_artifacts(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
             {
                 "attack_metrics_ready": True,
                 "evaluation_boundary": {
-                    "target_fpr": 0.1,
+                    "target_fpr": 0.01,
                     "calibrated_content_threshold": 0.50,
                     "rescue_margin_low": -0.05,
                     "allowed_fail_reasons": ["geometry_suspected", "low_confidence"],
@@ -272,7 +283,7 @@ def write_input_artifacts(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
         encoding="utf-8",
     )
     threshold_report_path.write_text(
-        json.dumps({"target_fpr": 0.1, "threshold_degenerate": False, "supports_paper_claim": False}, ensure_ascii=False),
+        json.dumps({"target_fpr": 0.01, "threshold_degenerate": False, "supports_paper_claim": False}, ensure_ascii=False),
         encoding="utf-8",
     )
     return attack_manifest_path, attack_family_metrics_path, attack_matrix_manifest_path, threshold_report_path
@@ -382,10 +393,10 @@ def test_external_baseline_primary_comparison_rows_share_common_claim_scope() ->
         {
             "attack_metrics_ready": True,
             "supports_paper_claim": True,
-            "evaluation_boundary": {"target_fpr": 0.1},
+            "evaluation_boundary": {"target_fpr": 0.01},
         },
             {
-                "target_fpr": 0.1,
+                "target_fpr": 0.01,
                 "fixed_fpr_threshold_audit_ready": True,
                 "all_method_thresholds_ready": True,
                 "supports_paper_claim": True,

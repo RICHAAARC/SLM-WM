@@ -114,23 +114,17 @@ def test_formal_run_and_package_functions_revalidate_execution_lock(
 
 
 @pytest.mark.quick
-def test_cpu_closure_and_complete_package_require_exact9_aggregate_first() -> None:
-    """聚合闭合未启用时, 闭合与完整包入口都必须立即 fail-closed."""
+def test_cpu_closure_validates_aggregate_before_gate_and_archive() -> None:
+    """CPU 闭合必须从唯一聚合来源重建统计, 再执行门禁和归档."""
 
     closure_function = _function_node(
         "scripts/paper_result_closure.py",
         "run_paper_result_closure_commands",
     )
-    package_function = _function_node(
-        "scripts/write_pilot_paper_complete_result_package.py",
-        "write_pilot_paper_complete_result_package_outputs",
-    )
-
-    closure_literals = _string_literals(closure_function)
-    assert any("精确9重复聚合证据" in value for value in closure_literals)
-    assert _called_names(package_function) == (
-        "require_exact9_randomization_aggregate_provenance",
-    )
+    called_names = _called_names(closure_function)
+    assert "_select_randomization_aggregate" in called_names
+    assert "_write_closure_gate" in called_names
+    assert "_write_complete_archive" in called_names
 
 
 @pytest.mark.quick

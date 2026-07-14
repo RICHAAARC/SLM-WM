@@ -9,6 +9,7 @@ import pytest
 
 from experiments.protocol.attacks import attack_config_digest, default_attack_configs
 from experiments.protocol.formal_randomization import formal_randomization_repeat_ids
+from experiments.protocol.paper_run_config import RUN_DEFAULTS
 from experiments.protocol.pilot_paper_fixed_fpr import (
     bounded_hoeffding_confidence_interval,
 )
@@ -30,7 +31,7 @@ from paper_experiments.analysis.randomization_detection_statistics import (
 pytestmark = pytest.mark.quick
 
 PAPER_RUN_NAME = "probe_paper"
-TARGET_FPR = 0.1
+TARGET_FPR = float(RUN_DEFAULTS[PAPER_RUN_NAME]["target_fpr"])
 REPEAT_COUNT = len(formal_randomization_repeat_ids())
 THRESHOLD_MAP_DIGEST = build_stable_digest({"threshold_map": "exact9"})
 
@@ -407,6 +408,45 @@ def test_probe_zero_cluster_failures_pass_but_one_failure_is_measured_negative()
     assert one_summary["randomization_detection_statistics_ready"] is True
     assert one_summary["supports_paper_claim"] is False
     assert zero_summary["randomization_detection_statistics_ready"] is True
+
+
+def test_wrong_key_failure_alone_blocks_the_unified_negative_population_gate() -> None:
+    """wrong-key 失败不得被 clean 与攻击阴性的通过结果平均掩盖。"""
+
+    operating, per_attack, wrong_key, comparisons, summary = _statistics(
+        _cluster_records(
+            wrong_key_false_positive_counts={"prompt_000": 1},
+        )
+    )
+
+    assert all(row["clean_fixed_fpr_ready"] is True for row in operating)
+    assert all(row["attacked_fixed_fpr_ready"] is True for row in per_attack)
+    assert wrong_key[0]["wrong_key_fixed_fpr_ready"] is False
+    assert all(row["superiority_claim_ready"] is True for row in comparisons)
+    assert summary["all_methods_clean_fixed_fpr_ready"] is True
+    assert summary["all_per_attack_fixed_fpr_ready"] is True
+    assert summary["main_method_wrong_key_fixed_fpr_ready"] is False
+    assert summary[
+        "all_test_negative_populations_fixed_fpr_ready"
+    ] is False
+    assert summary["universal_per_attack_superiority_claim_ready"] is False
+    assert summary["randomization_detection_statistics_ready"] is True
+
+
+def test_formal_detection_statistics_rejects_confidence_override() -> None:
+    """正式门禁必须固定使用单侧 Wilson 95% 上界。"""
+
+    with pytest.raises(
+        RandomizationDetectionStatisticsError,
+        match="Wilson 95%",
+    ):
+        build_randomization_detection_statistics(
+            _cluster_records(),
+            paper_run_name=PAPER_RUN_NAME,
+            target_fpr=TARGET_FPR,
+            attack_registry_rows=ATTACK_REGISTRY,
+            confidence_level=0.90,
+        )
 
 
 def test_exact_set_rejects_baseline_wrong_key_and_missing_attack_cell() -> None:

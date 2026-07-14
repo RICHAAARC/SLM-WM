@@ -680,7 +680,7 @@ def test_protocol_digest_covers_canonical_threshold_rows_and_report() -> None:
         rows.append(
             {
                 "method_id": method_id,
-                "threshold_source": "nested_calibration_threshold_freeze_conformal_v1",
+                "threshold_source": "nested_calibration_threshold_freeze_conformal",
                 "target_fpr": "0.1",
                 "calibration_clean_negative_count": "36",
                 "threshold_freeze_negative_count": "24",

@@ -202,6 +202,7 @@ PROMPT_RECORDS = build_prompt_records(
 )
 PAPER_CONFIG = PilotPaperFixedFprConfig(
     paper_run_name=SCALE,
+    protocol_profile=str(RUN_DEFAULTS[SCALE]["protocol_profile"]),
     prompt_set=SCALE,
     prompt_file=str(RUN_DEFAULTS[SCALE]["prompt_file"]),
     prompt_protocol_name=f"paper_main_{SCALE}_prompt_protocol",

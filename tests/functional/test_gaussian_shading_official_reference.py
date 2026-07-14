@@ -662,7 +662,7 @@ def test_gaussian_shading_official_reference_package_embeds_archive_self_descrip
             {
                 "baseline_id": "gaussian_shading",
                 "paper_claim_scale": "pilot_paper",
-                "target_fpr": 0.1,
+                "target_fpr": 0.01,
                 "run_decision": "pass",
                 "gaussian_shading_official_reference_ready": True,
                 "reference_import_ready": True,
@@ -846,7 +846,7 @@ def test_gaussian_shading_official_reference_package_embeds_archive_self_descrip
             archive_path,
             spec=spec,
             paper_run_name="pilot_paper",
-            target_fpr=0.1,
+            target_fpr=0.01,
         )
 
 

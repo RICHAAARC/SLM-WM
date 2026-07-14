@@ -133,6 +133,17 @@ def _write_dispatch_report(report_path: Path, report: dict[str, Any]) -> None:
     )
 
 
+def _require_repeat_component_ready(
+    summary: dict[str, Any],
+    *,
+    artifact_role: str,
+) -> None:
+    """要求科学产物已完成当前 seed-key 重复单元的全部正式门禁."""
+
+    if summary.get("repeat_component_ready") is not True:
+        raise RuntimeError(f"{artifact_role} 尚未形成可聚合的重复证据组件")
+
+
 def _closed_artifact_record(
     artifact_role: str,
     paper_run_name: str,
@@ -145,6 +156,10 @@ def _closed_artifact_record(
     manifest_path = artifact_dir / "manifest.local.json"
     summary = _read_json(summary_path)
     manifest = _read_json(manifest_path)
+    _require_repeat_component_ready(
+        summary,
+        artifact_role=artifact_role,
+    )
     formal_execution_run_lock = manifest.get("formal_execution_run_lock")
     if not isinstance(formal_execution_run_lock, dict):
         raise RuntimeError(f"{artifact_role} manifest 缺少正式执行锁")
@@ -165,6 +180,7 @@ def _closed_artifact_record(
             and summary.get("formal_fid_kid_component_ready") is True
             else "",
         ),
+        "repeat_component_ready": True,
     }
 
 
@@ -217,6 +233,14 @@ def run_scientific_commands(*, run_formal_ablation: bool) -> dict[str, Any]:
             raise RuntimeError("image_only_dataset_runtime_not_closed")
         if quality_summary.get("formal_fid_kid_component_ready") is not True:
             raise RuntimeError("dataset_level_quality_not_closed")
+        _require_repeat_component_ready(
+            runtime_summary,
+            artifact_role="image_only_dataset_runtime",
+        )
+        _require_repeat_component_ready(
+            quality_summary,
+            artifact_role="dataset_level_quality",
+        )
         closed_roles = [
             "image_only_dataset_runtime",
             "dataset_level_quality",
@@ -237,6 +261,10 @@ def run_scientific_commands(*, run_formal_ablation: bool) -> dict[str, Any]:
                 ablation_summary = _read_json(ROOT / state["ablation_summary_path"])
                 if ablation_summary.get("protocol_decision") != "pass":
                     raise RuntimeError("runtime_rerun_ablation_not_closed")
+                _require_repeat_component_ready(
+                    ablation_summary,
+                    artifact_role="runtime_rerun_ablation",
+                )
                 closed_roles.append("runtime_rerun_ablation")
 
         report["artifact_records"] = [
@@ -306,6 +334,11 @@ def package_bound_outputs(*, include_formal_ablation: bool) -> dict[str, Any]:
 
     archive_records = []
     for artifact_role, artifact_dir, package_function in specifications:
+        _, summary_name = SEMANTIC_ARTIFACT_SPECS[artifact_role]
+        _require_repeat_component_ready(
+            _read_json(artifact_dir / summary_name),
+            artifact_role=artifact_role,
+        )
         validate_scientific_execution_binding(
             artifact_dir / BINDING_FILE_NAME,
             expected_artifact_role=artifact_role,

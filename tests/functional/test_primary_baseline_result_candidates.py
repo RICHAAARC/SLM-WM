@@ -83,7 +83,7 @@ def probe_observations(*, baseline_id: str = "tree_ring") -> list[dict[str, obje
             "prompt_text": identity["prompt_text"],
             "prompt_digest": identity["prompt_digest"],
             "threshold": threshold,
-            "threshold_source": "nested_calibration_threshold_freeze_conformal_v1",
+            "threshold_source": "nested_calibration_threshold_freeze_conformal",
             "attack_family": "clean",
             "attack_name": "clean_none",
         }
@@ -304,7 +304,7 @@ def test_method_candidate_statistics_use_test_split_only(
             "prompt_id": prompt_id,
             "prompt_text": "a ceramic fox",
             "threshold": threshold,
-            "threshold_source": "nested_calibration_threshold_freeze_conformal_v1",
+            "threshold_source": "nested_calibration_threshold_freeze_conformal",
             "quality_score": quality_score,
         }
         observations.extend(
@@ -413,7 +413,7 @@ def test_t2smark_candidate_statistics_use_test_split_only() -> None:
             "quality_score": quality_score,
             "threshold": threshold,
             "threshold_source": (
-                "nested_calibration_threshold_freeze_conformal_v1"
+                "nested_calibration_threshold_freeze_conformal"
             ),
         }
         observations.extend(

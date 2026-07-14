@@ -4218,6 +4218,15 @@ def test_partial_closed_archive_recovery_neither_extracts_nor_skips_execution(
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", run_name)
     monkeypatch.setattr(
         scientific_workflow,
+        "build_paper_run_config",
+        lambda _root: SimpleNamespace(
+            run_name=run_name,
+            target_fpr=0.1,
+            randomization_repeat_id="seed_00_key_00",
+        ),
+    )
+    monkeypatch.setattr(
+        scientific_workflow,
         "inspect_closure_package",
         lambda package_path, **_kwargs: runtime_candidate,
     )
@@ -4286,6 +4295,15 @@ def test_all_current_closed_archives_restore_without_new_execution(
         for candidate in candidates.values()
     }
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    monkeypatch.setattr(
+        scientific_workflow,
+        "build_paper_run_config",
+        lambda _root: SimpleNamespace(
+            run_name="probe_paper",
+            target_fpr=0.1,
+            randomization_repeat_id="seed_00_key_00",
+        ),
+    )
     monkeypatch.setattr(
         scientific_workflow,
         "inspect_closure_package",
@@ -4474,6 +4492,15 @@ def test_colab_image_only_session_reports_persistent_resume(
         encoding="utf-8",
     )
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", run_name)
+    monkeypatch.setattr(
+        scientific_workflow,
+        "build_paper_run_config",
+        lambda _root: SimpleNamespace(
+            run_name=run_name,
+            target_fpr=0.1,
+            randomization_repeat_id="seed_00_key_00",
+        ),
+    )
     execution_path = tmp_path / "outputs" / "scientific_execution.json"
     execution_path.write_text("{}", encoding="utf-8")
     execution_report = {
@@ -4521,7 +4548,13 @@ def test_colab_image_only_session_mirrors_completed_formal_packages(
     runtime_dir.mkdir(parents=True)
     quality_dir.mkdir(parents=True)
     (runtime_dir / "dataset_runtime_summary.json").write_text(
-        json.dumps({"protocol_decision": "pass", "supports_paper_claim": True}),
+        json.dumps(
+            {
+                "protocol_decision": "pass",
+                "repeat_component_ready": True,
+                "supports_paper_claim": True,
+            }
+        ),
         encoding="utf-8",
     )
     (quality_dir / "dataset_quality_summary.json").write_text(
@@ -4530,6 +4563,7 @@ def test_colab_image_only_session_mirrors_completed_formal_packages(
                 "formal_fid_kid_ready": True,
                 "formal_fid_kid_component_ready": True,
                 "canonical_formal_feature_extractor_ready": True,
+                "repeat_component_ready": True,
                 "supports_paper_claim": True,
             }
         ),
@@ -4540,6 +4574,15 @@ def test_colab_image_only_session_mirrors_completed_formal_packages(
     runtime_drive_dir = tmp_path / "drive" / "image_only_dataset_runtime"
     quality_drive_dir = tmp_path / "drive" / "dataset_level_quality"
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", run_name)
+    monkeypatch.setattr(
+        scientific_workflow,
+        "build_paper_run_config",
+        lambda _root: SimpleNamespace(
+            run_name=run_name,
+            target_fpr=0.1,
+            randomization_repeat_id="seed_00_key_00",
+        ),
+    )
     monkeypatch.setenv("SLM_WM_IMAGE_ONLY_RUNTIME_DRIVE_DIR", str(runtime_drive_dir))
     monkeypatch.setenv("SLM_WM_DATASET_QUALITY_DRIVE_DIR", str(quality_drive_dir))
     execution_path = tmp_path / "outputs" / "scientific_execution.json"
@@ -4577,6 +4620,11 @@ def test_colab_image_only_session_mirrors_completed_formal_packages(
             / "dataset_level_quality_package_fixture.zip",
         },
     )
+    monkeypatch.setattr(
+        scientific_workflow,
+        "_validate_packaged_archives",
+        lambda *_args, **_kwargs: None,
+    )
 
     summary = scientific_workflow.run_semantic_watermark_image_only_session(
         tmp_path,
@@ -4607,11 +4655,18 @@ def test_formal_ablation_resume_skips_binding_and_packaging(
     for output_dir in (runtime_dir, quality_dir, ablation_dir):
         output_dir.mkdir(parents=True)
     (runtime_dir / "dataset_runtime_summary.json").write_text(
-        json.dumps({"protocol_decision": "pass"}),
+        json.dumps(
+            {"protocol_decision": "pass", "repeat_component_ready": True}
+        ),
         encoding="utf-8",
     )
     (quality_dir / "dataset_quality_summary.json").write_text(
-        json.dumps({"formal_fid_kid_component_ready": True}),
+        json.dumps(
+            {
+                "formal_fid_kid_component_ready": True,
+                "repeat_component_ready": True,
+            }
+        ),
         encoding="utf-8",
     )
     (ablation_dir / "runtime_rerun_progress.json").write_text(
@@ -4635,6 +4690,15 @@ def test_formal_ablation_resume_skips_binding_and_packaging(
         "dependency_environment_report_digest": "3" * 64,
     }
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", run_name)
+    monkeypatch.setattr(
+        scientific_workflow,
+        "build_paper_run_config",
+        lambda _root: SimpleNamespace(
+            run_name=run_name,
+            target_fpr=0.1,
+            randomization_repeat_id="seed_00_key_00",
+        ),
+    )
     monkeypatch.setattr(
         scientific_workflow,
         "execute_isolated_scientific_command",
@@ -4728,3 +4792,37 @@ def test_bound_packaging_archive_roles_must_match_exact_requested_set(
             duplicate_execution,
             expected_roles=expected_roles,
         )
+
+
+@pytest.mark.quick
+def test_packaged_archives_require_independent_closure_inspection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """打包命令自报成功后仍必须由闭合包检查器独立复验."""
+
+    archive_path = tmp_path / "outputs" / "runtime.zip"
+    archive_path.parent.mkdir(parents=True)
+    archive_path.write_bytes(b"archive")
+    calls: list[tuple[Path, str]] = []
+
+    def inspect(package_path: Path, **kwargs: object) -> SimpleNamespace:
+        calls.append((package_path, str(kwargs["randomization_repeat_id"])))
+        return SimpleNamespace()
+
+    monkeypatch.setattr(scientific_workflow, "inspect_closure_package", inspect)
+    monkeypatch.setattr(
+        scientific_workflow,
+        "_candidate_matches_repository",
+        lambda _candidate, _root: True,
+    )
+
+    scientific_workflow._validate_packaged_archives(
+        {"image_only_dataset_runtime": archive_path},
+        root_path=tmp_path,
+        paper_run_name="probe_paper",
+        target_fpr=0.1,
+        randomization_repeat_id="seed_00_key_00",
+    )
+
+    assert calls == [(archive_path, "seed_00_key_00")]

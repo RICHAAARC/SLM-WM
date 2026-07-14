@@ -13,9 +13,9 @@ import unicodedata
 from typing import Any, Iterable, Mapping
 
 
-PROMPT_SOURCE_PROTOCOL = "nested_coco_parti_hash_selection_v1"
-PROMPT_SOURCE_REGISTRY_SCHEMA = "governed_prompt_source_registry_v1"
-PROMPT_SELECTION_MANIFEST_SCHEMA = "governed_prompt_selection_manifest_v1"
+PROMPT_SOURCE_PROTOCOL = "nested_coco_parti_sha256_ranked_interleave"
+PROMPT_SOURCE_REGISTRY_SCHEMA = "prompt_source_reconstruction_registry"
+PROMPT_SELECTION_MANIFEST_SCHEMA = "prompt_source_selection_manifest"
 COCO_SOURCE_ID = "microsoft_coco_2017_train_captions"
 PARTI_SOURCE_ID = "google_research_parti_prompts"
 COCO_SELECTED_COUNT = 6000
@@ -34,16 +34,16 @@ PROMPT_CONFIG_NAMES = {
 PROMPT_SELECTION_MANIFEST_PATH = Path("configs/prompt_selection_manifest.jsonl")
 PROMPT_SOURCE_REGISTRY_PATH = Path("configs/prompt_source_registry.json")
 PROMPT_SOURCE_REGISTRY_SHA256 = (
-    "ece7cfe7d053cdd012f52052c79eb34e446a8454ff9f1d2ec43f6676596015aa"
+    "56336c107943923176e1f67441adc59ef631807f8c5c30da8cdaaa25acf84731"
 )
 PROMPT_SOURCE_REGISTRY_DIGEST = (
-    "6333dca7528a8defb2d4091990a9aa0246dde9d867e04290af2aba4e85249fde"
+    "6e3e77d9c0286ac5c19878478b12153a856bdb604675ccb71dea6f6f69c2ef6d"
 )
 PROMPT_SELECTION_MANIFEST_SHA256 = (
-    "5de869b83630d6fa0f0a8484fcc51b7b7cc453ab7917bba100635e6e3f5cdf4b"
+    "76d41fdf53089f0be4f16b09bdb0b9fc9b82656dc02b264ccff846f7cf783147"
 )
 PROMPT_SELECTION_MANIFEST_DIGEST = (
-    "95525a1b16f16a6e3e45276c2d09d286d459e173e190416f4f8006691c2de8cd"
+    "f7f2b11bf2e03e2ff77cc84f3c5723e59d9543436e2a845fde7a0cd7554f86cc"
 )
 PROMPT_SELECTION_POLICY = (
     "one_eligible_caption_per_coco_image_then_source_local_sha256_"

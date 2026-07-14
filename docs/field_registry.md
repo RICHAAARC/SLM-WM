@@ -1673,7 +1673,7 @@ Notebook 与 repository module 的跨边界数据
 | pilot_paper_prompt_count | metric | none | false | false | false | pilot_paper prompt split 中的 prompt 数量。|
 | pilot_paper_prompt_split_ready | governance | none | false | false | false | pilot_paper prompt split 是否可供共同协议使用。|
 | pilot_paper_target_fpr | protocol | none | false | false | false | pilot_paper 共同协议使用的 fixed-FPR 目标值。|
-| paper_target_fpr | protocol | none | false | false | false | 当前论文运行层级使用的 fixed-FPR 目标值, probe_paper、pilot_paper 与 full_paper 均固定为0.1。|
+| paper_target_fpr | protocol | none | false | false | false | 当前论文运行层级使用的 fixed-FPR 目标值, probe_paper、pilot_paper 与 full_paper 分别固定为0.1、0.01和0.001。|
 | expected_target_fpr | protocol | none | false | false | false | 当前论文运行层级按协议应匹配的 fixed-FPR 目标值。|
 | pilot_paper_negative_count_minimum_required | metric | none | false | false | false | pilot_paper fixed-FPR 校准所要求的最小 clean negative 数量。|
 | minimum_clean_negative_count | metric | none | false | false | false | fixed-FPR 协议要求的完整 test split clean negative 样本数, 三类运行层级分别为34、340、3400。|
@@ -1799,6 +1799,7 @@ Notebook 与 repository module 的跨边界数据
 | per_attack_ci_coverage_ready | governance | none | true | false | false | 所有正式结果记录是否均形成完整、自洽且可审计的逐攻击置信区间行。|
 | per_attack_superiority_evaluation_ready | governance | none | true | false | false | 每个正式攻击是否均形成可审计的 SLM-WM 与最强主表 baseline 比较行。|
 | universal_per_attack_superiority_claim_ready | governance | none | true | false | false | 是否每个正式攻击的保守置信区间均支持 SLM-WM 显著胜出; 该字段只限定全攻击普遍优势主张。|
+| all_test_negative_populations_fixed_fpr_ready | governance | none | true | false | false | 是否由样本级原始判定重建的精确9个 seed-key 重复中, 所有方法的未攻击 clean negatives、主方法 wrong-key negatives 以及每项正式攻击下的 attacked negatives 均通过逐重复单侧 Wilson 95% 上界的最不利值门禁。|
 | failure_case_record_count | metric | none | true | false | false | 失败案例图绑定的真实攻击检测失败记录数量。|
 | failure_case_figure_ready | governance | none | true | false | false | 失败案例图是否已由受治理攻击记录和实际攻击图像重建。|
 | missing_result_record_examples | governance | none | true | false | false | 结果模板覆盖报告中的缺失键示例。|
@@ -2631,7 +2632,7 @@ Notebook 与 repository module 的跨边界数据
 | holm_adjusted_p_value | metric | none | true | true | false | 对4个主表 baseline 的单侧 bounded Hoeffding claim p 值执行 Holm 校正后的结果。 |
 | bootstrap_resample_count | protocol | none | true | false | false | Prompt-clustered bootstrap 的重采样次数, 正式闭合固定为100000。 |
 | bootstrap_seed_digest_random | random | _digest_random | true | false | false | 仅由固定分析 schema、baseline、规范 Prompt 集、攻击 registry、注册 repeat 集、outcome 集、置信度和重采样次数确定的 bootstrap 随机源摘要。 |
-| bootstrap_analysis_schema | protocol | none | true | false | false | 精确9重复 bootstrap 固定分析规范, 正式值为 paired_prompt_cluster_registered_repeat_mean_bootstrap_v1。 |
+| bootstrap_analysis_schema | protocol | none | true | false | false | 精确9重复 bootstrap 固定分析规范, 正式值为 paired_prompt_cluster_registered_repeat_mean_bootstrap。 |
 | bootstrap_bit_generator | protocol | none | true | false | false | bootstrap 使用的 NumPy bit generator, 正式值为 PCG64。 |
 | bootstrap_quantile_method | protocol | none | true | false | false | percentile CI 的 NumPy quantile 算法, 正式值为 linear。 |
 | paired_attack_registry_digest | provenance | none | true | true | false | 配对 outcome 共同覆盖的正式攻击身份、资源档位与配置摘要 registry 的稳定摘要。 |

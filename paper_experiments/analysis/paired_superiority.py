@@ -32,13 +32,13 @@ DEFAULT_CONFIDENCE_LEVEL = 0.95
 DEFAULT_BOOTSTRAP_RESAMPLE_COUNT = 100_000
 MINIMUM_BOOTSTRAP_RESAMPLE_COUNT = 100_000
 RESAMPLE_BATCH_SIZE = 128
-BOOTSTRAP_ANALYSIS_SCHEMA = "paired_prompt_cluster_bootstrap_v1"
+BOOTSTRAP_ANALYSIS_SCHEMA = "paired_prompt_cluster_bootstrap"
 BOOTSTRAP_BIT_GENERATOR = "PCG64"
 BOOTSTRAP_QUANTILE_METHOD = "linear"
 CLAIM_P_VALUE_METHOD = "bounded_hoeffding_prompt_cluster_mean"
 SHARP_NULL_DIAGNOSTIC_METHOD = "exact_prompt_cluster_sign_flip_dp"
 QUALITY_MATCHING_PROTOCOL_SCHEMA = (
-    "paired_prompt_registered_repeat_all_embedding_ssim_caliper_v1"
+    "paired_prompt_registered_repeat_all_embedding_ssim_caliper"
 )
 QUALITY_MATCHING_METRIC_NAME = "embedding_pair_ssim"
 QUALITY_MATCHING_CALIPER = 0.02

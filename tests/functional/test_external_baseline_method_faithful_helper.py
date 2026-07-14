@@ -129,7 +129,7 @@ def thresholded_row(
         "attack_name": attack_name,
         "score": score,
         "threshold": threshold,
-        "threshold_source": "nested_calibration_threshold_freeze_conformal_v1",
+        "threshold_source": "nested_calibration_threshold_freeze_conformal",
         "detection_decision": score >= threshold,
         "generation_model_id": DEFAULT_MODEL_ID,
         "generation_model_revision": DEFAULT_MODEL_REVISION,
@@ -335,6 +335,7 @@ def test_formal_runner_rejects_unregistered_watermark_key_plan(
     root_path = Path(__file__).resolve().parents[2]
     config = ExternalBaselineMethodFaithfulConfig(
         primary_baseline_id="tree_ring",
+        target_fpr=0.1,
     )
 
     with pytest.raises(ValueError, match="预注册正式 key plan"):
@@ -361,7 +362,10 @@ def test_formal_runner_rejects_model_revision_override(
         )
 
     with pytest.raises(ValueError, match="40位小写十六进制"):
-        ExternalBaselineMethodFaithfulConfig(model_revision="main")
+        ExternalBaselineMethodFaithfulConfig(
+            target_fpr=0.1,
+            model_revision="main",
+        )
 
 
 def test_transfer_manifest_binds_actual_observations_and_threshold(
@@ -713,7 +717,7 @@ def prepare_package_source(
         expected_specs=specs,
     )
     threshold = math.nextafter(0.1, math.inf)
-    threshold_source = "nested_calibration_threshold_freeze_conformal_v1"
+    threshold_source = "nested_calibration_threshold_freeze_conformal"
     observations = units.apply_frozen_threshold(
         raw_observations,
         threshold=threshold,

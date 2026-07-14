@@ -125,6 +125,46 @@ def _require_provenance(source: RandomizationAggregateProvenance) -> None:
     if not isinstance(source, RandomizationAggregateProvenance):
         raise TypeError("跨重复检测统计只接受 RandomizationAggregateProvenance")
     payload = source.payload
+    expected_repeat_ids = formal_randomization_repeat_ids()
+    repeat_records = tuple(source.randomization_repeat_components)
+    payload_repeat_records = payload.get("randomization_repeat_components")
+    if (
+        not isinstance(payload_repeat_records, (tuple, list))
+        or len(repeat_records) != len(expected_repeat_ids)
+        or len(payload_repeat_records) != len(expected_repeat_ids)
+        or tuple(
+            str(record.get("randomization_repeat_id", ""))
+            for record in repeat_records
+        )
+        != expected_repeat_ids
+        or tuple(
+            str(record.get("randomization_repeat_id", ""))
+            for record in payload_repeat_records
+        )
+        != expected_repeat_ids
+        or tuple(dict(record) for record in payload_repeat_records)
+        != tuple(dict(record) for record in repeat_records)
+    ):
+        raise RandomizationDetectionStatisticsRunnerError(
+            "聚合来源必须按权威顺序精确包含9个 seed-key repeat"
+        )
+    for record, repeat_id in zip(
+        repeat_records,
+        expected_repeat_ids,
+        strict=True,
+    ):
+        repeat = resolve_formal_randomization_repeat(repeat_id)
+        if any(
+            record.get(field_name) != expected_value
+            for field_name, expected_value in (
+                ("generation_seed_index", repeat.generation_seed_index),
+                ("generation_seed_offset", repeat.generation_seed_offset),
+                ("watermark_key_index", repeat.watermark_key_index),
+            )
+        ):
+            raise RandomizationDetectionStatisticsRunnerError(
+                "聚合来源的 seed-key repeat 身份与权威注册不一致"
+            )
     if not all(
         (
             payload.get("randomization_aggregate_ready") is True,
@@ -133,7 +173,7 @@ def _require_provenance(source: RandomizationAggregateProvenance) -> None:
             == source.randomization_aggregate_digest,
             str(payload.get("common_code_version", "")) == source.common_code_version,
             tuple(payload.get("randomization_repeat_ids", ()))
-            == formal_randomization_repeat_ids(),
+            == expected_repeat_ids,
         )
     ):
         raise RandomizationDetectionStatisticsRunnerError(
@@ -797,6 +837,21 @@ def _rebuild_randomization_detection_statistics(
         "randomization_detection_statistics_summary_digest": summary[
             "randomization_detection_statistics_summary_digest"
         ],
+        "all_methods_clean_fixed_fpr_ready": summary[
+            "all_methods_clean_fixed_fpr_ready"
+        ],
+        "main_method_wrong_key_fixed_fpr_ready": summary[
+            "main_method_wrong_key_fixed_fpr_ready"
+        ],
+        "all_per_attack_fixed_fpr_ready": summary[
+            "all_per_attack_fixed_fpr_ready"
+        ],
+        "all_test_negative_populations_fixed_fpr_ready": summary[
+            "all_test_negative_populations_fixed_fpr_ready"
+        ],
+        "universal_per_attack_superiority_claim_ready": summary[
+            "universal_per_attack_superiority_claim_ready"
+        ],
         "randomization_detection_statistics_ready": True,
         "supports_paper_claim": False,
     }
@@ -993,6 +1048,16 @@ def write_randomization_detection_statistics_outputs(
                 "randomization_detection_statistics_summary_digest": result.summary[
                     "randomization_detection_statistics_summary_digest"
                 ],
+                "all_test_negative_populations_fixed_fpr_ready": (
+                    result.summary[
+                        "all_test_negative_populations_fixed_fpr_ready"
+                    ]
+                ),
+                "universal_per_attack_superiority_claim_ready": (
+                    result.summary[
+                        "universal_per_attack_superiority_claim_ready"
+                    ]
+                ),
                 "randomization_detection_statistics_report_digest": result.report[
                     "randomization_detection_statistics_report_digest"
                 ],
@@ -1014,6 +1079,19 @@ def write_randomization_detection_statistics_outputs(
                 "main_method_wrong_key_fixed_fpr_ready": result.summary[
                     "main_method_wrong_key_fixed_fpr_ready"
                 ],
+                "all_per_attack_fixed_fpr_ready": result.summary[
+                    "all_per_attack_fixed_fpr_ready"
+                ],
+                "all_test_negative_populations_fixed_fpr_ready": (
+                    result.summary[
+                        "all_test_negative_populations_fixed_fpr_ready"
+                    ]
+                ),
+                "universal_per_attack_superiority_claim_ready": (
+                    result.summary[
+                        "universal_per_attack_superiority_claim_ready"
+                    ]
+                ),
                 "supports_paper_claim": False,
             },
         ).to_dict()

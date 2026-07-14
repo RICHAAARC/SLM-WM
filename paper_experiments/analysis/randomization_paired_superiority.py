@@ -40,7 +40,7 @@ from paper_experiments.analysis.paired_superiority import (
 
 RANDOMIZATION_PAIRED_BOOTSTRAP_RESAMPLE_COUNT = 100_000
 RANDOMIZATION_PAIRED_BOOTSTRAP_SCHEMA = (
-    "paired_prompt_cluster_registered_repeat_mean_bootstrap_v1"
+    "paired_prompt_cluster_registered_repeat_mean_bootstrap"
 )
 RANDOMIZATION_PAIRED_CLAIM_P_VALUE_METHOD = (
     "bounded_hoeffding_prompt_cluster_registered_repeat_mean"
@@ -48,7 +48,7 @@ RANDOMIZATION_PAIRED_CLAIM_P_VALUE_METHOD = (
 RANDOMIZATION_PAIRED_STATISTICAL_UNIT = "prompt_cluster"
 RANDOMIZATION_PAIRED_HOLM_FAMILY_ID = "overall_primary_baseline_superiority"
 RANDOMIZATION_QUALITY_MATCHED_BOOTSTRAP_SCHEMA = (
-    "quality_matched_prompt_cluster_registered_repeat_mean_bootstrap_v1"
+    "quality_matched_prompt_cluster_registered_repeat_mean_bootstrap"
 )
 RANDOMIZATION_QUALITY_MATCHED_HOLM_FAMILY_ID = (
     "quality_matched_primary_baseline_superiority"

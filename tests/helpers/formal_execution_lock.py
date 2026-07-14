@@ -13,7 +13,7 @@ def build_test_formal_execution_lock(
     """构造字段完整且摘要可重算的 clean detached 测试锁."""
 
     payload = {
-        "formal_execution_lock_schema": "clean_detached_git_commit_v1",
+        "formal_execution_lock_schema": "clean_detached_git_commit",
         "formal_execution_commit": commit,
         "formal_execution_head_detached": True,
         "formal_execution_worktree_clean": True,

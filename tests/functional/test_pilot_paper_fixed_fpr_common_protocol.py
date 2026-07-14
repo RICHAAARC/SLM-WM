@@ -1,8 +1,9 @@
-"""pilot_paper 统一 fixed-FPR=0.1 共同协议的轻量功能测试。"""
+"""pilot_paper 在 FPR=0.01 工作点的共同协议轻量功能测试。"""
 
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from experiments.protocol.attacks import (
 from experiments.protocol.pilot_paper_fixed_fpr import (
     PilotPaperFixedFprConfig,
     bounded_hoeffding_confidence_interval,
+    build_paper_fixed_fpr_config,
     build_attack_matrix_digest,
     build_fixed_fpr_protocol_digest,
     build_pilot_paper_attack_matrix_rows,
@@ -67,7 +69,7 @@ def paired_superiority_summary(
         "paired_superiority_rows_digest": "b" * 64,
         "paired_superiority_protocol_digest": "c" * 64,
         "quality_matching_protocol_schema": (
-            "paired_prompt_embedding_ssim_caliper_v1"
+            "paired_prompt_embedding_ssim_caliper"
         ),
         "quality_matching_protocol_digest": "1" * 64,
         "quality_metric_name": "embedding_pair_ssim",
@@ -86,7 +88,7 @@ def paired_superiority_summary(
         "threshold_audit_rows_digest": "f" * 64,
         "claim_p_value_method": "bounded_hoeffding_prompt_cluster_mean",
         "sharp_null_diagnostic_method": "exact_prompt_cluster_sign_flip_dp",
-        "bootstrap_analysis_schema": "paired_prompt_cluster_bootstrap_v1",
+        "bootstrap_analysis_schema": "paired_prompt_cluster_bootstrap",
         "bootstrap_bit_generator": "PCG64",
         "bootstrap_quantile_method": "linear",
         "bootstrap_resample_count": 100_000,
@@ -115,6 +117,26 @@ def paired_superiority_summary(
 
 
 @pytest.mark.quick
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    (
+        ("protocol_profile", "paper_fixed_fpr_0_1"),
+        ("target_fpr", 0.1),
+        ("minimum_clean_negative_count", 34),
+    ),
+)
+def test_fixed_fpr_config_rejects_cross_level_identity(
+    field_name: str,
+    invalid_value: object,
+) -> None:
+    """pilot 共同协议不得拼接 probe 的 profile、FPR 或样本门禁。"""
+
+    config = build_paper_fixed_fpr_config()
+    with pytest.raises(ValueError):
+        replace(config, **{field_name: invalid_value})
+
+
+@pytest.mark.quick
 def test_writer_outputs_pilot_paper_common_protocol_with_shared_boundaries(tmp_path: Path) -> None:
     """未验证聚合来源时必须在读取输入和创建输出前拒绝."""
 
@@ -132,7 +154,7 @@ def test_writer_outputs_pilot_paper_common_protocol_with_shared_boundaries(tmp_p
 def test_common_protocol_accepts_complete_paired_superiority_evidence() -> None:
     """点估计与真实配对统计同时通过时才允许形成当前层级论文结论."""
 
-    config = PilotPaperFixedFprConfig()
+    config = build_paper_fixed_fpr_config()
     prompt_summary = {
         "prompt_split_ready": True,
         "pilot_paper_prompt_count": 700,
@@ -214,7 +236,7 @@ def test_common_protocol_accepts_complete_paired_superiority_evidence() -> None:
 def test_common_protocol_blocks_superiority_claim_when_slm_wm_tpr_is_below_baselines() -> None:
     """证据覆盖完整但 SLM-WM TPR 低于 baseline 时, 不得支持优势性主张。"""
 
-    config = PilotPaperFixedFprConfig()
+    config = build_paper_fixed_fpr_config()
     prompt_summary = {
         "prompt_split_ready": True,
         "pilot_paper_prompt_count": 700,
@@ -269,7 +291,7 @@ def test_common_protocol_blocks_superiority_claim_when_slm_wm_tpr_is_below_basel
 def test_common_protocol_blocks_duplicate_method_attack_records() -> None:
     """共同协议必须阻断重复的 method × attack 记录, 避免重复行改变聚合统计。"""
 
-    config = PilotPaperFixedFprConfig()
+    config = build_paper_fixed_fpr_config()
     prompt_summary = {
         "prompt_split_ready": True,
         "pilot_paper_prompt_count": 700,
@@ -353,7 +375,7 @@ def pilot_paper_result_row(schema: dict[str, object], evidence_path: str) -> dic
         "attack_name": "jpeg_compression",
         "resource_profile": "full_main",
         "attack_config_digest": attack_config_digest(attack_config),
-        "target_fpr": 0.1,
+        "target_fpr": schema["target_fpr"],
         "result_protocol_name": schema["result_protocol_name"],
         "result_scope": schema["result_scope"],
         "result_claim_scope": schema["result_claim_scope"],
@@ -417,7 +439,7 @@ def pilot_paper_result_row(schema: dict[str, object], evidence_path: str) -> dic
 def test_pilot_paper_import_validator_accepts_governed_confidence_interval_record(tmp_path: Path) -> None:
     """带 Hoeffding 置信区间的 pilot_paper 结果应能进入受治理导入协议。"""
 
-    config = PilotPaperFixedFprConfig()
+    config = build_paper_fixed_fpr_config()
     prompt_records = build_prompt_records(
         "pilot_paper",
         tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(700)),
@@ -464,7 +486,7 @@ def test_pilot_paper_import_validator_accepts_governed_confidence_interval_recor
 def test_paper_result_schema_rejects_unit_range_ssim_interval() -> None:
     """旧 [0,1] Hoeffding 区间不得冒充 signed-range SSIM 正式区间."""
 
-    config = PilotPaperFixedFprConfig()
+    config = build_paper_fixed_fpr_config()
     schema = build_pilot_paper_result_import_schema(
         prompt_split_digest="a" * 64,
         attack_matrix_digest="b" * 64,
@@ -494,7 +516,7 @@ def test_paper_result_schema_rejects_post_labeled_attack_identity(
 ) -> None:
     """结果记录的攻击身份必须与正式 AttackConfig 精确一致."""
 
-    config = PilotPaperFixedFprConfig()
+    config = build_paper_fixed_fpr_config()
     prompt_records = build_prompt_records(
         "pilot_paper",
         tuple(f"formal prompt {index}" for index in range(700)),
@@ -526,7 +548,7 @@ def test_paper_result_schema_rejects_post_labeled_attack_identity(
 def test_pilot_paper_import_validator_rejects_duplicate_template_key(tmp_path: Path) -> None:
     """行级导入校验器必须阻断重复的 method × attack 模板键。"""
 
-    config = PilotPaperFixedFprConfig()
+    config = build_paper_fixed_fpr_config()
     prompt_records = build_prompt_records(
         "pilot_paper",
         tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(700)),
@@ -562,7 +584,7 @@ def test_pilot_paper_import_validator_rejects_duplicate_template_key(tmp_path: P
 def test_pilot_paper_import_validator_rejects_full_paper_claim_boundary(tmp_path: Path) -> None:
     """pilot_paper 导入记录不得声明为 full_paper 论文主张。"""
 
-    config = PilotPaperFixedFprConfig()
+    config = build_paper_fixed_fpr_config()
     prompt_records = build_prompt_records(
         "pilot_paper",
         tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(700)),
@@ -591,7 +613,7 @@ def test_pilot_paper_import_validator_rejects_full_paper_claim_boundary(tmp_path
 def test_pilot_paper_import_validator_rejects_incomplete_statistical_scale(tmp_path: Path) -> None:
     """低于 pilot_paper fixed-FPR 统计边界的记录不得进入受治理导入协议。"""
 
-    config = PilotPaperFixedFprConfig()
+    config = build_paper_fixed_fpr_config()
     prompt_records = build_prompt_records(
         "pilot_paper",
         tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(700)),
@@ -619,7 +641,7 @@ def test_pilot_paper_import_validator_rejects_incomplete_statistical_scale(tmp_p
 def test_paper_import_validator_rejects_nonformal_marked_result_records(tmp_path: Path) -> None:
     """三层正式论文结果导入都必须拒绝诊断性证据标记。"""
 
-    config = PilotPaperFixedFprConfig()
+    config = build_paper_fixed_fpr_config()
     prompt_records = build_prompt_records(
         "pilot_paper",
         tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(700)),

@@ -273,7 +273,7 @@ def _paper_run(
 def test_t2smark_formal_rejects_unlocked_openclip_source_branch(tmp_path: Path) -> None:
     """正式入口不得激活官方源码中按可变标签下载 OpenCLIP 的分支。"""
 
-    config = T2SMarkFormalReproductionConfig(clip_test_num=1)
+    config = T2SMarkFormalReproductionConfig(target_fpr=0.1, clip_test_num=1)
 
     with pytest.raises(ValueError, match="未受治理的 OpenCLIP"):
         validate_t2smark_formal_protocol_config(config, root_path=tmp_path)
@@ -293,7 +293,7 @@ def test_t2smark_rejects_unregistered_watermark_key_plan(
 
     with pytest.raises(ValueError, match="预注册正式 key plan"):
         validate_t2smark_formal_protocol_config(
-            T2SMarkFormalReproductionConfig(),
+            T2SMarkFormalReproductionConfig(target_fpr=0.1),
             root_path=root_path,
         )
     with pytest.raises(ValueError, match="预注册正式 key plan"):
@@ -304,7 +304,7 @@ def test_t2smark_protocol_binding_records_disabled_source_clip_branch() -> None:
     """复用协议必须显式绑定官方源码 OpenCLIP 分支处于禁用状态。"""
 
     binding = build_t2smark_formal_protocol_binding(
-        T2SMarkFormalReproductionConfig(prompt_limit=1),
+        T2SMarkFormalReproductionConfig(target_fpr=0.1, prompt_limit=1),
         paper_run=_paper_run(1),
         prompt_report=_prompt_report(1),
         source_report=_source_report(),
@@ -344,7 +344,7 @@ def _write_reuse_binding(
 def test_t2smark_reuse_requires_every_formal_attack_for_every_prompt(tmp_path: Path) -> None:
     """只有每个 Prompt 都包含全部正式攻击时才允许复用 T2SMark 结果。"""
 
-    config = T2SMarkFormalReproductionConfig(prompt_limit=2, save_clean_pair=False)
+    config = T2SMarkFormalReproductionConfig(target_fpr=0.1, prompt_limit=2, save_clean_pair=False)
     results_path, settings_path, binding_path, expected_binding = _write_reuse_binding(tmp_path, config)
 
     should_run, reason = should_run_official(
@@ -364,7 +364,7 @@ def test_t2smark_reuse_rejects_incomplete_formal_attack_matrix(tmp_path: Path) -
 
     results_path = tmp_path / "results.json"
     missing_attack_name = configured_attack_names(DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES)[-1]
-    config = T2SMarkFormalReproductionConfig(prompt_limit=2, save_clean_pair=False)
+    config = T2SMarkFormalReproductionConfig(target_fpr=0.1, prompt_limit=2, save_clean_pair=False)
     _write_results(results_path, sample_count=2, missing_attack_name=missing_attack_name)
     settings_path = tmp_path / "settings.json"
     binding_path = tmp_path / "slm_formal_protocol_binding.json"
@@ -412,7 +412,7 @@ def test_t2smark_reuse_rejects_protocol_binding_mismatch(
 ) -> None:
     """Prompt 或公平预算发生变化时不得复用旧官方结果。"""
 
-    config = T2SMarkFormalReproductionConfig(prompt_limit=2, save_clean_pair=False)
+    config = T2SMarkFormalReproductionConfig(target_fpr=0.1, prompt_limit=2, save_clean_pair=False)
     results_path, settings_path, binding_path, _ = _write_reuse_binding(tmp_path, config)
     changed_config = config
     prompt_digest = "4" * 64
@@ -444,7 +444,7 @@ def test_t2smark_reuse_rejects_protocol_binding_mismatch(
 def test_t2smark_reuse_rejects_source_revision_or_patch_mismatch(tmp_path: Path) -> None:
     """源码 revision 或固定补丁摘要变化时必须重新生成。"""
 
-    config = T2SMarkFormalReproductionConfig(prompt_limit=2, save_clean_pair=False)
+    config = T2SMarkFormalReproductionConfig(target_fpr=0.1, prompt_limit=2, save_clean_pair=False)
     results_path, settings_path, binding_path, _ = _write_reuse_binding(tmp_path, config)
     changed_source = _source_report()
     changed_source["protocol_patch_sha256"] = "8" * 64
@@ -726,6 +726,7 @@ def test_t2smark_prompt_units_resume_only_missing_and_reject_damage(
     """dev/calibration/test 均形成单元, 续跑只返回缺失索引且损坏单元闭锁."""
 
     config = T2SMarkFormalReproductionConfig(
+        target_fpr=0.1,
         prompt_limit=3,
         minimum_prompt_protocol_count=3,
     )
@@ -871,6 +872,7 @@ def test_t2smark_unit_contract_excludes_workspace_and_control_paths() -> None:
     """Drive、checkout 路径和续跑控制开关不得改变科学单元身份."""
 
     first = T2SMarkFormalReproductionConfig(
+        target_fpr=0.1,
         output_dir="outputs/t2smark_formal_reproduction",
         drive_output_dir="/content/drive/session_a",
         prompt_file="/content/checkout_a/configs/paper_main_probe_paper_prompts.txt",

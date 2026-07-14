@@ -22,7 +22,7 @@ EXPECTED_PROMPT_COUNTS = {
     "pilot_paper": 700,
     "full_paper": 7000,
 }
-PROMPT_IDENTITY_PROTOCOL = "nested_prompt_bank_index_text_v1"
+PROMPT_IDENTITY_PROTOCOL = "nested_prompt_bank_index_text_identity"
 
 
 @dataclass(frozen=True)

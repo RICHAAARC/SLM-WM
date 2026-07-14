@@ -268,7 +268,7 @@ def _auto_threshold(
     )
     for threshold in sorted({math.nextafter(score, math.inf) for score in negative_scores}):
         if sum(score >= threshold for score in negative_scores) <= allowed_false_positives:
-            return threshold, "nested_calibration_threshold_freeze_conformal_v1"
+            return threshold, "nested_calibration_threshold_freeze_conformal"
     raise RuntimeError("无法冻结 T2SMark fixed-FPR 阈值")
 
 
@@ -399,8 +399,8 @@ def build_t2smark_observations(
     t2smark_results: dict[str, Any],
     model_id: str,
     model_revision: str,
+    target_fpr: float,
     attacked_image_manifest: dict[str, Any] | None = None,
-    target_fpr: float = 0.1,
     attack_family: str = "clean",
     attack_condition: str = "clean_none",
     evidence_root: str | Path | None = None,

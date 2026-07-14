@@ -5,13 +5,13 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 import json
+import math
 from typing import Any, Iterable, Mapping
 
 from experiments.protocol.attacks import (
     attack_config_digest,
     resolve_formal_attack_config,
 )
-from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from main.core.digest import build_stable_digest
 
 
@@ -309,7 +309,14 @@ def _weighted_mean(rows: Iterable[Mapping[str, Any]], value_field: str, weight_f
 
 def _operating_point(boundary: Mapping[str, Any]) -> str:
     """根据 fixed-FPR 边界生成可读 operating point 名称。"""
-    target_fpr = float(boundary.get("target_fpr", PILOT_PAPER_FIXED_FPR))
+    if "target_fpr" not in boundary:
+        raise ValueError("fixed-FPR 边界必须显式提供 target_fpr")
+    raw_target_fpr = boundary["target_fpr"]
+    if isinstance(raw_target_fpr, bool):
+        raise TypeError("target_fpr 必须是有限数值")
+    target_fpr = float(raw_target_fpr)
+    if not math.isfinite(target_fpr) or not 0.0 < target_fpr < 1.0:
+        raise ValueError("target_fpr 必须位于 (0, 1)")
     return f"fixed_fpr_{target_fpr:g}"
 
 

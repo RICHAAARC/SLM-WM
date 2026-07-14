@@ -83,7 +83,7 @@ def _formal_lock() -> dict[str, Any]:
     """构造可复算的正式执行锁."""
 
     payload = {
-        "formal_execution_lock_schema": "clean_detached_git_commit_v1",
+        "formal_execution_lock_schema": "clean_detached_git_commit",
         "formal_execution_commit": "a" * 40,
         "formal_execution_head_detached": True,
         "formal_execution_worktree_clean": True,

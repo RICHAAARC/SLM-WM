@@ -59,7 +59,7 @@ RANDOMIZATION_DATASET_QUALITY_OUTPUT_ROOT = (
     "outputs/randomization_dataset_quality"
 )
 RANDOMIZATION_DATASET_QUALITY_REPORT_SCHEMA = (
-    "randomization_dataset_quality_reconstruction_report_v1"
+    "randomization_dataset_quality_reconstruction_report"
 )
 
 

@@ -61,14 +61,20 @@ def test_drive_paths_isolate_active_repeat_and_invariant_evidence_once() -> None
 
 @pytest.mark.quick
 @pytest.mark.parametrize(
-    "paper_run_name",
-    ("probe_paper", "pilot_paper", "full_paper"),
+    ("paper_run_name", "protocol_profile", "target_fpr"),
+    (
+        ("probe_paper", "paper_fixed_fpr_0_1", "0.1"),
+        ("pilot_paper", "paper_fixed_fpr_0_01", "0.01"),
+        ("full_paper", "paper_fixed_fpr_0_001", "0.001"),
+    ),
 )
-def test_formal_entry_uses_the_same_fixed_fpr_profile_for_all_run_levels(
+def test_formal_entry_propagates_registered_fixed_fpr_profile_for_each_run_level(
     paper_run_name: str,
+    protocol_profile: str,
+    target_fpr: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """服务器与 Colab 入口不得重建第二套层级相关 FPR 身份."""
+    """服务器与 Colab 入口必须传播当前层级登记的 FPR 身份."""
 
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", paper_run_name)
     monkeypatch.setenv("SLM_WM_PROTOCOL_PROFILE", "stale_wrong_profile")
@@ -87,10 +93,50 @@ def test_formal_entry_uses_the_same_fixed_fpr_profile_for_all_run_levels(
         repository_root=Path("."),
     )
 
-    assert result["protocol_profile"] == "paper_fixed_fpr_0_1"
-    assert result["target_fpr"] == "0.1"
-    assert os.environ["SLM_WM_PROTOCOL_PROFILE"] == "paper_fixed_fpr_0_1"
-    assert os.environ["SLM_WM_THRESHOLD_TARGET_FPR"] == "0.1"
+    assert result["protocol_profile"] == protocol_profile
+    assert result["target_fpr"] == target_fpr
+    assert os.environ["SLM_WM_PROTOCOL_PROFILE"] == protocol_profile
+    assert os.environ["SLM_WM_THRESHOLD_TARGET_FPR"] == target_fpr
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("paper_run_name", "target_fpr"),
+    (
+        ("probe_paper", "0.1"),
+        ("pilot_paper", "0.01"),
+        ("full_paper", "0.001"),
+    ),
+)
+def test_formal_entry_propagates_tier_fpr_to_baseline_runners(
+    paper_run_name: str,
+    target_fpr: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """common-backbone 与 T2SMark 必须接收当前层级同一个目标 FPR。"""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", paper_run_name)
+    monkeypatch.setattr(
+        workflow_environment,
+        "require_published_formal_execution_lock",
+        lambda root: {
+            "formal_execution_commit": "a" * 40,
+            "formal_execution_lock_digest": "b" * 64,
+        },
+    )
+
+    workflow_environment.configure_formal_workflow_environment(
+        "external_baseline_method_faithful",
+        baseline_id="tree_ring",
+        repository_root=Path("."),
+    )
+    assert os.environ["SLM_WM_EXTERNAL_BASELINE_TARGET_FPR"] == target_fpr
+
+    workflow_environment.configure_formal_workflow_environment(
+        "official_reference_t2smark",
+        repository_root=Path("."),
+    )
+    assert os.environ["SLM_WM_T2SMARK_FORMAL_TARGET_FPR"] == target_fpr
 
 
 @pytest.mark.quick

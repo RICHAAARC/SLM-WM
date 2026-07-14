@@ -353,7 +353,7 @@ calibration source 只接受 registered-key、未攻击的 clean negatives。按
 
 当 `attention_geometry_enabled` 或 `image_alignment_enabled` 为 false 时, `geometry_rescue_enabled` 必须同时为 false。该路径以 raw 内容分数直接执行 fixed-FPR 判定, rescue 与几何参数均为 `None`, 相关计数为0, 不生成被关闭机制的替代原子。
 
-三级运行配置分别使用 70/700/7000 个 Prompt，test 数量为 34/340/3400，并统一使用 FPR=0.1。test split 只应用冻结协议并报告置信上界，样本规模仅改变统计强度。
+三级运行配置分别使用70/700/7000个 Prompt, test 数量为34/340/3400, 目标 FPR 依次为0.1、0.01和0.001。test split 只应用对应层级的冻结协议并报告同一种置信上界。
 
 ---
 

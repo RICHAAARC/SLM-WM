@@ -199,7 +199,7 @@ def _rebuild_randomization_paired_superiority(
     source_by_key, threshold_by_key = _validate_threshold_source_binding(rebuilt)
     attack_registry = _formal_attack_registry()
     protocol_payload = {
-        "protocol_schema": "randomization_quality_matched_main_table_v1",
+        "protocol_schema": "randomization_quality_matched_main_table",
         "method_repeat_fixed_fpr_report_digest": rebuilt.report[
             "method_repeat_fixed_fpr_report_digest"
         ],

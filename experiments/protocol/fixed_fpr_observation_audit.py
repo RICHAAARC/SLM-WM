@@ -14,7 +14,7 @@ from experiments.protocol.calibration import is_clean_unattacked_negative
 from main.core.digest import build_stable_digest
 
 
-FORMAL_THRESHOLD_SOURCE = "nested_calibration_threshold_freeze_conformal_v1"
+FORMAL_THRESHOLD_SOURCE = "nested_calibration_threshold_freeze_conformal"
 
 
 @dataclass(frozen=True)

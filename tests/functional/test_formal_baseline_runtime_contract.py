@@ -72,7 +72,7 @@ def test_method_faithful_threshold_uses_calibration_negatives_only() -> None:
     freeze_id_set = set(freeze_ids)
 
     assert first == second
-    assert source == "nested_calibration_threshold_freeze_conformal_v1"
+    assert source == "nested_calibration_threshold_freeze_conformal"
     assert sum(
         row["score"] >= first
         for row in negatives
@@ -168,7 +168,7 @@ def test_common_backbone_producers_bind_formal_attack_identity(
         "event_id": "event_0001",
         "score": 0.9,
         "threshold": 0.5,
-        "threshold_source": "nested_calibration_threshold_freeze_conformal_v1",
+        "threshold_source": "nested_calibration_threshold_freeze_conformal",
         "row": {"split": "test", "prompt_id": "prompt_0001"},
         "index": 1,
         "sample_role": "attacked_positive",
@@ -221,7 +221,7 @@ def test_t2smark_threshold_uses_only_calibration_clean_scores() -> None:
     threshold, source = _auto_threshold(results, pairs, 0.1)
 
     assert threshold > 0.1
-    assert source == "nested_calibration_threshold_freeze_conformal_v1"
+    assert source == "nested_calibration_threshold_freeze_conformal"
 
 
 @pytest.mark.quick

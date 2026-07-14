@@ -16,6 +16,7 @@ from experiments.protocol.formal_randomization import (
     formal_randomization_repeat_ids,
     resolve_formal_randomization_repeat,
 )
+from experiments.protocol.paper_run_config import RUN_DEFAULTS
 from paper_experiments.runners import randomization_aggregate_provenance as aggregate
 from paper_experiments.runners.randomization_aggregate_provenance import (
     RANDOMIZATION_AGGREGATE_INVARIANT_PACKAGE_FAMILIES,
@@ -32,7 +33,7 @@ from paper_experiments.runners.randomization_aggregate_provenance import (
 pytestmark = pytest.mark.quick
 
 PAPER_RUN_NAME = "probe_paper"
-TARGET_FPR = 0.1
+TARGET_FPR = float(RUN_DEFAULTS[PAPER_RUN_NAME]["target_fpr"])
 CODE_VERSION = "a" * 40
 
 
@@ -872,9 +873,9 @@ def test_aggregate_writer_rejects_run_fpr_drift_before_reading_inputs(
     with pytest.raises(ValueError, match="必须使用冻结值"):
         write_randomization_aggregate_provenance_package(
             {},
-            {},
-            paper_run_name="pilot_paper",
-            target_fpr=0.01,
+                {},
+                paper_run_name="pilot_paper",
+                target_fpr=TARGET_FPR,
             root=tmp_path,
         )
 

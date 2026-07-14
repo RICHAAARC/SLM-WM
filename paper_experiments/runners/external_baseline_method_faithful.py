@@ -35,7 +35,6 @@ from experiments.protocol.method_runtime_config import load_formal_method_runtim
 from experiments.protocol.paper_run_config import (
     DEFAULT_GUIDANCE_SCALE,
     DEFAULT_INFERENCE_STEPS,
-    DEFAULT_TARGET_FPR,
     build_paper_run_config,
     normalize_paper_run_name,
     resolve_count_from_environment,
@@ -98,6 +97,7 @@ DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES = ",".join(supported_formal_image_attack_na
 class ExternalBaselineMethodFaithfulConfig:
     """描述一次单 baseline common-backbone 正式运行。"""
 
+    target_fpr: float
     output_dir: str = DEFAULT_OUTPUT_DIR
     drive_output_dir: str = field(
         default_factory=lambda: build_paper_run_config(".").drive_dir("external_baseline_method_faithful")
@@ -118,7 +118,6 @@ class ExternalBaselineMethodFaithfulConfig:
         ).formal_randomization_protocol_digest
     )
     watermark_key_seed_random: int = DEFAULT_WATERMARK_KEY_SEED_RANDOM
-    target_fpr: float = DEFAULT_TARGET_FPR
     num_inference_steps: int = DEFAULT_INFERENCE_STEPS
     num_inversion_steps: int = DEFAULT_INFERENCE_STEPS
     guidance_scale: float = DEFAULT_GUIDANCE_SCALE

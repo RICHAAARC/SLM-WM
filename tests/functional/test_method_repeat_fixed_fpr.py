@@ -18,6 +18,10 @@ from experiments.protocol.formal_randomization import (
     formal_randomization_repeats,
     formal_watermark_key_plan_record,
 )
+from experiments.protocol.detection_key_identity import (
+    REGISTERED_WRONG_KEY_ROLE,
+)
+from experiments.protocol.paper_run_config import RUN_DEFAULTS
 from experiments.protocol.image_only_evidence import (
     partition_calibration_prompt_ids,
 )
@@ -51,7 +55,7 @@ from tests.helpers.formal_detection_record import bind_formal_detection_record
 pytestmark = pytest.mark.quick
 
 PAPER_RUN_NAME = "probe_paper"
-TARGET_FPR = 0.1
+TARGET_FPR = float(RUN_DEFAULTS[PAPER_RUN_NAME]["target_fpr"])
 MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 MODEL_REVISION = "b940f670f0eda2d07fbb75229e779da1ad11eb80"
 EXPECTED_BASE_SEED = 1703
@@ -597,6 +601,30 @@ def test_exact_method_repeat_recomputation_rejects_calibration_duplicate(
 
     with pytest.raises(MethodRepeatFixedFprError, match="精确提供一条"):
         _run((duplicated, *exact_sources[1:]))
+
+
+def test_exact_method_repeat_rejects_wrong_key_calibration_negative(
+    exact_sources: tuple[MethodRepeatObservationSource, ...],
+) -> None:
+    """主方法 calibration 只允许注册密钥下的未攻击 clean negative。"""
+
+    first = exact_sources[0]
+    rows = [dict(row) for row in first.observation_rows]
+    calibration_index = next(
+        index
+        for index, row in enumerate(rows)
+        if row["split"] == "calibration"
+    )
+    rows[calibration_index]["detection_key_role"] = (
+        REGISTERED_WRONG_KEY_ROLE
+    )
+    wrong_key_calibration = replace(
+        first,
+        observation_rows=tuple(rows),
+    )
+
+    with pytest.raises(MethodRepeatFixedFprError, match="clean negative"):
+        _run((wrong_key_calibration, *exact_sources[1:]))
 
 
 def test_exact_method_repeat_recomputation_rejects_cross_method_latent_drift(

@@ -88,15 +88,15 @@ def test_current_notebook_set_contains_formal_entrypoints_only() -> None:
     "notebook_name",
     sorted(OFFICIAL_REFERENCE_NOTEBOOKS),
 )
-def test_official_reference_notebooks_describe_one_fixed_fpr_working_point(
+def test_official_reference_notebooks_describe_registered_tier_working_points(
     notebook_name: str,
 ) -> None:
-    """外层入口说明不得为三个论文层级发布不同 FPR 身份."""
+    """外层入口说明必须列出三个论文层级各自冻结的 FPR 身份."""
 
     source = _all_cell_source(NOTEBOOK_DIR / notebook_name)
     assert "FPR=0.1" in source
-    assert "FPR=0.01" not in source
-    assert "FPR=0.001" not in source
+    assert "FPR=0.01" in source
+    assert "FPR=0.001" in source
 
 
 @pytest.mark.quick

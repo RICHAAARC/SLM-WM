@@ -388,7 +388,7 @@ def _semantic_paired_rows() -> list[dict[str, object]]:
                 "confidence_level": 0.95,
                 "bootstrap_resample_count": 100_000,
                 "bootstrap_seed_digest_random": f"{index + 1}" * 64,
-                "bootstrap_analysis_schema": "paired_prompt_cluster_bootstrap_v1",
+                "bootstrap_analysis_schema": "paired_prompt_cluster_bootstrap",
                 "bootstrap_bit_generator": "PCG64",
                 "bootstrap_quantile_method": "linear",
                 "proposed_method_threshold_digest": "d" * 64,
@@ -399,7 +399,7 @@ def _semantic_paired_rows() -> list[dict[str, object]]:
                 "protocol_digest": "3" * 64,
                 "paired_superiority_ready": ready,
                 "quality_matching_protocol_schema": (
-                    "paired_prompt_embedding_ssim_caliper_v1"
+                    "paired_prompt_embedding_ssim_caliper"
                 ),
                 "quality_matching_protocol_digest": "4" * 64,
                 "quality_metric_name": "embedding_pair_ssim",

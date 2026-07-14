@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,6 +19,16 @@ def _write_json(path: Path, payload: dict[str, object]) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _select_probe_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """让调度单元测试只关注科学命令状态机."""
+
+    monkeypatch.setattr(
+        dispatcher,
+        "build_paper_run_config",
+        lambda _root: SimpleNamespace(run_name="probe_paper"),
+    )
 
 
 def test_runtime_progress_prevents_formal_ablation_command(
@@ -38,6 +49,7 @@ def test_runtime_progress_prevents_formal_ablation_command(
     calls = []
     monkeypatch.setattr(dispatcher, "ROOT", tmp_path)
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", run_name)
+    _select_probe_run(monkeypatch)
 
     def run_child(command_tail: tuple[str, ...]) -> dict[str, object]:
         calls.append(command_tail)
@@ -66,7 +78,7 @@ def test_closed_main_runs_requested_ablation_once(
         / "image_only_dataset_runtime"
         / run_name
         / "dataset_runtime_summary.json",
-        {"protocol_decision": "pass"},
+        {"protocol_decision": "pass", "repeat_component_ready": True},
     )
     for relative_path in (
         f"outputs/image_only_dataset_runtime/{run_name}/manifest.local.json",
@@ -83,7 +95,10 @@ def test_closed_main_runs_requested_ablation_once(
         / "dataset_level_quality"
         / run_name
         / "dataset_quality_summary.json",
-        {"formal_fid_kid_component_ready": True},
+        {
+            "formal_fid_kid_component_ready": True,
+            "repeat_component_ready": True,
+        },
     )
     _write_json(
         tmp_path
@@ -91,11 +106,12 @@ def test_closed_main_runs_requested_ablation_once(
         / "formal_mechanism_ablation"
         / run_name
         / "ablation_component_summary.json",
-        {"protocol_decision": "pass"},
+        {"protocol_decision": "pass", "repeat_component_ready": True},
     )
     calls = []
     monkeypatch.setattr(dispatcher, "ROOT", tmp_path)
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", run_name)
+    _select_probe_run(monkeypatch)
 
     def run_child(command_tail: tuple[str, ...]) -> dict[str, object]:
         calls.append(command_tail)
@@ -119,6 +135,50 @@ def test_closed_main_runs_requested_ablation_once(
         "dataset_level_quality",
         "runtime_rerun_ablation",
     ]
+
+
+def test_protocol_pass_without_repeat_component_cannot_close(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """仅有协议通过文本时不得把未完成重复单元视为闭合."""
+
+    run_name = "probe_paper"
+    _write_json(
+        tmp_path
+        / "outputs"
+        / "image_only_dataset_runtime"
+        / run_name
+        / "dataset_runtime_summary.json",
+        {"protocol_decision": "pass", "repeat_component_ready": False},
+    )
+    _write_json(
+        tmp_path
+        / "outputs"
+        / "dataset_level_quality"
+        / run_name
+        / "dataset_quality_summary.json",
+        {
+            "formal_fid_kid_component_ready": True,
+            "repeat_component_ready": True,
+        },
+    )
+    monkeypatch.setattr(dispatcher, "ROOT", tmp_path)
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", run_name)
+    _select_probe_run(monkeypatch)
+    monkeypatch.setattr(
+        dispatcher,
+        "_run_child",
+        lambda _command: {
+            "argv": [],
+            "return_code": 0,
+            "stdout": "",
+            "stderr": "",
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="重复证据组件"):
+        dispatcher.run_scientific_commands(run_formal_ablation=False)
 
 
 def test_child_command_defers_packaging_until_binding_exists(

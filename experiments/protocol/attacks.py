@@ -12,7 +12,7 @@ from main.core.digest import build_stable_digest
 DIFFUSION_ATTACK_INFERENCE_STEPS = 28
 DIFFUSION_ATTACK_GUIDANCE_SCALE = 4.5
 DIFFUSION_ATTACK_NEGATIVE_PROMPT = "low quality, blurry"
-FORMAL_ATTACK_SEED_PROTOCOL = "sha256_generation_seed_attack_id_uint63_v1"
+FORMAL_ATTACK_SEED_PROTOCOL = "sha256_generation_seed_attack_id_uint63"
 
 
 def formal_attack_seed_protocol_record() -> dict[str, Any]:

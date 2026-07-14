@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from paper_experiments.baselines import PRIMARY_BASELINE_IDS, build_primary_baseline_execution_plans
+from paper_experiments.baselines import (
+    PRIMARY_BASELINE_IDS,
+    build_primary_baseline_execution_plans,
+    build_primary_result_templates,
+)
 from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from scripts.write_primary_baseline_reproduction_plan import write_primary_baseline_reproduction_plan
 
@@ -93,6 +97,14 @@ def test_primary_execution_plan_uses_only_primary_baselines(tmp_path: Path) -> N
 
 
 @pytest.mark.quick
+def test_primary_result_templates_require_explicit_target_fpr() -> None:
+    """主表模板不得从缺失边界回退到任一论文层级的 FPR。"""
+
+    with pytest.raises(ValueError, match="显式提供 target_fpr"):
+        build_primary_result_templates((), (), {})
+
+
+@pytest.mark.quick
 def test_primary_reproduction_writer_outputs_plan_and_result_templates(tmp_path: Path) -> None:
     """复现计划脚本应输出计划, 结果模板, 运行报告和 manifest。"""
     registry_path = write_primary_source_registry(tmp_path)
@@ -125,5 +137,7 @@ def test_primary_reproduction_writer_outputs_plan_and_result_templates(tmp_path:
     assert report["result_import_template_ready"] is True
     assert report["baseline_results_ready"] is False
     assert report["supports_paper_claim"] is False
-    assert {row["comparable_operating_point"] for row in template_rows} == {"fixed_fpr_0.1"}
+    assert {row["comparable_operating_point"] for row in template_rows} == {
+        "fixed_fpr_0.01"
+    }
 

@@ -652,13 +652,13 @@ fixed-FPR 约束包含 rescue 的完整 evidence 判定。`window_fit` 与 `thre
 
 注意力几何或图像对齐被关闭时, 正式协议必须关闭 `geometry_rescue_enabled`, 只以 raw 内容分数执行最终阈值判定；rescue 与几何参数均为 `None`, 对应计数为0, 不允许保留或伪造被关闭机制的原子证据。
 
-当前三类运行配置使用同一 FPR=0.1 工作点, 只通过样本规模改变统计强度：
+当前三类运行配置使用同构 fixed-FPR 统计实现, 目标 FPR 依次为0.1、0.01和0.001：
 
 | Prompt 数量 | dev | calibration | test | 目标 FPR |
 | ---: | ---: | ---: | ---: | ---: |
 | 70 | 3 | 33 | 34 | 0.1 |
-| 700 | 30 | 330 | 340 | 0.1 |
-| 7000 | 300 | 3300 | 3400 | 0.1 |
+| 700 | 30 | 330 | 340 | 0.01 |
+| 7000 | 300 | 3300 | 3400 | 0.001 |
 
 ---
 
@@ -718,6 +718,6 @@ SLM-WM 的科学方法终止于仅图像 $y_{\mathrm{evidence}}$ 判定。事件
 
 主表同时报告全样本比较和检测标签无关的质量匹配比较。对 baseline $b$、Prompt $q$ 和注册重复 $r$, 记两方法未攻击 clean-watermarked pair 的实测 SSIM 绝对差为 $G_{b,q,r}$。只有全部9个 repeat 都满足 $G_{b,q,r}\le0.02$, 当前 Prompt 才进入该 baseline 的质量匹配子集；任何单个 repeat 越界都会排除完整 Prompt, 不允许以跨 repeat 均值或部分 repeat 筛选替代。入选 Prompt 的检测效应由其完整9重复与完整攻击集合共同计算, bootstrap 和 Hoeffding 推断仍只把 Prompt 作为独立单位。每个 baseline 的匹配子集必须覆盖至少80%的完整 test Prompt, 对应 probe、pilot 和 full 至少28、272和2720个。全样本与质量匹配分别执行固定4项 Holm 校正；只有两类优势门禁都通过的 baseline 行才支持主张, 四个 baseline 全部通过后总体主表结论才成立。
 
-单次 GPU 运行只物化一个登记重复, 最终论文统计必须覆盖全部9个重复。三个论文运行层级使用同一个随机化注册表、方法参数、攻击、baseline 协议和 FPR=0.1 工作点, 只改变 Prompt 数量、划分规模与由样本规模带来的统计强度。因此 probe 结果只能支持 probe 的统计强度, 但其方法与公平评测定义不能比 pilot 或 full 更弱。
+单次 GPU 运行只物化一个登记重复, 最终论文统计必须覆盖全部9个重复。三个论文运行层级使用同一个随机化注册表、方法参数、攻击、baseline 协议和 fixed-FPR 统计代码, 目标 FPR 分别为0.1、0.01和0.001, Prompt 数量与划分规模也随层级递增。因此 probe 结果只能支持 FPR=0.1 的 probe 结论, 但其方法与公平评测路径不能比 pilot 或 full 更弱。
 
 方法实现存在不等于论文结论成立。空间 LF 的有效性、高斯幅值尾部截断的攻击鲁棒性、Q/K 几何恢复的增益和完整 fixed-FPR 均必须由真实 GPU 生成、clean negative、真实攻击、正式机制重跑消融、外部 baseline 和受治理结果包共同支撑。

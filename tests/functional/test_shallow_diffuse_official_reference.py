@@ -838,7 +838,7 @@ def test_shallow_diffuse_official_reference_package_embeds_archive_self_descript
             {
                 "baseline_id": "shallow_diffuse",
                 "paper_claim_scale": "pilot_paper",
-                "target_fpr": 0.1,
+                "target_fpr": 0.01,
                 "run_decision": "pass",
                 "shallow_diffuse_official_reference_ready": True,
                 "reference_import_ready": True,
@@ -999,7 +999,7 @@ def test_shallow_diffuse_official_reference_package_embeds_archive_self_descript
             archive_path,
             spec=spec,
             paper_run_name="pilot_paper",
-            target_fpr=0.1,
+            target_fpr=0.01,
         )
 
 

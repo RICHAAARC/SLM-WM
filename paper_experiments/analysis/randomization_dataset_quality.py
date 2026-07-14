@@ -32,10 +32,10 @@ from paper_experiments.analysis.formal_record_statistics import (
 
 
 RANDOMIZATION_DATASET_QUALITY_SUMMARY_SCHEMA = (
-    "randomization_dataset_quality_summary_v1"
+    "randomization_dataset_quality_summary"
 )
 RANDOMIZATION_DATASET_QUALITY_METRIC_PROTOCOL_SCHEMA = (
-    "registered_repeat_joint_inception_distribution_v1"
+    "registered_repeat_joint_inception_distribution"
 )
 RANDOMIZATION_DATASET_QUALITY_MEMBERSHIP_FIELDNAMES = (
     "randomization_repeat_id",

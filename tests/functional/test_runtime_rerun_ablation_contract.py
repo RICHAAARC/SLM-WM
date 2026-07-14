@@ -10,6 +10,7 @@ from experiments.ablations.runtime_rerun import (
     FORMAL_RUNTIME_RERUN_ABLATION_IDS,
     FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
     _formal_attack_coverage_ready,
+    _shared_runtime_context_config,
     default_runtime_rerun_ablation_specs,
     runtime_rerun_randomization_plan,
     runtime_rerun_ablation_contract,
@@ -147,6 +148,32 @@ def test_attention_and_alignment_ablations_preserve_dependency_direction() -> No
     assert without_attention.image_alignment_enabled is False
     assert without_alignment.attention_geometry_enabled is True
     assert without_alignment.image_alignment_enabled is False
+
+
+@pytest.mark.quick
+def test_shared_context_unions_diffusion_requirements_across_all_configs() -> None:
+    """共享上下文必须覆盖后续 test 配置需要的真实扩散攻击运行时."""
+
+    calibration = replace(
+        SemanticWatermarkRuntimeConfig(),
+        prompt_id="calibration_prompt",
+        split="calibration",
+        diffusion_attacks_enabled=False,
+    )
+    test = replace(
+        SemanticWatermarkRuntimeConfig(),
+        prompt_id="test_prompt",
+        split="test",
+        diffusion_attacks_enabled=True,
+    )
+
+    context_config = _shared_runtime_context_config(
+        (calibration, test),
+        default_runtime_rerun_ablation_specs(),
+        "outputs/formal_mechanism_ablation/probe_paper",
+    )
+
+    assert context_config.diffusion_attacks_enabled is True
 
 
 @pytest.mark.quick

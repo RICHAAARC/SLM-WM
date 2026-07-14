@@ -23,7 +23,7 @@ from experiments.protocol.formal_randomization import (
 from main.core.digest import build_stable_digest
 
 
-ABLATION_NECESSITY_ANALYSIS_SCHEMA = "ablation_prompt_cluster_component_v2"
+ABLATION_NECESSITY_ANALYSIS_SCHEMA = "ablation_prompt_cluster_component"
 ABLATION_NECESSITY_AGGREGATE_ANALYSIS_SCHEMA = (
     "ablation_prompt_cluster_registered_repeat_mean"
 )

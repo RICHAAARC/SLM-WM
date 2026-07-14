@@ -62,7 +62,7 @@ def test_formal_randomization_registry_is_exact_three_by_three_cross() -> None:
     assert protocol["watermark_key_repeat_count"] == 3
     assert protocol["crossed_repeat_count"] == 9
     assert protocol["formal_randomization_protocol_digest"] == (
-        "d489cedb0f36359d589e132bface8dabb2993dd5e035ae5f806d403c2702ce6d"
+        "d03d6ef0d58f2fd02f54aa85e3cd695dbab391586d48001524a95ef62ec97630"
     )
     assert formal_randomization_repeat_ids() == tuple(
         f"seed_{seed_index:02d}_key_{key_index:02d}"
@@ -184,7 +184,7 @@ def test_canonical_base_latent_is_byte_stable_and_seed_sensitive() -> None:
     assert not torch.equal(first, different)
     assert (
         first_identity["base_latent_content_digest_random"]
-        == "f8c706447476ca11b991f9c56f83b2118fc77c2f622652da59b679c63407e73c"
+        == "e1ccefcb4a091a109ecf095e822ca73bed97fc13e788f0601e12927e0d0fea40"
     )
     assert (
         first_identity["base_latent_content_digest_random"]
@@ -209,16 +209,16 @@ def test_formal_sd35_shape_base_latent_has_frozen_cpu_golden_identity() -> None:
     assert latent.dtype == torch.float16
     assert identity["base_latent_generation_protocol"] == (
         "device_independent_sha256_normal_icdf_table20_"
-        "cpu_dtype_cast_then_device_transfer_v2"
+        "cpu_dtype_cast_then_device_transfer"
     )
     assert identity["base_latent_keyed_prg_protocol_digest"] == (
         "e1f97fd7457893cf4d92c0ffa383b44219cf6b1034055e43dcadf1d535ab1595"
     )
     assert identity["base_latent_content_digest_random"] == (
-        "949fb85f003c2e70ce4758e9243401df917d7716d1871072b8b82f02111010b5"
+        "b665be1585924e50b868c98fbf7a6bfd9170745b8298d1203f979b36926633b8"
     )
     assert identity["base_latent_identity_digest_random"] == (
-        "b306016801b0528c44cd07e536beb5e93b7b1dc602ad4f8be9daf154cfd7276e"
+        "b8d6cdb11e814f3c098f6a567aefd39a2b2b29da79b85a50f2894889473dfa58"
     )
 
 

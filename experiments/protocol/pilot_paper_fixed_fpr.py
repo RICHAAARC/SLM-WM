@@ -2,13 +2,14 @@
 
 该模块描述 probe_paper、pilot_paper 与 full_paper 共用的正式验证协议,
 包括受治理输入、阈值边界、攻击矩阵、baseline 导入模板和声明边界。
-它不执行 GPU 推理。三个论文运行层级仅通过 Prompt 规模和统计强度区分。
+它不执行 GPU 推理。三个论文运行层级复用同一协议拓扑, 并分别在
+FPR=0.1、FPR=0.01和 FPR=0.001 工作点报告对应统计强度。
 """
 
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 import math
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -20,6 +21,7 @@ from experiments.protocol.attacks import (
 )
 from experiments.protocol.formal_evidence import contains_nonformal_marker
 from experiments.protocol.formal_randomization import (
+    DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID,
     formal_randomization_protocol_record,
     resolve_formal_randomization_repeat,
 )
@@ -30,6 +32,7 @@ from experiments.protocol.paper_run_config import (
     RUN_DEFAULTS,
     RUN_EXPECTED_PROMPT_COUNTS,
     build_paper_run_config,
+    validate_paper_run_protocol_identity,
 )
 from experiments.protocol.prompts import PromptProtocolRecord
 from experiments.protocol.splits import apply_split_assignments, build_group_split_counts
@@ -61,7 +64,7 @@ PAPER_RUN_FIXED_FPR = {
 PILOT_PAPER_CONFIDENCE_INTERVAL_METHOD = "bounded_hoeffding"
 PILOT_PAPER_CONFIDENCE_LEVEL = 0.95
 PILOT_PAPER_PAIRED_BOOTSTRAP_RESAMPLE_COUNT = 100_000
-PILOT_PAPER_PAIRED_BOOTSTRAP_ANALYSIS_SCHEMA = "paired_prompt_cluster_bootstrap_v1"
+PILOT_PAPER_PAIRED_BOOTSTRAP_ANALYSIS_SCHEMA = "paired_prompt_cluster_bootstrap"
 PILOT_PAPER_PAIRED_BOOTSTRAP_BIT_GENERATOR = "PCG64"
 PILOT_PAPER_PAIRED_BOOTSTRAP_QUANTILE_METHOD = "linear"
 PILOT_PAPER_PAIRED_CLAIM_P_VALUE_METHOD = "bounded_hoeffding_prompt_cluster_mean"
@@ -313,10 +316,14 @@ def result_claim_scope_for_run(run_name: str) -> str:
     return PAPER_RUN_CLAIM_SCOPES[run_name]
 
 
-def _default_paper_run_value(field_name: str) -> Any:
-    """从统一论文运行配置读取 dataclass 默认值。"""
-
-    return getattr(build_paper_run_config("."), field_name)
+_DEFAULT_RANDOMIZATION_REPEAT = resolve_formal_randomization_repeat(
+    DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID
+)
+_DEFAULT_RANDOMIZATION_PROTOCOL_DIGEST = str(
+    formal_randomization_protocol_record()[
+        "formal_randomization_protocol_digest"
+    ]
+)
 
 
 @dataclass(frozen=True)
@@ -327,69 +334,66 @@ class PilotPaperFixedFprConfig:
     论文声明边界集中在 dataclass 构造层, 业务函数只消费已经归一化的配置。
     """
 
-    paper_run_name: str = field(default_factory=lambda: _default_paper_run_value("run_name"))
-    prompt_set: str = field(default_factory=lambda: _default_paper_run_value("prompt_set"))
-    prompt_file: str = field(default_factory=lambda: _default_paper_run_value("prompt_file"))
-    prompt_protocol_name: str = field(
-        default_factory=lambda: prompt_protocol_name_for_run(_default_paper_run_value("run_name"))
-    )
-    result_protocol_name: str = field(
-        default_factory=lambda: result_protocol_name_for_run(_default_paper_run_value("run_name"))
-    )
-    result_scope: str = field(default_factory=lambda: result_scope_for_run(_default_paper_run_value("run_name")))
-    result_claim_scope: str = field(default_factory=lambda: result_claim_scope_for_run(_default_paper_run_value("run_name")))
-    target_fpr: float = field(default_factory=lambda: float(_default_paper_run_value("target_fpr")))
+    paper_run_name: str
+    protocol_profile: str
+    prompt_set: str
+    prompt_file: str
+    prompt_protocol_name: str
+    result_protocol_name: str
+    result_scope: str
+    result_claim_scope: str
+    target_fpr: float
+    minimum_clean_negative_count: int
     confidence_interval_method: str = PILOT_PAPER_CONFIDENCE_INTERVAL_METHOD
     confidence_level: float = PILOT_PAPER_CONFIDENCE_LEVEL
-    minimum_clean_negative_count: int = field(
-        default_factory=lambda: int(_default_paper_run_value("minimum_clean_negative_count"))
-    )
-    randomization_repeat_id: str = field(
-        default_factory=lambda: str(
-            _default_paper_run_value("randomization_repeat_id")
-        )
-    )
-    generation_seed_index: int = field(
-        default_factory=lambda: int(
-            _default_paper_run_value("generation_seed_index")
-        )
-    )
-    generation_seed_offset: int = field(
-        default_factory=lambda: int(
-            _default_paper_run_value("generation_seed_offset")
-        )
-    )
-    watermark_key_index: int = field(
-        default_factory=lambda: int(
-            _default_paper_run_value("watermark_key_index")
-        )
-    )
-    formal_randomization_protocol_digest: str = field(
-        default_factory=lambda: str(
-            _default_paper_run_value(
-                "formal_randomization_protocol_digest"
-            )
-        )
+    randomization_repeat_id: str = DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID
+    generation_seed_index: int = _DEFAULT_RANDOMIZATION_REPEAT.generation_seed_index
+    generation_seed_offset: int = _DEFAULT_RANDOMIZATION_REPEAT.generation_seed_offset
+    watermark_key_index: int = _DEFAULT_RANDOMIZATION_REPEAT.watermark_key_index
+    formal_randomization_protocol_digest: str = (
+        _DEFAULT_RANDOMIZATION_PROTOCOL_DIGEST
     )
     attack_resource_profiles: tuple[str, ...] = PILOT_PAPER_ATTACK_RESOURCE_PROFILES
 
     def __post_init__(self) -> None:
         """集中校验不可恢复的协议边界。"""
 
-        if self.prompt_set not in RUN_DEFAULTS:
-            raise ValueError(f"未知论文运行 prompt set: {self.prompt_set}")
-        if self.paper_run_name not in RUN_DEFAULTS:
-            raise ValueError(f"未知论文运行层级: {self.paper_run_name}")
-        if not self.prompt_file:
-            raise ValueError("prompt_file 不得为空")
-        if not 0.0 < self.target_fpr < 1.0:
-            raise ValueError("target_fpr 必须位于 (0, 1)")
+        validate_paper_run_protocol_identity(
+            self.paper_run_name,
+            self.protocol_profile,
+            self.target_fpr,
+        )
+        defaults = RUN_DEFAULTS[self.paper_run_name]
+        expected_prompt_count = RUN_EXPECTED_PROMPT_COUNTS[self.paper_run_name]
+        expected_minimum_count = build_group_split_counts(
+            expected_prompt_count
+        )["test"]
+        if self.prompt_set != self.paper_run_name:
+            raise ValueError("prompt_set 必须与 paper_run_name 一致")
+        if self.prompt_file != str(defaults["prompt_file"]):
+            raise ValueError("prompt_file 必须与论文运行层级的受治理路径一致")
+        if self.prompt_protocol_name != prompt_protocol_name_for_run(
+            self.paper_run_name
+        ):
+            raise ValueError("prompt_protocol_name 与论文运行层级不一致")
+        if self.result_protocol_name != result_protocol_name_for_run(
+            self.paper_run_name
+        ):
+            raise ValueError("result_protocol_name 与论文运行层级不一致")
+        if self.result_scope != result_scope_for_run(self.paper_run_name):
+            raise ValueError("result_scope 与论文运行层级不一致")
+        if self.result_claim_scope != result_claim_scope_for_run(
+            self.paper_run_name
+        ):
+            raise ValueError("result_claim_scope 与论文运行层级不一致")
         if self.confidence_interval_method != PILOT_PAPER_CONFIDENCE_INTERVAL_METHOD:
             raise ValueError("confidence_interval_method 必须为 bounded_hoeffding")
         if not 0.0 < self.confidence_level < 1.0:
             raise ValueError("confidence_level 必须位于 (0, 1)")
-        if self.minimum_clean_negative_count <= 0:
-            raise ValueError("minimum_clean_negative_count 必须为正整数")
+        if self.minimum_clean_negative_count != expected_minimum_count:
+            raise ValueError(
+                "minimum_clean_negative_count 必须等于当前层级完整 test split 数量"
+            )
         if not self.randomization_repeat_id:
             raise ValueError("fixed-FPR 配置必须显式携带活动 repeat ID")
         repeat = resolve_formal_randomization_repeat(
@@ -421,6 +425,7 @@ def build_paper_fixed_fpr_config_from_paper_run(
 
     return PilotPaperFixedFprConfig(
         paper_run_name=paper_run.run_name,
+        protocol_profile=paper_run.protocol_profile,
         prompt_set=paper_run.prompt_set,
         prompt_file=paper_run.prompt_file,
         prompt_protocol_name=prompt_protocol_name_for_run(paper_run.run_name),
@@ -540,7 +545,7 @@ def _stable_records_for_prompt_split(records: Iterable[PromptProtocolRecord]) ->
 
 def build_pilot_paper_prompt_split_summary(
     prompt_records: Iterable[PromptProtocolRecord],
-    config: PilotPaperFixedFprConfig | None = None,
+    config: PilotPaperFixedFprConfig,
 ) -> dict[str, Any]:
     """构建 pilot_paper prompt split 摘要。
 
@@ -549,7 +554,7 @@ def build_pilot_paper_prompt_split_summary(
     重新划分样本。
     """
 
-    resolved_config = config or PilotPaperFixedFprConfig()
+    resolved_config = config
     pilot_paper_records = tuple(record for record in prompt_records if record.prompt_set == resolved_config.prompt_set)
     assigned_records = apply_split_assignments(pilot_paper_records)
     split_counts = dict(sorted(Counter(record.split for record in assigned_records).items()))
@@ -596,7 +601,7 @@ def build_pilot_paper_prompt_split_summary(
 
 def build_pilot_paper_attack_matrix_rows(
     attack_configs: Iterable[AttackConfig],
-    config: PilotPaperFixedFprConfig | None = None,
+    config: PilotPaperFixedFprConfig,
 ) -> tuple[dict[str, Any], ...]:
     """构建 pilot_paper 共同协议使用的同一攻击矩阵行。
 
@@ -604,7 +609,7 @@ def build_pilot_paper_attack_matrix_rows(
     约束所有方法共享同一批攻击定义。
     """
 
-    resolved_config = config or PilotPaperFixedFprConfig()
+    resolved_config = config
     rows: list[dict[str, Any]] = []
     for attack_config in attack_configs:
         if not attack_config.enabled or attack_config.resource_profile not in resolved_config.attack_resource_profiles:
@@ -626,10 +631,10 @@ def build_pilot_paper_attack_matrix_rows(
     return tuple(sorted(rows, key=lambda item: (item["resource_profile"], item["attack_family"], item["attack_name"], item["attack_id"])))
 
 
-def build_fixed_fpr_protocol_digest(config: PilotPaperFixedFprConfig | None = None) -> str:
+def build_fixed_fpr_protocol_digest(config: PilotPaperFixedFprConfig) -> str:
     """生成 pilot_paper fixed-FPR 协议摘要。"""
 
-    resolved_config = config or PilotPaperFixedFprConfig()
+    resolved_config = config
     payload = {
         "result_protocol_name": resolved_config.result_protocol_name,
         "result_scope": resolved_config.result_scope,
@@ -650,11 +655,11 @@ def build_pilot_paper_result_import_schema(
     prompt_split_digest: str,
     attack_matrix_digest: str,
     fixed_fpr_protocol_digest: str,
-    config: PilotPaperFixedFprConfig | None = None,
+    config: PilotPaperFixedFprConfig,
 ) -> dict[str, Any]:
     """构建 pilot_paper 结果受治理导入 schema 描述。"""
 
-    resolved_config = config or PilotPaperFixedFprConfig()
+    resolved_config = config
     return {
         "result_protocol_name": resolved_config.result_protocol_name,
         "result_scope": resolved_config.result_scope,
@@ -699,11 +704,11 @@ def build_pilot_paper_method_registry_rows(
     prompt_split_digest: str,
     attack_matrix_digest: str,
     fixed_fpr_protocol_digest: str,
-    config: PilotPaperFixedFprConfig | None = None,
+    config: PilotPaperFixedFprConfig,
 ) -> tuple[dict[str, Any], ...]:
     """构建参与 pilot_paper 共同协议的方法登记表。"""
 
-    resolved_config = config or PilotPaperFixedFprConfig()
+    resolved_config = config
     display_names = {
         "slm_wm_current": "SLM-WM",
         "tree_ring": "Tree-Ring",
@@ -742,7 +747,7 @@ def build_pilot_paper_method_registry_rows(
 def build_pilot_paper_result_import_template_rows(
     method_rows: Iterable[Mapping[str, Any]],
     attack_rows: Iterable[Mapping[str, Any]],
-    config: PilotPaperFixedFprConfig | None = None,
+    config: PilotPaperFixedFprConfig,
 ) -> tuple[dict[str, Any], ...]:
     """构建 method × attack 的 pilot_paper 结果导入模板。
 
@@ -751,7 +756,7 @@ def build_pilot_paper_result_import_template_rows(
     协议下提交同构结果记录。
     """
 
-    resolved_config = config or PilotPaperFixedFprConfig()
+    resolved_config = config
     rows: list[dict[str, Any]] = []
     for method_row in method_rows:
         for attack_row in attack_rows:
@@ -1156,11 +1161,11 @@ def build_pilot_paper_common_protocol_summary(
     template_rows: Iterable[Mapping[str, Any]],
     import_validation_report: Mapping[str, Any],
     paired_superiority_summary: Mapping[str, Any],
-    config: PilotPaperFixedFprConfig | None = None,
+    config: PilotPaperFixedFprConfig,
 ) -> dict[str, Any]:
     """汇总 pilot_paper fixed-FPR 共同协议的运行前治理状态。"""
 
-    resolved_config = config or PilotPaperFixedFprConfig()
+    resolved_config = config
     materialized_attack_rows = tuple(attack_rows)
     materialized_method_rows = tuple(method_rows)
     materialized_template_rows = tuple(template_rows)
@@ -1200,7 +1205,7 @@ def build_pilot_paper_common_protocol_summary(
         and accepted_claim_record_count == len(accepted_records)
     )
     superiority_gate = build_superiority_gate_summary(accepted_records, resolved_config)
-    expected_target_fpr = PAPER_RUN_FIXED_FPR.get(resolved_config.paper_run_name, PILOT_PAPER_FIXED_FPR)
+    expected_target_fpr = PAPER_RUN_FIXED_FPR[resolved_config.paper_run_name]
     template_registry_unique = len(expected_template_keys) == len(materialized_template_rows)
     ready = (
         bool(prompt_summary.get("prompt_split_ready"))

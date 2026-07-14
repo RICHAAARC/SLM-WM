@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,7 +19,14 @@ from experiments.protocol.detection_key_identity import (
     REGISTERED_WATERMARK_KEY_ROLE,
     REGISTERED_WRONG_KEY_ROLE,
 )
-from experiments.protocol.formal_randomization import formal_randomization_repeat_ids
+from experiments.protocol.formal_randomization import (
+    formal_randomization_repeat_ids,
+    resolve_formal_randomization_repeat,
+)
+from experiments.protocol.fixed_fpr_observation_audit import (
+    FORMAL_THRESHOLD_SOURCE,
+)
+from experiments.protocol.paper_run_config import RUN_DEFAULTS
 from main.core.digest import build_stable_digest
 from paper_experiments.analysis.randomization_detection_statistics import (
     DETECTION_METHOD_IDS,
@@ -39,6 +47,8 @@ from paper_experiments.runners import randomization_detection_statistics as runn
 pytestmark = pytest.mark.quick
 
 CODE_VERSION = "a" * 40
+PAPER_RUN_NAME = "probe_paper"
+TARGET_FPR = float(RUN_DEFAULTS[PAPER_RUN_NAME]["target_fpr"])
 AGGREGATE_SHA = build_stable_digest({"aggregate_package": "detection"})
 AGGREGATE_DIGEST = build_stable_digest({"aggregate": "detection"})
 
@@ -67,14 +77,36 @@ def _provenance(tmp_path: Path) -> RandomizationAggregateProvenance:
 
     package_path = tmp_path / "aggregate.zip"
     package_path.write_bytes(b"aggregate")
+    repeat_components = tuple(
+        {
+            "randomization_repeat_id": repeat_id,
+            "generation_seed_index": (
+                resolve_formal_randomization_repeat(
+                    repeat_id
+                ).generation_seed_index
+            ),
+            "generation_seed_offset": (
+                resolve_formal_randomization_repeat(
+                    repeat_id
+                ).generation_seed_offset
+            ),
+            "watermark_key_index": (
+                resolve_formal_randomization_repeat(
+                    repeat_id
+                ).watermark_key_index
+            ),
+        }
+        for repeat_id in formal_randomization_repeat_ids()
+    )
     payload = {
-        "paper_run_name": "probe_paper",
-        "target_fpr": 0.1,
+        "paper_run_name": PAPER_RUN_NAME,
+        "target_fpr": TARGET_FPR,
         "randomization_aggregate_ready": True,
         "supports_paper_claim": False,
         "randomization_aggregate_digest": AGGREGATE_DIGEST,
         "common_code_version": CODE_VERSION,
         "randomization_repeat_ids": list(formal_randomization_repeat_ids()),
+        "randomization_repeat_components": repeat_components,
     }
     return RandomizationAggregateProvenance(
         package_path=package_path,
@@ -85,11 +117,35 @@ def _provenance(tmp_path: Path) -> RandomizationAggregateProvenance:
         manifest_sha256=build_stable_digest({"manifest": "detection"}),
         payload=payload,
         manifest={},
-        randomization_repeat_components=(),
+        randomization_repeat_components=repeat_components,
         invariant_packages=(),
         common_code_version=CODE_VERSION,
         randomization_aggregate_digest=AGGREGATE_DIGEST,
     )
+
+
+def test_final_statistics_consumer_rejects_incomplete_repeat_aggregate(
+    tmp_path: Path,
+) -> None:
+    """最终统计入口必须自行拒绝缺失的 seed-key repeat。"""
+
+    provenance = _provenance(tmp_path)
+    incomplete_records = provenance.randomization_repeat_components[:-1]
+    incomplete_payload = {
+        **dict(provenance.payload),
+        "randomization_repeat_components": incomplete_records,
+    }
+    incomplete = replace(
+        provenance,
+        payload=incomplete_payload,
+        randomization_repeat_components=incomplete_records,
+    )
+
+    with pytest.raises(
+        runner.RandomizationDetectionStatisticsRunnerError,
+        match="精确包含9个",
+    ):
+        runner._require_provenance(incomplete)
 
 
 def _identity(repeat_id: str, prompt_index: int) -> dict[str, object]:
@@ -501,7 +557,7 @@ def test_main_key_role_and_baseline_score_must_rebuild(
     baseline_row = {
         "baseline_id": "tree_ring",
         "threshold": 0.5,
-        "threshold_source": "nested_calibration_threshold_freeze_conformal_v1",
+        "threshold_source": FORMAL_THRESHOLD_SOURCE,
         "score": 0.9,
         "detection_decision": False,
         "image_path": "outputs/tree_ring.png",
@@ -535,12 +591,15 @@ def _result() -> runner.RandomizationDetectionStatisticsResult:
         ),
         "main_method_clean_fixed_fpr_ready": False,
         "main_method_wrong_key_fixed_fpr_ready": False,
+        "all_per_attack_fixed_fpr_ready": False,
+        "all_test_negative_populations_fixed_fpr_ready": False,
+        "universal_per_attack_superiority_claim_ready": False,
         "randomization_detection_statistics_ready": True,
         "supports_paper_claim": False,
     }
     report = {
-        "paper_run_name": "probe_paper",
-        "target_fpr": 0.1,
+        "paper_run_name": PAPER_RUN_NAME,
+        "target_fpr": TARGET_FPR,
         "method_repeat_threshold_map_digest": build_stable_digest(
             {"threshold_map": 1}
         ),
@@ -595,4 +654,10 @@ def test_writer_publishes_negative_result_transactionally(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["metadata"]["randomization_detection_statistics_ready"] is True
     assert manifest["metadata"]["main_method_clean_fixed_fpr_ready"] is False
+    assert manifest["metadata"][
+        "all_test_negative_populations_fixed_fpr_ready"
+    ] is False
+    assert manifest["metadata"][
+        "universal_per_attack_superiority_claim_ready"
+    ] is False
     assert manifest["metadata"]["supports_paper_claim"] is False

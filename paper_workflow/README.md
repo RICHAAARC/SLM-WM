@@ -13,13 +13,13 @@
 
 `paper_workflow/notebook_utils/workflow_archive_naming.py` 保存 Notebook、method-faithful baseline 与 official-reference 的外层归档角色词表。它只复用 `experiments.runtime.archive_naming` 提供的 UTC 时间和短提交身份原语；`experiments/` 不感知 Notebook 或外部 baseline workflow 名称。
 
-`paper_workflow/colab_utils/paper_run_environment.py` 只记录 Notebook 会话起点并转发到 `scripts/formal_workflow_environment.py`。正式运行配置由 scripts 层统一读取 `SLM_WM_PAPER_RUN_NAME`；未显式设置该变量时, Notebook、服务器与配置解析层唯一默认使用 `probe_paper`, `pilot_paper` 和 `full_paper` 必须由运行者显式选择。三个论文级别采用相同方法、攻击、baseline、消融、FPR=0.1 工作点和证据门禁, 仅规模与统计强度不同:
+`paper_workflow/colab_utils/paper_run_environment.py` 只记录 Notebook 会话起点并转发到 `scripts/formal_workflow_environment.py`。正式运行配置由 scripts 层统一读取 `SLM_WM_PAPER_RUN_NAME`；未显式设置该变量时, Notebook、服务器与配置解析层唯一默认使用 `probe_paper`, `pilot_paper` 和 `full_paper` 必须由运行者显式选择。三个论文级别采用相同方法、攻击、baseline、消融、统计实现和证据门禁, 并分别冻结 FPR=0.1、FPR=0.01和 FPR=0.001 工作点:
 
 | 级别 | Prompt | test | FPR |
 |---|---:|---:|---:|
 | `probe_paper` | 70 | 34 | 0.1 |
-| `pilot_paper` | 700 | 340 | 0.1 |
-| `full_paper` | 7000 | 3400 | 0.1 |
+| `pilot_paper` | 700 | 340 | 0.01 |
+| `full_paper` | 7000 | 3400 | 0.001 |
 
 每个 Notebook 在拉取仓库前必须由 `SLM_WM_REPOSITORY_COMMIT` 提供精确40位小写 Git SHA。正式结果入口只以 `python -I scripts/run_formal_workflow_host.py` 调用宿主 launcher, 不在 Colab 系统解释器中导入 repository helper 或直接安装依赖。launcher 先复验 clean detached checkout, 再从固定 SHA-256 的 `uv` wheel 创建 registry 指定的精确 CPython 3.12.13, 按已提交完整哈希锁准备 CPU 父 `workflow_orchestrator`, 最后由该解释器调用 `scripts/formal_workflow_entry.py`。该内层入口再选择 GPU workflow 或单 repeat 证据封装入口, 不引用 `paper_workflow/`。GPU workflow 只准备当前职责对应的一个 CUDA 科学子 profile。正式运行与打包边界仍实时复验 Git 锁、依赖身份和科学执行证据。
 

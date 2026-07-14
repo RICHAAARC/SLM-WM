@@ -45,53 +45,28 @@ python scripts/run_gpu_server_workflow.py \
 
 ## CPU 闭合入口
 
-- `write_randomization_repeat_evidence_package.py`: 显式选择一个已登记 seed-key repeat 的7类随机化 leaf ZIP, 以原始 ZIP 字节嵌套写出自包含证据包。该包固定 `randomization_aggregate_ready=false` 与 `supports_paper_claim=false`。
-- `write_randomization_aggregate_provenance_package.py`: 按权威顺序显式接收9个单 repeat 证据组件和3个跨 repeat 不变 official-reference ZIP, 重新调用生产 validator / inspector 后保存12个输入 ZIP 的原始字节。聚合包固定 `randomization_aggregate_ready=true` 与 `supports_paper_claim=false`; 它只证明正式统计输入已闭合, 不直接支持论文结论。Manifest 的重建命令只接受当前 aggregate ZIP 路径参数, 由层内入口在临时目录安全提取12个原始 ZIP 并重新执行全部生产门禁, 不引用只能在压缩包内部看到的成员路径。
-- `paper_experiments/runners/paper_claim_provenance.py`: 全部正式结论 Writer 共用的来源边界。精确9+3聚合来源构造器与独立 validator 已实现；在各 Writer 完成不可变来源对象绑定、原始记录重算和 aggregate digest 传播前, 相应公开入口仍提前拒绝且不创建输出。
-- `paper_result_closure.py`: 仅承担精确9重复聚合后的论文结果闭合。没有9重复聚合证据时直接拒绝构造或执行论文闭合 DAG。
-- `run_gpu_server_result_closure.py`: 精确9重复聚合后的 CPU 汇总服务器入口。单 repeat 保存与传输必须使用随机化证据打包入口。
-- `write_pilot_paper_result_records.py`: 正式 records Writer 必须先取得版本化精确9重复聚合验证器返回的来源对象; 在该 Writer 完成不可变来源对象绑定前, 公开入口在读取任何输入和创建任何输出前无条件拒绝执行。单 repeat ZIP 不得通过独立物化模式写入正式结果目录。
-- `write_pilot_paper_fixed_fpr_common_protocol_outputs.py`: 只负责已验证精确9重复聚合后的共同协议产物。该入口不接受单 repeat 包、调用方声明的 ready 字段或其他输入身份替代物; 在共同协议 Writer 完成不可变 aggregate 来源绑定前保持失败即关闭。
-- `write_fixed_fpr_threshold_audit_outputs.py`: 正式职责是从9个重复中主方法与四个外部 baseline 的原始 observation 独立重算45个 calibration clean-negative 冻结阈值、阈值摘要和逐条判定；当前公开入口在精确聚合记录提取器接入前失败即关闭。
-- `write_primary_baseline_result_candidates.py`: 从三个 method-faithful transfer manifest 的 exact-set collection 与 T2SMark 正式候选生成共同协议记录。
-- `write_primary_baseline_evidence_outputs.py`: 联合核验三个 common-backbone exact-set source 与独立 T2SMark formal source, 生成四方法完整证据门禁。
-- `write_official_reference_fidelity_evidence_outputs.py`: 在精确结果包物化后独立核验三个 official-reference family 的运行、validation、package input 摘要、归档治理和共同 clean 代码版本, 写入 `outputs/official_reference_fidelity_evidence/<paper_run_name>/`; 正式闭合调用使用 `--require-pass`。该入口只生成补充方法忠实度证据, 不声明主表优势。
-- `write_paired_superiority_outputs.py`: 正式职责是把9个重复中的 SLM-WM 与4个主表 baseline 的完整 test Prompt × attack 记录精确配对, 并执行100000次 Prompt-clustered bootstrap、单侧 bounded Hoeffding Prompt 均值检验和跨4比较 Holm 校正；当前公开入口在跨重复原始记录重算接入前失败即关闭。
-- `write_pilot_paper_result_analysis_outputs.py`: 正式职责是从跨重复 records 生成完整逐攻击 CI、优势比较表、失败记录与真实失败案例图；当前公开入口在跨重复 records Writer 接入前失败即关闭。
-- `write_pilot_paper_complete_result_package.py`: 只接受通过版本化精确9重复聚合验证器返回的来源对象, 从该对象绑定的9个随机化组件与3个跨重复不变包物化输入, 再核验最终结果门禁并按当前 `paper_run_name` 独占目录执行 fail-closed 打包; 跨重复 records、共同协议和结果门禁尚未接入时公开入口在创建输出前拒绝执行, 最终 zip 摘要只写入包外 archive receipt。
-- `write_paper_artifact_evidence_audit_outputs.py`: 正式职责是读取跨重复仅图像盲检原始 JSONL、冻结协议与正式表图数据并重建 ROC / DET、FID / KID 和关键统计；当前公开入口在上游正式 Writer 接入前失败即关闭。
-- `write_submission_readiness_outputs.py`: 正式职责是在实际数据验证与 claim 审计之后执行投稿就绪审计；当前公开入口随上游正式 Writer 一起失败即关闭。
-- `write_evidence_closure_entry_review_outputs.py`: 正式职责是由已物化的受治理审计报告生成入口清单与确定性决策；当前公开入口随上游正式 Writer 一起失败即关闭。
-- `write_result_closure_gate_outputs.py`: 正式职责是联合复核精确9重复聚合来源、三方法 official-reference 忠实度、45个 method-repeat 阈值、4个主表 baseline 的配对总体优势、正式 records、表图、消融、质量和入口审计；当前公开入口在全部上游跨重复 Writer 接入前失败即关闭。
+- `write_randomization_repeat_evidence_package.py`: 显式选择一个已登记 seed-key repeat 的7类随机化 leaf ZIP, 以原始 ZIP 字节写出自包含证据组件。该组件固定 `randomization_aggregate_ready=false` 与 `supports_paper_claim=false`。
+- `write_randomization_aggregate_provenance_package.py`: 按权威顺序接收9个 repeat 证据组件与3个跨 repeat 不变 official-reference ZIP, 重新调用生产 validator 后保存12个输入 ZIP 的原始字节。聚合包固定 `randomization_aggregate_ready=true` 与 `supports_paper_claim=false`, 只表示最终统计输入已经闭合。
+- `paper_result_closure.py`: 从显式文件或目录中选择唯一有效聚合 ZIP, 核验论文运行层级、冻结 FPR、共同 clean Git 提交和聚合摘要, 随后执行4个可脱离 Notebook 的规范统计 Writer。Writer 分别重建检测与逐攻击统计、全样本及质量匹配配对优势、FID/KID 联合质量统计、真实重运行消融必要性统计。
+- `run_gpu_server_result_closure.py`: CPU 汇总主机入口。`--dry-run` 仍会验证聚合来源与 Git 提交并返回真实命令计划；正式模式调用同一个 `paper_result_closure.py` 实现, 不维护第二套闭合逻辑。
 
-## 聚合闭合执行边界
+闭合入口会再次读取4个统计产物的 summary、manifest、文件集合和 SHA-256, 并要求它们绑定同一聚合来源、代码提交、运行层级和 FPR。顶层结论分为两个独立字段：
 
-下列17项是冻结的目标执行顺序。只有权威9个 repeat 全部完成、原始证据重算通过且版本化聚合来源验证成立后才能执行；当前尚未接入跨重复重算的公开 Writer 会在创建输出前拒绝。任何单 repeat 输入都不能调用这些论文 claim 产物。
+1. `paper_result_evidence_ready`: 4类统计均能从聚合包内样本级记录或原始 Inception 特征重建。
+2. `supports_paper_claim`: 统一阴性总体 fixed-FPR、全样本及质量匹配总体优势、正式消融必要性三项门禁同时通过。FID/KID 是必需测量证据, 但不参与中心结论投票。
 
-1. `write_official_reference_fidelity_evidence_outputs.py --require-pass`
-2. `write_attack_matrix_outputs.py`
-3. `write_fixed_fpr_threshold_audit_outputs.py --require-pass`
-4. `write_paired_superiority_outputs.py --require-pass`
-5. `write_primary_baseline_method_faithful_adapter_protocol.py`
-6. `write_primary_baseline_result_candidates.py`
-7. `write_primary_baseline_formal_import_protocol.py`
-8. `write_primary_baseline_evidence_outputs.py --require-pass`
-9. `write_external_baseline_comparison_outputs.py`
-10. `write_pilot_paper_result_records.py --require-existing-evidence`
-11. `write_pilot_paper_fixed_fpr_common_protocol_outputs.py --require-existing-evidence`
-12. `write_pilot_paper_result_analysis_outputs.py`
-13. `write_paper_artifact_evidence_audit_outputs.py`
-14. `write_submission_readiness_outputs.py`
-15. `write_evidence_closure_entry_review_outputs.py`
-16. `write_result_closure_gate_outputs.py --require-pass`
-17. `write_pilot_paper_complete_result_package.py`
+完整归档只保存不可变聚合来源、4类重建统计、闭合报告及归档 manifest。任一 repeat 缺失、跨运行混选、FPR 漂移、Git 提交不一致、原始记录重算失败或输出摘要漂移都会阻断归档。
 
-逐攻击结果表属于完整披露证据。主表总体 superiority claim 只由第4步的 Prompt 聚类配对统计及第16步的跨产物语义门禁决定; official-reference 忠实度证据不进入主表。
+CPU 汇总命令示例：
 
-当前没有可用的远程 Linux 服务器或本地 CUDA 环境。本地只执行 CPU 测试、静态审计和协议验证；GPU 主方法、消融和 baseline 先在 Colab 运行, 后续 full_paper 再迁移到独立 CUDA 服务器。
+```bash
+python scripts/run_gpu_server_result_closure.py \
+  --paper-run-name probe_paper \
+  --randomization-aggregate-package-path outputs/randomization_aggregate/probe_paper/randomization_aggregate.zip \
+  --complete-output-dir outputs/complete_result_packages \
+  --repository-commit <40位小写Git提交>
+```
 
-五个 CUDA profile 的 repository 隔离子执行路径均已定义。完整锁候选只解析目标 CPython/Linux x86_64 wheel 闭包和登记 PyTorch index, 不导入 torch 或执行 CUDA, 因而可在无 GPU Linux 服务器完成; 真实锁安装、`pip check`、torch/CUDA identity、CUDA 可用性和科学运行仍必须在 Colab GPU 环境通过。Notebook 不得内嵌安装逻辑或绕过已提交锁门禁。
-
-完整结果包的共享代码白名单只归档 `scripts/` 及更内层的可执行实现, 不归档 `paper_workflow/`、Notebook 或 Colab / Drive 包装。该边界使 CPU 服务器能够仅凭结果包中的内层实现复核精确9重复聚合来源、科学执行绑定和17步证据闭合。
+当前没有可用的远程 Linux 服务器或本地 CUDA 环境。本地只执行 CPU 测试、静态审计和协议验证；GPU 主方法、消融和 baseline 先在 Colab 运行, 后续 `full_paper` 再迁移到独立 CUDA 服务器。五个 CUDA profile 的真实锁安装、`pip check`、torch/CUDA identity、CUDA 可用性和科学运行必须在 Colab 或 GPU 服务器完成。Notebook 不得内嵌安装逻辑或绕过已提交锁门禁。
 
 所有持久化输出必须位于 `outputs/`; harness 报告必须位于 `outputs/audit_reports/`。

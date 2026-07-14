@@ -17,7 +17,6 @@ from experiments.protocol.attacks import (
 )
 from experiments.protocol.pilot_paper_fixed_fpr import (
     PILOT_PAPER_ATTACK_RESOURCE_PROFILES,
-    PILOT_PAPER_FIXED_FPR,
     prompt_protocol_name_for_run,
 )
 from experiments.protocol.paper_run_config import build_paper_run_config
@@ -293,7 +292,7 @@ def resolve_paper_run_prompt_protocol_name(root: str | Path = ".") -> str:
 
 
 def build_primary_baseline_formal_import_schema(
-    target_fpr: float = PILOT_PAPER_FIXED_FPR,
+    target_fpr: float,
     *,
     root: str | Path = ".",
 ) -> dict[str, Any]:
@@ -997,7 +996,7 @@ def validate_primary_baseline_formal_import_rows(
     rows: Iterable[Mapping[str, Any]],
     *,
     evidence_root: str | Path = ".",
-    target_fpr: float = PILOT_PAPER_FIXED_FPR,
+    target_fpr: float,
     require_existing_evidence: bool = True,
     evidence_search_roots: Iterable[str | Path] = (),
     prompt_protocol_name: str | None = None,
