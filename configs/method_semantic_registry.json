@@ -1,8 +1,8 @@
 {
   "registry_schema": "slm_wm_method_semantic_registry_v1",
   "registry_scope": "normative_traceability_without_scientific_conformance_decision",
-  "method_definition_schema": "slm_wm_constructive_local_tangent_v9",
-  "method_definition_digest": "2b7ab51c952abf74d145fd23694790b9de71fc6712b319fb10b3f46c9db0a0fe",
+  "method_definition_schema": "slm_wm_constructive_local_tangent_v10",
+  "method_definition_digest": "8875c24ad29344b2ea8a6fc6ae62d8bccaafd0fa426e8072e2380bb1abca7d43",
   "invariants": [
     {
       "invariant_id": "constructive_local_tangent_scope",
@@ -1453,7 +1453,9 @@
         "rescue_content_threshold=content_threshold",
         "alignment_structure_gate=preregistered(anchor_count=12,residual_threshold=0.20,minimum_inlier_ratio=0.50)",
         "alignment_layer=lexicographic_argmax(registration_objective,observation_relation,registration_confidence,negative_frozen_layer_rank)",
-        "aligned_rgb_uint8=floor(255*clip(grid_sample(image,bilinear,border,align_corners_true),0,1))"
+        "aligned_rgb_uint8=floor(255*clip(grid_sample(image,bilinear,border,align_corners_true),0,1))",
+        "registration_objective_margin=registration_objective_score-identity_registration_objective_score",
+        "registration_geometry_reliable_requires=registration_objective_margin>0"
       ],
       "configuration_fields": [
         "detector_input_access_mode",
@@ -1537,7 +1539,12 @@
         "public_detection_noise_content_sha256",
         "public_detection_noise_evidence_digest",
         "public_detection_noise_evidence_records",
-        "public_detection_noise_evidence_ready"
+        "public_detection_noise_evidence_ready",
+        "registration_objective_score",
+        "identity_registration_objective_score",
+        "registration_objective_margin",
+        "registration_geometry_reliable",
+        "alignment_digest"
       ],
       "fail_closed_conditions": [
         "private_generation_state_requested",
@@ -1549,7 +1556,10 @@
         "calibration_test_detector_config_digest_mismatch",
         "alignment_decision_field_mismatch",
         "alignment_layer_order_or_selection_mismatch",
-        "aligned_image_resampling_protocol_drift"
+        "aligned_image_resampling_protocol_drift",
+        "exact_identity_alignment_candidate_missing",
+        "registration_objective_margin_formula_mismatch",
+        "identity_alignment_declares_positive_objective_margin"
       ],
       "forbidden_substitutes": [
         "prompt_conditioned_detection",
@@ -1560,11 +1570,18 @@
         "separate_rescue_threshold",
         "implicit_detector_parameter_defaults",
         "implicit_callback_order_alignment_tie_break",
-        "alternate_aligned_image_padding_or_quantization"
+        "alternate_aligned_image_padding_or_quantization",
+        "runner_up_registration_objective_margin",
+        "nearest_distinct_transform_registration_objective_margin"
       ],
       "cpu_property_id": "detector_signature_and_runtime_reject_generation_private_state",
       "specification_test_nodes": [
         "tests/functional/test_real_scientific_operators.py::test_image_only_detector_interface_and_positive_content_path",
+        "tests/functional/test_attention_affine_protocol_geometry.py::test_generic_hierarchical_search_recovers_random_continuous_affine",
+        "tests/functional/test_attention_affine_protocol_geometry.py::test_identity_alignment_cannot_pass_positive_objective_gain_gate",
+        "tests/functional/test_attention_affine_protocol_geometry.py::test_alignment_fails_closed_when_exact_identity_candidate_is_missing",
+        "tests/functional/test_attention_affine_protocol_geometry.py::test_complete_alignment_record_digest_rebuild_rejects_field_mutations",
+        "tests/functional/test_real_scientific_operators.py::test_identity_alignment_cannot_propagate_into_detector_rescue",
         "tests/functional/test_attention_affine_protocol_geometry.py::test_cross_layer_alignment_selection_uses_frozen_lexicographic_rule",
         "tests/functional/test_real_scientific_operators.py::test_image_alignment_quantizes_fractional_rgb_with_floor",
         "tests/functional/test_attack_matrix.py::test_attack_matrix_rejects_non_blind_detection_records",
@@ -1596,7 +1613,9 @@
         "raw_and_aligned_detection_bind_public_detection_noise_evidence",
         "registration_geometry_gate=(requested_anchor_count=12,residual<=0.20,inlier_ratio>=0.50)",
         "alignment_layer=lexicographic_argmax(registration_objective,observation_relation,registration_confidence,negative_frozen_layer_rank)",
-        "aligned_rgb_uint8=floor(255*clip(grid_sample(image,bilinear,border,align_corners_true),0,1))"
+        "aligned_rgb_uint8=floor(255*clip(grid_sample(image,bilinear,border,align_corners_true),0,1))",
+        "registration_objective_margin=registration_objective_score-identity_registration_objective_score",
+        "registration_geometry_reliable_requires=registration_objective_margin>0"
       ],
       "configuration_fields": [
         "detector_input_access_mode",
@@ -1668,7 +1687,11 @@
         "public_detection_noise_prg_identity_digest",
         "public_detection_noise_evidence_digest",
         "public_detection_noise_evidence_records",
-        "public_detection_noise_evidence_ready"
+        "public_detection_noise_evidence_ready",
+        "registration_objective_score",
+        "identity_registration_objective_score",
+        "registration_objective_margin",
+        "registration_geometry_reliable"
       ],
       "fail_closed_conditions": [
         "calibration_clean_negatives_missing",
@@ -1681,7 +1704,10 @@
         "calibration_test_detector_config_digest_mismatch",
         "alignment_decision_field_mismatch",
         "alignment_layer_order_or_selection_mismatch",
-        "aligned_image_resampling_protocol_drift"
+        "aligned_image_resampling_protocol_drift",
+        "exact_identity_alignment_candidate_missing",
+        "registration_objective_margin_formula_mismatch",
+        "identity_alignment_declares_positive_objective_margin"
       ],
       "forbidden_substitutes": [
         "independent_rescue_threshold",
@@ -1690,11 +1716,18 @@
         "temporary_failure_reason_reuse",
         "aligned_score_without_reencoding",
         "implicit_callback_order_alignment_tie_break",
-        "alternate_aligned_image_padding_or_quantization"
+        "alternate_aligned_image_padding_or_quantization",
+        "runner_up_registration_objective_margin",
+        "nearest_distinct_transform_registration_objective_margin"
       ],
       "cpu_property_id": "geometry_rescue_reuses_the_calibrated_content_threshold_and_cannot_vote_positive_alone",
       "specification_test_nodes": [
         "tests/functional/test_real_scientific_operators.py::test_complete_evidence_calibration_includes_geometry_rescue",
+        "tests/functional/test_attention_affine_protocol_geometry.py::test_generic_hierarchical_search_recovers_random_continuous_affine",
+        "tests/functional/test_attention_affine_protocol_geometry.py::test_identity_alignment_cannot_pass_positive_objective_gain_gate",
+        "tests/functional/test_attention_affine_protocol_geometry.py::test_alignment_fails_closed_when_exact_identity_candidate_is_missing",
+        "tests/functional/test_attention_affine_protocol_geometry.py::test_complete_alignment_record_digest_rebuild_rejects_field_mutations",
+        "tests/functional/test_real_scientific_operators.py::test_identity_alignment_cannot_propagate_into_detector_rescue",
         "tests/functional/test_attention_affine_protocol_geometry.py::test_cross_layer_alignment_selection_uses_frozen_lexicographic_rule",
         "tests/functional/test_real_scientific_operators.py::test_image_alignment_quantizes_fractional_rgb_with_floor",
         "tests/functional/test_real_scientific_operators.py::test_frozen_protocol_recomputes_threshold_dependent_failure_reason",

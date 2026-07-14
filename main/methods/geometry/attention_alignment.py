@@ -756,6 +756,7 @@ class AttentionAlignmentResult:
     registration_alignment_gain: float
     bidirectional_relation_score: float
     registration_objective_score: float
+    identity_registration_objective_score: float
     registration_objective_margin: float
     registration_coverage_penalty: float
     canonical_coverage_ratio: float
@@ -956,6 +957,13 @@ def recompute_attention_alignment_digest_payload(
             _alignment_float(record, "registration_objective_score"),
             12,
         ),
+        "identity_registration_objective_score": round(
+            _alignment_float(
+                record,
+                "identity_registration_objective_score",
+            ),
+            12,
+        ),
         "registration_objective_margin": round(
             _alignment_float(record, "registration_objective_margin"),
             12,
@@ -1115,6 +1123,55 @@ def validate_attention_alignment_record(
     ):
         raise ValueError("registration_confidence 与配准公式不一致")
 
+    registration_objective_score = _alignment_float(
+        record,
+        "registration_objective_score",
+    )
+    identity_registration_objective_score = _alignment_float(
+        record,
+        "identity_registration_objective_score",
+    )
+    registration_objective_margin = _alignment_float(
+        record,
+        "registration_objective_margin",
+    )
+    expected_objective_margin = (
+        registration_objective_score
+        - identity_registration_objective_score
+    )
+    if (
+        registration_objective_margin < 0.0
+        or not math.isclose(
+            registration_objective_margin,
+            expected_objective_margin,
+            rel_tol=0.0,
+            abs_tol=2e-12,
+        )
+    ):
+        raise ValueError("registration_objective_margin 与 identity 目标差公式不一致")
+    affine_transform = payload["affine_transform"]
+    identity_transform = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+    affine_is_identity = all(
+        math.isclose(
+            float(affine_transform[row_index][column_index]),
+            identity_transform[row_index][column_index],
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        for row_index in range(2)
+        for column_index in range(3)
+    )
+    if affine_is_identity and (
+        registration_objective_margin != 0.0
+        or not math.isclose(
+            registration_objective_score,
+            identity_registration_objective_score,
+            rel_tol=0.0,
+            abs_tol=2e-12,
+        )
+    ):
+        raise ValueError("identity 配准不得声明正注册目标增益")
+
     expected_reliable = bool(
         _alignment_float(record, "relation_sync_score") >= -1.0
         and _alignment_float(record, "observation_relation_score") > 0.0
@@ -1123,7 +1180,7 @@ def validate_attention_alignment_record(
         and mean_residual <= gate["attention_residual_threshold"]
         and canonical_coverage >= _MINIMUM_REGISTRATION_COVERAGE
         and observation_coverage >= _MINIMUM_REGISTRATION_COVERAGE
-        and _alignment_float(record, "registration_objective_margin") > 0.0
+        and registration_objective_margin > 0.0
         and record.get("attention_relation_source")
         == DIRECT_QK_RELATION_SOURCE
         and record.get("attention_relation_qk_operator_metadata_ready")
@@ -1248,15 +1305,6 @@ def recover_attention_affine_alignment(
     evaluated = _combine_evaluations(evaluations)
     best_index = int(torch.argmax(evaluated.objectives).item())
     best_transform = evaluated.transforms[best_index]
-    transform_distances = (
-        evaluated.transforms - best_transform.unsqueeze(0)
-    ).square().sum(dim=(1, 2)).sqrt()
-    distinct_competitors = evaluated.objectives[transform_distances > 1e-4]
-    second_objective = (
-        float(distinct_competitors.max().item())
-        if distinct_competitors.numel()
-        else float(evaluated.objectives[best_index].item())
-    )
     best_weights = evaluated.weights[best_index]
     best_valid = evaluated.valid[best_index]
     best_residuals = evaluated.nearest_residuals[best_index]
@@ -1311,10 +1359,17 @@ def recover_attention_affine_alignment(
         device=matrix.device,
         dtype=evaluated.transforms.dtype,
     )
-    identity_index = int(
-        (
-            evaluated.transforms - identity_transform.unsqueeze(0)
-        ).square().sum(dim=(1, 2)).argmin().item()
+    identity_distance_sq = (
+        evaluated.transforms - identity_transform.unsqueeze(0)
+    ).square().sum(dim=(1, 2))
+    identity_index = int(identity_distance_sq.argmin().item())
+    if not torch.equal(
+        evaluated.transforms[identity_index],
+        identity_transform,
+    ):
+        raise RuntimeError("配准候选集合缺少精确 identity 候选")
+    identity_registration_objective_score = float(
+        evaluated.objectives[identity_index].item()
     )
     identity_observation_score = float(
         evaluated.observation_relation_scores[identity_index].item()
@@ -1351,7 +1406,9 @@ def recover_attention_affine_alignment(
         if bool(inliers.any())
         else float("inf")
     )
-    registration_objective_margin = max(0.0, best_objective - second_objective)
+    registration_objective_margin = (
+        best_objective - identity_registration_objective_score
+    )
     confidence = (
         max(0.0, best_bidirectional_score)
         * inlier_ratio
@@ -1412,6 +1469,10 @@ def recover_attention_affine_alignment(
         "registration_alignment_gain": round(registration_alignment_gain, 12),
         "bidirectional_relation_score": round(best_bidirectional_score, 12),
         "registration_objective_score": round(best_objective, 12),
+        "identity_registration_objective_score": round(
+            identity_registration_objective_score,
+            12,
+        ),
         "registration_objective_margin": round(registration_objective_margin, 12),
         "registration_coverage_penalty": round(best_coverage_penalty, 12),
         "canonical_coverage_ratio": round(canonical_coverage_ratio, 12),
@@ -1487,6 +1548,9 @@ def recover_attention_affine_alignment(
         registration_alignment_gain=registration_alignment_gain,
         bidirectional_relation_score=best_bidirectional_score,
         registration_objective_score=best_objective,
+        identity_registration_objective_score=(
+            identity_registration_objective_score
+        ),
         registration_objective_margin=registration_objective_margin,
         registration_coverage_penalty=best_coverage_penalty,
         canonical_coverage_ratio=canonical_coverage_ratio,
@@ -1635,7 +1699,6 @@ def recover_attention_affine_alignment(
             "coordinate_convention": ATTENTION_COORDINATE_CONVENTION,
             "grid_align_corners": ATTENTION_GRID_ALIGN_CORNERS,
             "registration_candidate_count": int(evaluated.transforms.shape[0]),
-            "sync_margin_duplicate_transform_tolerance": 1e-4,
             "canonical_relation_weight": _CANONICAL_RELATION_WEIGHT,
             "observation_relation_weight": _OBSERVATION_RELATION_WEIGHT,
             "registration_coverage_penalty_weight": _COVERAGE_PENALTY_WEIGHT,

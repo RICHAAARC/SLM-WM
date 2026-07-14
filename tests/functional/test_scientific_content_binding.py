@@ -93,8 +93,8 @@ _ATTENTION_ALIGNMENT_GATE = attention_alignment_gate_record(
     ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
     ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
 )
-_IDENTITY_AFFINE_TRANSFORM = (
-    (1.0, 0.0, 0.0),
+_RELIABLE_AFFINE_TRANSFORM = (
+    (1.0, 0.0, 0.01),
     (0.0, 1.0, 0.0),
 )
 _RISK_SOURCE_FIELDS = (
@@ -967,7 +967,7 @@ def _detection_record(
         "alignment": (
             {
                 "affine_transform": [
-                    list(row) for row in _IDENTITY_AFFINE_TRANSFORM
+                    list(row) for row in _RELIABLE_AFFINE_TRANSFORM
                 ],
                 "alignment_digest": take_digest(),
             }
@@ -1891,7 +1891,7 @@ def _artifact_fixture(
             _align_image(
                 evaluated_image,
                 SimpleNamespace(
-                    affine_transform=_IDENTITY_AFFINE_TRANSFORM
+                    affine_transform=_RELIABLE_AFFINE_TRANSFORM
                 ),
             )
         )["image_rgb_uint8_content_sha256"]

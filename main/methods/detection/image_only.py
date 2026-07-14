@@ -50,7 +50,7 @@ ImageLatentEncoder = Callable[[Any], Any]
 AttentionRecord = tuple[str, Any, tuple[int, ...]]
 ImageAttentionExtractor = Callable[[Any], tuple[AttentionRecord, ...]]
 ImageAligner = Callable[[Any, AttentionAlignmentResult], Any]
-IMAGE_ONLY_DETECTOR_CONFIG_SCHEMA = "slm_wm_image_only_detector_config_v2"
+IMAGE_ONLY_DETECTOR_CONFIG_SCHEMA = "slm_wm_image_only_detector_config_v3"
 ATTENTION_ALIGNMENT_LAYER_SELECTION_RULE = (
     "lexicographic_objective_observation_confidence_then_frozen_layer_order_v1"
 )

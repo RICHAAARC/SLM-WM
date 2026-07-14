@@ -35,7 +35,7 @@ from main.methods.geometry.differentiable_attention import (
 )
 
 
-METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_v9"
+METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_v10"
 
 
 def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
@@ -217,6 +217,10 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
             ),
             "calibration_data_used_for_gate_parameters": False,
             "alignment_digest_binds_gate_parameters": True,
+            "registration_objective_margin_rule": (
+                "best_registration_objective_minus_identity_registration_objective"
+            ),
+            "registration_objective_margin_required_positive": True,
         },
         "write_validation": {
             "branch_amplitude_envelope_validation_rule": (

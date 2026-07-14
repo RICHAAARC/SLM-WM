@@ -5,26 +5,26 @@
 本报告审计当前核心方法定义与真实模型绑定实现。审计依据为:
 
 - 权威方法定义: `docs/builds/method_semantic_invariants.md`。
-- 可机读方法定义摘要: `2b7ab51c952abf74d145fd23694790b9de71fc6712b319fb10b3f46c9db0a0fe`。
+- 可机读方法定义摘要: `8875c24ad29344b2ea8a6fc6ae62d8bccaafd0fa426e8072e2380bb1abca7d43`。
 - 密钥 PRG 算法摘要: `a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b`。
 - 正式随机化协议摘要: `d09928b763c17d2c68fa2bc3921b59b76c3df2fc264fb364ae33bcc8bdeba0d5`。
-- 方法追踪规范摘要: `6dd763343d71c3fc6803c9bfad60ff6ad2159d139a75682f2b3223c67112419c`。
+- 方法追踪规范摘要: `e1d6d106ae3756ff9afe2a906a368d884cd8c264941f45d5ea29889cb2a264cb`。
 
 本报告只判断静态实现、CPU 公式性质、反例拒绝和跨模块身份绑定。它不把尚未执行的 SD3.5 CUDA 运行、论文统计或结果包解释为已经完成的证据。
 
 ## 审计结论
 
-关键科学算子在当前冻结定义下完成 CPU 公式、反例和跨路径身份核验:
+注意力配准结构目标已在当前冻结定义下完成 CPU 公式、反例和跨路径身份核验；完整方法仍保留一个待修复的 calibration 决策偏离:
 
-- 方法语义偏离 P0: 0项。
-- 正式完整方法路径中的代理、占位或静默科学算子替代: 0项。
+- 方法语义偏离 P0: 1项。正式运行仍由运行时常量提供 `rescue_margin_low`, 尚未从 calibration clean negatives 独立冻结。
+- 除上述未校准的 rescue window 外, 未发现其他代理、占位或静默科学算子替代。
 - `main/` 核心方法与 `experiments/` 真实 SD3.5 绑定使用同一公式和同一内容身份, 未发现第二套简化实现。
 - 注意力配准结构门禁已唯一冻结为12个锚点、0.20归一化 xy 欧氏残差上界和相对有效覆盖锚点的0.50最小内点率；方法配置、对齐、检测与冻结阈值摘要逐字段绑定该协议, calibration 和 test 不参与三项常量选择。
 - LF 嵌入、raw/aligned 检测共同消费唯一 YAML 的七字段低通协议；高斯幅值尾部载体共同绑定选择协议、模板计数和内容摘要。完整注入、carrier-only、注册密钥检测与预注册 wrong-key 对照在总科学内容记录中形成角色明确的跨路径身份。
 - 正式主方法、baseline 与消融入口逐 Prompt 重建实际生成 seed、预注册密钥和基础 latent 身份；顶层 manifest 保存相同的9重复、3密钥与基础 latent 完整计划, 样本仅保存必要引用。
 - 主方法、4个 baseline 与消融统一按生成 seed 和攻击 ID 派生攻击 seed；统计重建会独立复算并拒绝任一路径漂移。
 
-本地方法机制与正式运行身份已达到静态冻结边界。真实模型层名、CUDA 混合精度、无阻尼 PSD-CG 收敛、实际 Q/K hook、float16 非零写回和最终成图归因仍必须由 Colab GPU 预检验证；在这些运行事实产生前, 不得声称已经获得论文效果证据。
+除 calibration 派生 rescue window 尚未闭合外, 其余本地方法机制与正式运行身份已达到静态冻结边界。真实模型层名、CUDA 混合精度、无阻尼 PSD-CG 收敛、实际 Q/K hook、float16 非零写回和最终成图归因仍必须由 Colab GPU 预检验证；在这些运行事实产生前, 不得声称已经获得论文效果证据。
 
 ## 原语一致性矩阵
 
@@ -36,7 +36,7 @@
 | LF 载体 | 已对齐 | 仅在 latent 二维空间轴执行冻结七字段平均低通；嵌入、raw/aligned 检测和 fixed-FPR 共享协议摘要与模板身份。 |
 | 高斯幅值尾部载体 | 已对齐 | 按高斯元素绝对幅值截断并保持非选择坐标精确0, 不解释为空间高频；shape、选中数、阈值、保留比例和模板摘要进入原子记录。 |
 | 注意力几何 | 已对齐 | 直接读取冻结层 `to_q`/`to_k`, 使用四分量关系、真实 autograd 和单调回溯。 |
-| 注意力配准结构门禁 | 已对齐 | 两个冻结层分别完成层内搜索, 再按注册目标、观测关系分、注册置信度与冻结层顺序执行唯一字典序裁决；随后以12个锚点、0.20残差和0.50有效覆盖锚点内点率执行结构门禁。 |
+| 注意力配准结构门禁 | 已对齐 | 每层候选集合实际包含精确 identity, 并以 $\Delta J(l)=J(\widehat T_l,l)-J(I,l)>0$ 门禁结构增益；两个冻结层分别完成层内搜索, 再按注册目标、观测关系分、注册置信度与冻结层顺序执行唯一字典序裁决。 |
 | 三分支实际写回 | 已对齐 | 冻结顺序 float32 合成、单次 dtype cast、共同缩放后重新执行包络、JVP、有限特征和 Q/K 门禁。 |
 | 仅图像盲检 | 已对齐 | 检测接口不接收 Prompt、源 latent、采样轨迹、生成 seed 或样本级安全基底；aligned 图像固定使用 bilinear、border、`align_corners=True` 与 RGB uint8 floor 量化。 |
 | 版本化密钥 PRG | 已对齐 | `sha256_counter_normal_icdf_table20_float32_v2` 从 SHA-256 大端计数器的 MSB-first 连续比特流提取20位索引, 查询冻结 Q20 中点逆 CDF float32 表；53位开区间 uniform 路径只生成注意力关系符号。 |
@@ -58,8 +58,8 @@ Q20 表定义为 $q_i=\operatorname{round}_{\mathrm{binary32}}(\Phi^{-1}((i+0.5)
 8. 同一个内部 Q/K 层的克隆被重复登记以冒充跨层稳定性。
 9. scheduler 缺失真实 `scale_noise` 并尝试线性混合 latent 与噪声。
 10. forward AD 不支持以外的显存、形状或模型错误触发近似 Jacobian 替代。
-11. 注意力配准缺失三项预注册结构常量、请求锚点数超过实际 token 数、使用无覆盖锚点作为内点率分母或尝试从 calibration/test 改写门禁。
-12. 对齐记录、检测记录、冻结阈值协议或结果摘要中的注意力结构门禁缺失、漂移或摘要未绑定。
+11. 注意力配准缺失精确 identity 候选、以次优或最近非重复候选代替 identity 目标、$\Delta J$ 不能由两个已记录目标独立重算, 或 identity 配准声明正目标增益。
+12. 注意力配准缺失三项预注册结构常量、请求锚点数超过实际 token 数、使用无覆盖锚点作为内点率分母或尝试从 calibration/test 改写门禁。
 13. LF 池化依赖运行库默认值、跨 batch/channel 混合或嵌入与检测使用不同协议。
 14. 高斯幅值尾部模板的 shape、元素总数、`ceil(n * tail_fraction)` 选中数、阈值或保留比例不一致。
 15. 内容权重越界、和不为1、使用未登记权重组合或 raw/aligned 分数组合公式不能重建。
@@ -75,7 +75,7 @@ Q20 表定义为 $q_i=\operatorname{round}_{\mathrm{binary32}}(\Phi^{-1}((i+0.5)
 
 ```text
 pytest -q
-1333 passed, 8 skipped, 69 deselected
+1458 passed, 8 skipped, 70 deselected
 
 python tools/harness/run_all_audits.py
 10/10 audits passed

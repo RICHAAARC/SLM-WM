@@ -69,11 +69,20 @@ def _synthetic_alignment_record(
     component_scores = {
         name: relation_sync_score for name in component_names
     }
+    default_affine_transform = (
+        ((1.0, 0.0, 0.01), (0.0, 1.0, 0.0))
+        if registration_geometry_reliable
+        else ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+    )
     affine_transform = alignment.get(
         "affine_transform",
-        ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+        default_affine_transform,
     )
     objective_margin = 0.1 if registration_geometry_reliable else 0.0
+    registration_objective_score = registration_confidence
+    identity_registration_objective_score = (
+        registration_objective_score - objective_margin
+    )
     record = {
         "layer_name": _FORMAL_METHOD_CONFIG.attention_module_names[0],
         "token_indices": list(range(token_count)),
@@ -100,7 +109,10 @@ def _synthetic_alignment_record(
             0.1,
         ),
         "bidirectional_relation_score": registration_confidence,
-        "registration_objective_score": registration_confidence,
+        "registration_objective_score": registration_objective_score,
+        "identity_registration_objective_score": (
+            identity_registration_objective_score
+        ),
         "registration_objective_margin": objective_margin,
         "registration_coverage_penalty": 0.0,
         "canonical_coverage_ratio": 1.0,

@@ -539,6 +539,10 @@ def test_registry_binds_preregistered_alignment_gate_evidence() -> None:
         "attention_residual_threshold",
         "attention_minimum_inlier_ratio",
         "alignment_digest",
+        "registration_objective_score",
+        "identity_registration_objective_score",
+        "registration_objective_margin",
+        "registration_geometry_reliable",
     }
     required_symbols = {
         (
@@ -557,10 +561,22 @@ def test_registry_binds_preregistered_alignment_gate_evidence() -> None:
         evidence_fields = set(
             invariants[invariant_id]["runtime_evidence_fields"]
         )
-        if invariant_id == "image_only_detection_boundary":
-            assert required_fields - {"alignment_digest"} <= evidence_fields
-        else:
-            assert required_fields <= evidence_fields
+        assert required_fields <= evidence_fields
+        expressions = set(invariants[invariant_id]["formal_expression"])
+        assert (
+            "registration_objective_margin=registration_objective_score-"
+            "identity_registration_objective_score"
+        ) in expressions
+        assert (
+            "registration_geometry_reliable_requires="
+            "registration_objective_margin>0"
+        ) in expressions
+        assert "exact_identity_alignment_candidate_missing" in invariants[
+            invariant_id
+        ]["fail_closed_conditions"]
+        assert "runner_up_registration_objective_margin" in invariants[
+            invariant_id
+        ]["forbidden_substitutes"]
         bindings = {
             (binding["path"], binding["symbol"])
             for binding in invariants[invariant_id][

@@ -357,7 +357,7 @@ domain_fields = {
 
 `public_detection_noise_prg_protocol` 必须等于 `sha256_counter_normal_icdf_table20_float32_v2`。上述 `key_material`、`domain_fields` 和 `shape` 进入本节定义的完整 stable JSON domain payload, 经 SHA-256、从0开始的16字节大端计数器、MSB-first 连续20位索引提取和冻结 Q20 表查询得到 CPU float32 Tensor；实际 latent dtype 转换在 CPU 完成, 随后才搬运到执行设备。该公开 domain 不含水印密钥、Prompt、生成 seed 或生成轨迹。
 
-CPU/CUDA 设备 RNG 不参与方法身份。PRG 算法摘要固定为 `a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b`, 核心方法定义摘要固定为 `2b7ab51c952abf74d145fd23694790b9de71fc6712b319fb10b3f46c9db0a0fe`, 正式随机化协议摘要固定为 `d09928b763c17d2c68fa2bc3921b59b76c3df2fc264fb364ae33bcc8bdeba0d5`。`tools/harness/verify_normal_quantile_reference.py` 以 `normal_quantile_reference_verification_protocol=mpfr_192bit_erf_midpoint_bracket_and_newton_v2` 使用192位 MPFR, 对正半轴全部524288个表项验证相邻 binary32 中点的 CDF 严格夹逼, 并以 Newton 根作为独立交叉检查；报告同时登记最小中点概率余量。该复验是外层参考证据, 不进入 PRG 算法摘要或采样身份。固定 test vector 必须分别覆盖20位索引跨 SHA-256 块边界、Q20 值、uniform 值、relation signs、公开检测噪声和正式 shape 基础 latent。当前固定向量只在 Windows CPU 实测；Linux/Colab 的逐字节 KAT 仍是 GPU 运行前阻断门禁, 不得表述为已经完成跨平台实测。
+CPU/CUDA 设备 RNG 不参与方法身份。PRG 算法摘要固定为 `a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b`, 核心方法定义摘要固定为 `8875c24ad29344b2ea8a6fc6ae62d8bccaafd0fa426e8072e2380bb1abca7d43`, 正式随机化协议摘要固定为 `d09928b763c17d2c68fa2bc3921b59b76c3df2fc264fb364ae33bcc8bdeba0d5`。`tools/harness/verify_normal_quantile_reference.py` 以 `normal_quantile_reference_verification_protocol=mpfr_192bit_erf_midpoint_bracket_and_newton_v2` 使用192位 MPFR, 对正半轴全部524288个表项验证相邻 binary32 中点的 CDF 严格夹逼, 并以 Newton 根作为独立交叉检查；报告同时登记最小中点概率余量。该复验是外层参考证据, 不进入 PRG 算法摘要或采样身份。固定 test vector 必须分别覆盖20位索引跨 SHA-256 块边界、Q20 值、uniform 值、relation signs、公开检测噪声和正式 shape 基础 latent。当前固定向量只在 Windows CPU 实测；Linux/Colab 的逐字节 KAT 仍是 GPU 运行前阻断门禁, 不得表述为已经完成跨平台实测。
 
 ## `spatial_low_pass_and_amplitude_tail_carriers`
 
@@ -692,6 +692,14 @@ J(T,l)=0.10s_{\mathrm{can}}(T,l)+0.90s_{\mathrm{obs}}(T,l)
 -0.01\sum_{q\in\{c_{\mathrm{can}},u_{\mathrm{can}},c_{\mathrm{obs}},u_{\mathrm{obs}}\}}(1-q).
 $$
 
+identity 变换 $I$ 必须作为候选集合中的精确候选实际执行。每层结构目标增益定义为
+
+$$
+\Delta J(l)=J(\widehat T_l,l)-J(I,l).
+$$
+
+检测记录必须同时保存 $J(\widehat T_l,l)$、$J(I,l)$ 与 $\Delta J(l)$, 并能由前两者独立重算后者。候选集合缺少精确 identity、三者公式不一致或 $\Delta J(l)\le0$ 时, 该层结构注册失败；不得用次优候选、近邻候选或截断后的目标差替代。
+
 冻结层有序集合精确为 $\mathcal L=(\texttt{transformer\_blocks.0.attn},\texttt{transformer\_blocks.23.attn})$。每层先独立完成层内搜索并得到 $\widehat T_l$；跨层结果按
 
 $$
@@ -702,7 +710,7 @@ $$
 
 唯一选择。比较优先级依次是注册目标、观测关系分和注册置信度；三者完全相同时选择冻结层顺序中更靠前的层。检测器不得依赖回调或容器的偶然遍历顺序改变该裁决。
 
-搜索定义域固定为残余旋转 $[-32,32]$ 度、均匀尺度 $[1/\sqrt2,\sqrt2]$ 和两个归一化平移分量 $[-0.28,0.28]$, 并使用三层三分局部细化；搜索器不得读取攻击参数。结构可靠性要求观测和双向关系分数为正、相对 identity 的目标间隔为正、两个方向覆盖率均不低于0.45, 并通过下述预注册结构门禁。aligned 图像重新提取真实 Q/K 后, 使用传递的同一 pair 身份计算 sync, 不重新选择稳定 token。
+搜索定义域固定为残余旋转 $[-32,32]$ 度、均匀尺度 $[1/\sqrt2,\sqrt2]$ 和两个归一化平移分量 $[-0.28,0.28]$, 并使用三层三分局部细化；搜索器不得读取攻击参数。结构可靠性要求观测和双向关系分数为正、$\Delta J(l)>0$、两个方向覆盖率均不低于0.45, 并通过下述预注册结构门禁。aligned 图像重新提取真实 Q/K 后, 使用传递的同一 pair 身份计算 sync, 不重新选择稳定 token。
 
 令当前规则二维抽样网格包含 $n$ 个 token。正式锚点数量固定为 $A=12$；若 $n<12$, 当前检测单元必须失败, 不允许缩减锚点数。锚点位置按
 

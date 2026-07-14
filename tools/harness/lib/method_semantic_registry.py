@@ -19,7 +19,7 @@ METHOD_CONFIG_RELATIVE_PATH = PurePosixPath("configs/model_sd35.yaml")
 REGISTRY_SCHEMA = "slm_wm_method_semantic_registry_v1"
 REGISTRY_SCOPE = "normative_traceability_without_scientific_conformance_decision"
 EXPECTED_NORMATIVE_TRACE_DIGEST = (
-    "6dd763343d71c3fc6803c9bfad60ff6ad2159d139a75682f2b3223c67112419c"
+    "e1d6d106ae3756ff9afe2a906a368d884cd8c264941f45d5ea29889cb2a264cb"
 )
 EXPECTED_INVARIANT_IDS = (
     "constructive_local_tangent_scope",
@@ -614,6 +614,16 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
         "tests/functional/test_real_scientific_operators.py::"
         "test_image_only_detector_interface_and_positive_content_path",
         "tests/functional/test_attention_affine_protocol_geometry.py::"
+        "test_generic_hierarchical_search_recovers_random_continuous_affine",
+        "tests/functional/test_attention_affine_protocol_geometry.py::"
+        "test_identity_alignment_cannot_pass_positive_objective_gain_gate",
+        "tests/functional/test_attention_affine_protocol_geometry.py::"
+        "test_alignment_fails_closed_when_exact_identity_candidate_is_missing",
+        "tests/functional/test_attention_affine_protocol_geometry.py::"
+        "test_complete_alignment_record_digest_rebuild_rejects_field_mutations",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_identity_alignment_cannot_propagate_into_detector_rescue",
+        "tests/functional/test_attention_affine_protocol_geometry.py::"
         "test_cross_layer_alignment_selection_uses_frozen_lexicographic_rule",
         "tests/functional/test_real_scientific_operators.py::"
         "test_image_alignment_quantizes_fractional_rgb_with_floor",
@@ -635,6 +645,16 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
     "same_threshold_geometry_rescue": (
         "tests/functional/test_real_scientific_operators.py::"
         "test_complete_evidence_calibration_includes_geometry_rescue",
+        "tests/functional/test_attention_affine_protocol_geometry.py::"
+        "test_generic_hierarchical_search_recovers_random_continuous_affine",
+        "tests/functional/test_attention_affine_protocol_geometry.py::"
+        "test_identity_alignment_cannot_pass_positive_objective_gain_gate",
+        "tests/functional/test_attention_affine_protocol_geometry.py::"
+        "test_alignment_fails_closed_when_exact_identity_candidate_is_missing",
+        "tests/functional/test_attention_affine_protocol_geometry.py::"
+        "test_complete_alignment_record_digest_rebuild_rejects_field_mutations",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_identity_alignment_cannot_propagate_into_detector_rescue",
         "tests/functional/test_attention_affine_protocol_geometry.py::"
         "test_cross_layer_alignment_selection_uses_frozen_lexicographic_rule",
         "tests/functional/test_real_scientific_operators.py::"

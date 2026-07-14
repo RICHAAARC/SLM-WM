@@ -758,6 +758,14 @@ g_{\mathrm{align}}=
 s_{\mathrm{obs}}(\widehat T,l)-s_{\mathrm{obs}}(I,l).
 $$
 
+观测关系增益 $g_{\mathrm{align}}$ 不等同于完整注册目标增益。后者精确定义为
+
+$$
+\Delta J(l)=J(\widehat T_l,l)-J(I,l).
+$$
+
+identity 必须作为候选集合中的精确候选实际评分。记录同时保存 `registration_objective_score`、`identity_registration_objective_score` 和 `registration_objective_margin`, 并要求第三项由前两项相减得到且严格大于0；缺少 identity 候选、公式不一致或使用次优候选目标差时结构注册失败。
+
 注册关系分数记为 $s_{\mathrm{reg}}=s_{\mathrm{can}}(\widehat T,l)$。令规则抽样网格包含 $n$ 个 token, 正式方法预注册 $A=12$ 个锚点, 并按 $h_j=\operatorname{round}(j(n-1)/(A-1))$、$j=0,\ldots,11$ 在抽样索引范围内确定性均匀选择；$n<12$ 时直接失败, 不允许自动缩减锚点数。残差使用 `normalized_xy_token_centers_corner_endpoints_v1` 中的归一化 xy 欧氏距离, token 关系采样与图像重采样统一采用 `align_corners=true`。仅具有有效双线性覆盖的锚点组成分母集合 $\mathcal V$；匹配到唯一观测 token 且残差 $d_j\le0.20$ 的锚点记为内点：
 
 $$

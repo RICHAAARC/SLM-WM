@@ -362,6 +362,11 @@ def test_generic_hierarchical_search_recovers_random_continuous_affine(
     assert result.observation_relation_score > 0.55
     assert result.registration_alignment_gain > 0.02
     assert result.registration_objective_margin > 0.0
+    assert result.registration_objective_margin == pytest.approx(
+        result.registration_objective_score
+        - result.identity_registration_objective_score,
+        abs=1e-12,
+    )
     assert result.canonical_coverage_ratio >= 0.45
     assert result.observation_coverage_ratio >= 0.45
     assert result.stable_pair_weight_identity_digest == (
@@ -381,6 +386,94 @@ def test_generic_hierarchical_search_recovers_random_continuous_affine(
     assert result.metadata["attention_relation_direct_qk_source_ready"] is True
     assert result.metadata["attention_relation_qk_operator_metadata_ready"] is True
     assert len(result.attention_relation_qk_operator_metadata_digest) == 64
+
+
+@pytest.mark.quick
+def test_identity_alignment_cannot_pass_positive_objective_gain_gate() -> None:
+    """identity 相对自身的完整注册目标增益为0, 不得开放几何救回。"""
+
+    observed_attention, _ = _continuous_observed_attention(
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+    )
+    pair_weights = _stable_pair_weights(observed_attention)
+    result = recover_attention_affine_alignment(
+        observed_attention,
+        _KEY_MATERIAL,
+        _LAYER_NAME,
+        _TOKEN_INDICES,
+        pair_weights,
+        KEYED_PRG_VERSION,
+        **_ALIGNMENT_GATE_KWARGS,
+    )
+
+    assert torch.allclose(
+        torch.tensor(result.affine_transform),
+        torch.tensor(((1.0, 0.0, 0.0), (0.0, 1.0, 0.0))),
+        atol=1e-7,
+        rtol=0.0,
+    )
+    assert result.registration_alignment_gain == pytest.approx(0.0, abs=1e-12)
+    assert result.registration_objective_score == pytest.approx(
+        result.identity_registration_objective_score,
+        abs=1e-12,
+    )
+    assert result.registration_objective_margin == pytest.approx(0.0, abs=1e-12)
+    assert result.geometry_reliable is False
+
+
+@pytest.mark.quick
+def test_alignment_fails_closed_when_exact_identity_candidate_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """候选集合不含精确 identity 时不得用最近仿射近似其基准目标。"""
+
+    original_combine = alignment_module._combine_evaluations
+
+    def combine_without_identity(evaluations: object) -> object:
+        """以极小非零平移替换 identity, 构造最近候选替代反例。"""
+
+        combined = original_combine(evaluations)
+        identity = torch.tensor(
+            ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+            dtype=combined.transforms.dtype,
+            device=combined.transforms.device,
+        )
+        identity_rows = (
+            combined.transforms - identity.unsqueeze(0)
+        ).square().sum(dim=(1, 2)) == 0.0
+        changed_transforms = combined.transforms.clone()
+        changed_transforms[identity_rows, 0, 2] = 1e-7
+        return alignment_module._CandidateEvaluation(
+            **{
+                field_name: (
+                    changed_transforms
+                    if field_name == "transforms"
+                    else getattr(combined, field_name)
+                )
+                for field_name in combined.__dataclass_fields__
+            }
+        )
+
+    monkeypatch.setattr(
+        alignment_module,
+        "_combine_evaluations",
+        combine_without_identity,
+    )
+    relation, _ = _continuous_observed_attention(18.0, 0.95, 0.08, -0.05)
+
+    with pytest.raises(RuntimeError, match="缺少精确 identity 候选"):
+        recover_attention_affine_alignment(
+            relation,
+            _KEY_MATERIAL,
+            _LAYER_NAME,
+            _TOKEN_INDICES,
+            _stable_pair_weights(relation),
+            KEYED_PRG_VERSION,
+            **_ALIGNMENT_GATE_KWARGS,
+        )
 
 
 @pytest.mark.quick
@@ -694,6 +787,14 @@ def test_complete_alignment_record_digest_rebuild_rejects_field_mutations() -> N
     ]
     with pytest.raises(ValueError, match="注册可靠性与核心门禁不一致"):
         validate_attention_alignment_record(mutated_wrapper)
+
+    formula_mutation = copy.deepcopy(serialized_record)
+    formula_mutation["registration_objective_margin"] += 0.01
+    formula_mutation["alignment_digest"] = alignment_module.build_stable_digest(
+        recompute_attention_alignment_digest_payload(formula_mutation)
+    )
+    with pytest.raises(ValueError, match="identity 目标差公式不一致"):
+        validate_attention_alignment_record(formula_mutation)
 
     mutations = []
 

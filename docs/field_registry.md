@@ -2857,10 +2857,9 @@ Notebook 与 repository module 的跨边界数据
 | prompt_file_sha256 | provenance | none | true | false | false | 规范 Prompt 文件的字节级 SHA-256 身份。 |
 | significance_alpha | protocol | none | true | true | false | 机制必要性家族检验采用的预注册显著性水平。 |
 | relation_sync_score | metric | none | true | true | false | 双边配准后规范四分量关系图与四通道密钥投影按当前冻结分量权重组合的一致性分数。 |
-| registration_objective_margin | metric | none | true | true | false | 最优配准目标相对非近重复候选目标的差值。 |
+| registration_objective_margin | metric | none | true | true | false | 最优配准目标 $J(\widehat T,l)$ 减去精确 identity 候选目标 $J(I,l)$ 得到的结构目标增益。 |
 | registration_candidate_count | protocol | none | true | false | false | 双边关系图配准实际评估的冻结仿射候选数量。 |
-| sync_margin_duplicate_transform_tolerance | protocol | none | true | false | false | 计算配准目标差值时排除近重复仿射候选所用的冻结矩阵距离阈值。 |
-| registration_geometry_reliable | metric | none | true | true | false | 由正双向关系、正目标间隔、双向最小覆盖率、锚点内点比例和重采样残差共同得到的结构注册可靠性。 |
+| registration_geometry_reliable | metric | none | true | true | false | 由正双向关系、正 identity 结构目标增益、双向最小覆盖率、锚点内点比例和重采样残差共同得到的结构注册可靠性。 |
 | registration_confidence_threshold | protocol | none | true | true | false | calibration clean negatives 冻结的配准置信度门限。 |
 | attention_sync_score_threshold | protocol | none | true | true | false | calibration clean negatives 冻结的对齐后真实 Q/K 同步分数门限。 |
 | raw_attention_geometry_score | metric | none | true | true | false | 对待检图像未执行几何配准时计算的真实 Q/K 四分量密钥投影分数。 |
@@ -2889,6 +2888,7 @@ Notebook 与 repository module 的跨边界数据
 | registration_alignment_gain | metric | none | true | true | false | 最优候选观测关系分数相对 identity 候选的确定性增益。 |
 | bidirectional_relation_score | metric | none | true | true | false | 规范拉回关系分数与观测前推关系分数按冻结权重组合的注册分数。 |
 | registration_objective_score | metric | none | true | true | false | 双向关系分数扣除双向覆盖与唯一采样惩罚后的候选注册目标。 |
+| identity_registration_objective_score | metric | none | true | true | false | 同一候选集合中精确 identity 变换实际执行得到的完整注册目标, 用于独立重算结构目标增益。 |
 | registration_coverage_penalty | metric | none | true | true | false | 最优候选由规范侧和观测侧覆盖率及唯一采样率共同产生的目标扣减值。 |
 | canonical_coverage_ratio | metric | none | true | true | false | 候选从规范 token 坐标采样观测关系图时处于有效网格内的位置比例。 |
 | observation_coverage_ratio | metric | none | true | true | false | 候选从观测 token 坐标前推密钥关系图时处于有效规范网格内的位置比例。 |

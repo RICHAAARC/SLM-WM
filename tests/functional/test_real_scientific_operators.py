@@ -3349,6 +3349,73 @@ def test_detector_rejects_alignment_selected_from_unfrozen_layer() -> None:
 
 
 @pytest.mark.quick
+def test_identity_alignment_cannot_propagate_into_detector_rescue() -> None:
+    """identity 配准即使内容 margin 位于救回窗口也不得开放 rescue。"""
+
+    metadata, alignment = _formal_detection_alignment_identity(
+        registration_geometry_reliable=False,
+    )
+    metadata.update(
+        {
+            "content_threshold": 0.20,
+            "geometry_score_threshold": 0.50,
+            "registration_confidence_threshold": 0.50,
+            "attention_sync_score_threshold": 0.50,
+            "rescue_margin_low": -0.05,
+        }
+    )
+    record = bind_formal_detection_record(
+        {
+            **_formal_content_carrier_identity_fields(),
+            "content_score": 0.18,
+            "aligned_content_score": 0.25,
+            "attention_geometry_score": 0.90,
+            "registration_confidence": 0.90,
+            "attention_sync_score": 0.90,
+            "metadata": metadata,
+            "alignment": alignment,
+        }
+    )
+
+    assert record["raw_content_margin"] == pytest.approx(-0.02)
+    assert record["alignment"]["affine_transform"] == [
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+    ]
+    assert record["alignment"]["registration_objective_score"] == pytest.approx(
+        record["alignment"]["identity_registration_objective_score"]
+    )
+    assert record["alignment"]["registration_objective_margin"] == 0.0
+    assert record["alignment"]["geometry_reliable"] is False
+    assert record["geometry_reliable"] is False
+    assert record["rescue_eligible"] is False
+    assert record["rescue_applied"] is False
+    assert record["evidence_positive"] is False
+    validate_image_only_detection_digest_record(record)
+
+    forged = deepcopy(record)
+    forged["alignment"]["geometry_reliable"] = True
+    forged["alignment"]["registration_geometry_reliable"] = True
+    forged["alignment"]["alignment_digest"] = build_stable_digest(
+        recompute_attention_alignment_digest_payload(forged["alignment"])
+    )
+    forged.update(
+        {
+            "geometry_reliable": True,
+            "content_failure_reason": "geometry_suspected",
+            "rescue_eligible": True,
+            "rescue_applied": True,
+            "evidence_positive": True,
+        }
+    )
+    forged["detector_digest"] = build_stable_digest(
+        recompute_image_only_detection_digest_payload(forged)
+    )
+    with pytest.raises(ValueError, match="注册可靠性与核心门禁不一致"):
+        validate_image_only_detection_digest_record(forged)
+
+
+@pytest.mark.quick
 def test_detector_digest_separates_zero_score_template_content_collisions() -> None:
     """相同零分数摘要不得掩盖不同 shape 对应的 LF 模板身份."""
 

@@ -562,9 +562,15 @@ J(T)=0.10s_{\mathrm{can}}+0.90s_{\mathrm{obs}}
 -0.01\sum_{q\in\{c_{\mathrm{can}},u_{\mathrm{can}},c_{\mathrm{obs}},u_{\mathrm{obs}}\}}(1-q).
 $$
 
-冻结层有序集合为 $(\texttt{transformer\_blocks.0.attn},\texttt{transformer\_blocks.23.attn})$。每层先独立完成层内搜索；跨层候选依次按注册目标、观测关系分、注册置信度执行字典序最大化, 三者完全同分时选择冻结顺序中更靠前的层。
+冻结层有序集合为 $(\texttt{transformer\_blocks.0.attn},\texttt{transformer\_blocks.23.attn})$。每层先独立完成层内搜索；跨层候选依次按注册目标、观测关系分、注册置信度执行字典序最大化, 三者完全同分时选择冻结顺序中更靠前的层。identity 变换 $I$ 必须作为每层候选集合中的精确候选实际评分, 完整注册目标增益唯一地定义为
 
-$c$ 和 $u$ 分别表示有效坐标覆盖率与唯一采样率。观测前推项使用完整观测关系解释候选变换，防止只保留中心子图的尺度候选通过较小有效区域获得更高目标。检测端只在原始观测 Q/K 上执行一次稳定 token 选择。观测项使用 $w_{\mathrm{obs}}$, 规范项使用 $a_{\mathrm{can},T}=W_Ta_{\mathrm{obs}}$ 后重新外积得到的 $w_{\mathrm{can},T}$, 两者共享权重身份摘要。检测器从与攻击注册表无关的旋转、log-scale 和归一化位移连续定义域生成粗锚点，并按固定三分比例执行三层局部细化。每轮局部组合都相对方形二面体基元执行严格过滤, 保证残余旋转不超过32°、尺度始终位于 $[1/\sqrt2,\sqrt2]$、两个平移分量绝对值不超过0.28；搜索器不读取攻击角度、裁剪比例或位移参数，验证集使用远离正式攻击取值的确定性随机连续变换。输出包括四通道分数、相对 identity 候选的观测关系增益、双向关系分数、覆盖惩罚、目标间隔、注册置信度、有效锚点内点比例、对齐残差和权重身份。结构门禁预注册锚点数12、归一化 xy 欧氏残差上界0.20和最小内点率0.50。锚点按抽样 token 索引确定性均匀选择, token 数少于12时失败；内点率以具有有效双线性覆盖的锚点为分母, 并要求唯一观测匹配。坐标固定为 `normalized_xy_token_centers_corner_endpoints_v1`, token 采样与图像重采样统一使用 `align_corners=True`。结构注册要求完整四通道观测与双向分数为正、目标间隔为正、两个方向覆盖率均不低于0.45，并通过上述固定内点率和残差门禁。三项常量必须进入方法配置、对齐、检测、冻结阈值与结果摘要, calibration 和 test 不得调节。由于均匀 attention 使 $G=0$ 且其余通道在逐行中心化后也为0, 公开坐标不能单独形成可靠注册。得到 $\widehat T$ 后，检测器按 bilinear、`padding_mode=border`、`align_corners=True` 重采样待检 RGB 图像, 并按 $\operatorname{floor}(255\cdot\operatorname{clip}(x,0,1))$ 转回 RGB uint8。随后重新提取全部冻结层的真实 Q/K；恢复后同步分数使用传递后的 $w_{\mathrm{can},\widehat T}$, 不重新选择稳定 token。权重身份一致且同步分数通过 calibration split 冻结阈值后, 才允许进入同阈值内容救回。几何链只负责参考系恢复和救回资格门禁，不独立产生 positive 判定。
+$$
+\Delta J(\ell)=J(\widehat T_\ell,\ell)-J(I,\ell).
+$$
+
+记录分别保存 `registration_objective_score`、`identity_registration_objective_score` 与 `registration_objective_margin`；后者必须能由前两者相减重建且严格大于0。候选集合缺少 identity、公式不一致或以次优候选目标代替 $J(I,\ell)$ 时结构注册失败。
+
+$c$ 和 $u$ 分别表示有效坐标覆盖率与唯一采样率。观测前推项使用完整观测关系解释候选变换，防止只保留中心子图的尺度候选通过较小有效区域获得更高目标。检测端只在原始观测 Q/K 上执行一次稳定 token 选择。观测项使用 $w_{\mathrm{obs}}$, 规范项使用 $a_{\mathrm{can},T}=W_Ta_{\mathrm{obs}}$ 后重新外积得到的 $w_{\mathrm{can},T}$, 两者共享权重身份摘要。检测器从与攻击注册表无关的旋转、log-scale 和归一化位移连续定义域生成粗锚点，并按固定三分比例执行三层局部细化。每轮局部组合都相对方形二面体基元执行严格过滤, 保证残余旋转不超过32°、尺度始终位于 $[1/\sqrt2,\sqrt2]$、两个平移分量绝对值不超过0.28；搜索器不读取攻击角度、裁剪比例或位移参数，验证集使用远离正式攻击取值的确定性随机连续变换。输出包括四通道分数、相对 identity 候选的观测关系增益、双向关系分数、覆盖惩罚、$\Delta J(\ell)$、注册置信度、有效锚点内点比例、对齐残差和权重身份。结构门禁预注册锚点数12、归一化 xy 欧氏残差上界0.20和最小内点率0.50。锚点按抽样 token 索引确定性均匀选择, token 数少于12时失败；内点率以具有有效双线性覆盖的锚点为分母, 并要求唯一观测匹配。坐标固定为 `normalized_xy_token_centers_corner_endpoints_v1`, token 采样与图像重采样统一使用 `align_corners=True`。结构注册要求完整四通道观测与双向分数为正、$\Delta J(\ell)>0$、两个方向覆盖率均不低于0.45，并通过上述固定内点率和残差门禁。三项常量必须进入方法配置、对齐、检测、冻结阈值与结果摘要, calibration 和 test 不得调节。由于均匀 attention 使 $G=0$ 且其余通道在逐行中心化后也为0, 公开坐标不能单独形成可靠注册。得到 $\widehat T$ 后，检测器按 bilinear、`padding_mode=border`、`align_corners=True` 重采样待检 RGB 图像, 并按 $\operatorname{floor}(255\cdot\operatorname{clip}(x,0,1))$ 转回 RGB uint8。随后重新提取全部冻结层的真实 Q/K；恢复后同步分数使用传递后的 $w_{\mathrm{can},\widehat T}$, 不重新选择稳定 token。权重身份一致且同步分数通过 calibration split 冻结阈值后, 才允许进入同阈值内容救回。几何链只负责参考系恢复和救回资格门禁，不独立产生 positive 判定。
 
 ### 3.6.4 最终成图注意力可观测性
 

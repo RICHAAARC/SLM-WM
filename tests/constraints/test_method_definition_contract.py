@@ -37,7 +37,7 @@ PRIMITIVE_DOCUMENT = (
 )
 FIELD_REGISTRY = ROOT / "docs" / "field_registry.md"
 EXPECTED_METHOD_DEFINITION = {
-    "method_definition_schema": "slm_wm_constructive_local_tangent_v9",
+    "method_definition_schema": "slm_wm_constructive_local_tangent_v10",
     "method_name": "semantic_conditioned_latent_manifold_watermarking",
     "update_construction": {
         "semantics": "branchwise_constructive_safe_subspace_updates",
@@ -196,6 +196,10 @@ EXPECTED_METHOD_DEFINITION = {
         ),
         "calibration_data_used_for_gate_parameters": False,
         "alignment_digest_binds_gate_parameters": True,
+        "registration_objective_margin_rule": (
+            "best_registration_objective_minus_identity_registration_objective"
+        ),
+        "registration_objective_margin_required_positive": True,
     },
     "write_validation": {
         "branch_amplitude_envelope_validation_rule": (
@@ -265,7 +269,7 @@ EXPECTED_METHOD_DEFINITION = {
     ],
 }
 EXPECTED_METHOD_DEFINITION_DIGEST = (
-    "2b7ab51c952abf74d145fd23694790b9de71fc6712b319fb10b3f46c9db0a0fe"
+    "8875c24ad29344b2ea8a6fc6ae62d8bccaafd0fa426e8072e2380bb1abca7d43"
 )
 
 
@@ -275,7 +279,7 @@ def test_machine_readable_method_definition_freezes_constructive_semantics() -> 
 
     definition = semantic_conditioned_latent_method_definition()
 
-    assert METHOD_DEFINITION_SCHEMA == "slm_wm_constructive_local_tangent_v9"
+    assert METHOD_DEFINITION_SCHEMA == "slm_wm_constructive_local_tangent_v10"
     assert definition == EXPECTED_METHOD_DEFINITION
     assert definition["update_construction"]["joint_argmax_solved"] is False
     assert (
@@ -311,6 +315,8 @@ def test_method_documents_define_local_tangent_constructive_protocol() -> None:
         assert "\\beta_s" not in text
         assert "\\beta_v" not in text
         assert "\\mathcal{M}_{\\mathrm{route}}" not in text
+        assert "\\Delta J" in text
+        assert "J(I" in text
 
 
 @pytest.mark.constraint
