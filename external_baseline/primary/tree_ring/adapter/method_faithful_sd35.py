@@ -34,6 +34,7 @@ from external_baseline.primary.sd35_method_faithful_common import (
     apply_formal_image_attack,
     canonical_attack_family,
     canonical_attack_name,
+    derive_threshold,
     emit_adapter_progress,
     formal_image_attack_config,
     validate_model_revision,
@@ -501,36 +502,6 @@ def build_observation(
     return payload
 
 
-def derive_threshold(
-    observations: Iterable[dict[str, Any]],
-    explicit_threshold: float | None,
-    target_fpr: float,
-) -> tuple[float, str]:
-    """仅从 calibration clean negative 分数冻结 fixed-FPR 阈值。"""
-
-    if explicit_threshold is not None:
-        return float(explicit_threshold), "pre_registered_threshold"
-    if not 0.0 < target_fpr < 1.0:
-        raise ValueError("target_fpr 必须位于 (0, 1)")
-    rows = list(observations)
-    negative_scores = [
-        float(row["score"])
-        for row in rows
-        if row.get("split") == "calibration" and row.get("sample_role") == "clean_negative"
-    ]
-    if not negative_scores:
-        raise ValueError("fixed-FPR 阈值要求非空 calibration clean negative 分数")
-    allowed_false_positives = max(
-        0,
-        math.floor(target_fpr * (len(negative_scores) + 1)) - 1,
-    )
-    for threshold in sorted({math.nextafter(score, math.inf) for score in negative_scores}):
-        if sum(score >= threshold for score in negative_scores) <= allowed_false_positives:
-            return threshold, "calibration_clean_negative_conformal"
-    raise RuntimeError("无法从 calibration clean negative 冻结 fixed-FPR 阈值")
-
-
-
 def score_image(pipe: Any, image: Any, *, size: int, device: str, mask: Any, key: Any, num_inversion_steps: int) -> float:
     """把图像重新编码并计算 Tree-Ring 检测分数。"""
 
@@ -612,7 +583,6 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
         "num_inversion_steps": int(args.num_inversion_steps),
         "guidance_scale": float(args.guidance_scale),
         "target_fpr": float(args.target_fpr),
-        "explicit_threshold": args.threshold,
         "attack_families": list(attack_families),
         "attack_execution_split": "test",
         "prompt_count": len(prompt_rows),
@@ -877,7 +847,10 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
             profile=f"operation=source_pair_generation prompt={index}/{len(prompt_rows)} image_id={image_id}",
         )
 
-    threshold, threshold_source = derive_threshold(observations_without_threshold, args.threshold, args.target_fpr)
+    threshold, threshold_source = derive_threshold(
+        observations_without_threshold,
+        args.target_fpr,
+    )
     attacked_records: list[dict[str, Any]] = []
     attack_observations_without_threshold: list[dict[str, Any]] = []
     attack_unit_specs: list[Any] = []
@@ -1197,7 +1170,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--w-channel", type=int, default=0)
     parser.add_argument("--w-radius", type=int, default=10)
     parser.add_argument("--w-pattern", default="ring", choices=("ring", "rand", "zeros"))
-    parser.add_argument("--threshold", type=float, default=None)
     parser.add_argument("--target-fpr", type=float, required=True)
     parser.add_argument("--attack-families", default="")
     parser.add_argument("--max-samples", type=int, default=None)

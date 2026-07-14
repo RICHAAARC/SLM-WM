@@ -15,9 +15,9 @@ from experiments.runners.image_only_dataset_runtime import (
 from main.core.digest import build_stable_digest
 from main.methods.carrier import tail_robust_carrier_protocol_record
 from main.methods.detection import (
-    ImageOnlyDetectionConfig,
-    image_only_detector_config_identity_record,
-    recompute_image_only_detection_digest_payload,
+    ImageOnlyMeasurementConfig,
+    image_only_measurement_config_identity_record,
+    recompute_image_only_measurement_digest_payload,
 )
 from main.methods.geometry import (
     ATTENTION_COORDINATE_CONVENTION,
@@ -33,13 +33,6 @@ _FORMAL_METHOD_CONFIG = load_formal_method_runtime_config(
     FORMAL_METHOD_PACKAGE_ROOT
 )
 _LF_PROTOCOL = formal_low_frequency_carrier_protocol_record()
-_DEFAULT_CONTENT_THRESHOLD = 0.0
-_DEFAULT_GEOMETRY_SCORE_THRESHOLD = 0.0
-_DEFAULT_REGISTRATION_CONFIDENCE_THRESHOLD = 0.0
-_DEFAULT_ATTENTION_SYNC_SCORE_THRESHOLD = 0.0
-_DEFAULT_RESCUE_MARGIN_LOW = -0.05
-
-
 def _synthetic_alignment_record(
     alignment: Mapping[str, Any],
     *,
@@ -318,30 +311,6 @@ def bind_formal_detection_record(
         )
     )
     model_id = str(metadata.get("model_id", _FORMAL_METHOD_CONFIG.model_id))
-    content_threshold = float(
-        metadata.get("content_threshold", _DEFAULT_CONTENT_THRESHOLD)
-    )
-    geometry_score_threshold = float(
-        metadata.get(
-            "geometry_score_threshold",
-            _DEFAULT_GEOMETRY_SCORE_THRESHOLD,
-        )
-    )
-    registration_confidence_threshold = float(
-        metadata.get(
-            "registration_confidence_threshold",
-            _DEFAULT_REGISTRATION_CONFIDENCE_THRESHOLD,
-        )
-    )
-    attention_sync_score_threshold = float(
-        metadata.get(
-            "attention_sync_score_threshold",
-            _DEFAULT_ATTENTION_SYNC_SCORE_THRESHOLD,
-        )
-    )
-    rescue_margin_low = float(
-        metadata.get("rescue_margin_low", _DEFAULT_RESCUE_MARGIN_LOW)
-    )
     attention_stable_token_fraction = float(
         metadata.get(
             "attention_stable_token_fraction",
@@ -417,15 +386,6 @@ def bind_formal_detection_record(
     )
     metadata.update(
         {
-            "content_threshold": content_threshold,
-            "geometry_score_threshold": geometry_score_threshold,
-            "registration_confidence_threshold": (
-                registration_confidence_threshold
-            ),
-            "attention_sync_score_threshold": (
-                attention_sync_score_threshold
-            ),
-            "rescue_margin_low": rescue_margin_low,
             "attention_geometry_enabled": attention_geometry_enabled,
             "image_alignment_enabled": image_alignment_enabled,
         }
@@ -459,50 +419,25 @@ def bind_formal_detection_record(
         "detection_qk_atomic_content_digest": "",
     }.items():
         metadata.setdefault(field_name, default_value)
-    raw_margin = content_score - content_threshold
-    geometry_score_value = resolved.get("attention_geometry_score")
-    registration_confidence_value = resolved.get(
-        "registration_confidence"
-    )
-    attention_sync_score_value = resolved.get("attention_sync_score")
-    geometry_reliable = bool(
-        alignment is not None
-        and registration_geometry_reliable
-        and metadata["stable_pair_weight_identity_ready"]
-        and geometry_score_value is not None
-        and float(geometry_score_value) >= geometry_score_threshold
-        and registration_confidence_value is not None
-        and float(registration_confidence_value)
-        >= registration_confidence_threshold
-        and attention_sync_score_value is not None
-        and float(attention_sync_score_value)
-        >= attention_sync_score_threshold
-    )
-    if raw_margin >= 0.0:
-        content_failure_reason = "content_positive"
-    elif rescue_margin_low <= raw_margin < 0.0 and geometry_reliable:
-        content_failure_reason = "geometry_suspected"
-    elif rescue_margin_low <= raw_margin < 0.0:
-        content_failure_reason = "low_confidence"
-    else:
-        content_failure_reason = "content_evidence_absent"
-    rescue_eligible = bool(
-        rescue_margin_low <= raw_margin < 0.0
-        and geometry_reliable
-        and aligned_score is not None
-        and content_failure_reason
-        in {"geometry_suspected", "low_confidence"}
-    )
-    aligned_content_margin = (
-        None
-        if aligned_score is None
-        else aligned_score - content_threshold
-    )
-    rescue_applied = bool(
-        rescue_eligible
-        and aligned_content_margin is not None
-        and aligned_content_margin >= 0.0
-    )
+    for field_name in (
+        "raw_content_margin",
+        "aligned_content_margin",
+        "positive_by_content",
+        "geometry_reliable",
+        "content_failure_reason",
+        "rescue_eligible",
+        "rescue_applied",
+        "evidence_positive",
+    ):
+        resolved.pop(field_name, None)
+    for field_name in (
+        "content_threshold",
+        "geometry_score_threshold",
+        "registration_confidence_threshold",
+        "attention_sync_score_threshold",
+        "rescue_margin_low",
+    ):
+        metadata.pop(field_name, None)
     resolved.update(
         {
             "lf_score": lf_score,
@@ -520,31 +455,51 @@ def bind_formal_detection_record(
             "tail_selected_element_count": tail_selected_element_count,
             "tail_threshold": tail_threshold,
             "tail_retained_fraction": tail_retained_fraction,
-            "raw_content_margin": raw_margin,
             "aligned_lf_score": aligned_lf_score,
             "aligned_tail_robust_score": aligned_tail_score,
             "aligned_content_score": aligned_score,
-            "aligned_content_margin": (
-                aligned_content_margin
-            ),
-            "positive_by_content": raw_margin >= 0.0,
-            "geometry_reliable": geometry_reliable,
             "raw_attention_geometry_score": resolved.get(
                 "raw_attention_geometry_score",
                 resolved.get("attention_geometry_score"),
             ),
-            "content_failure_reason": content_failure_reason,
-            "rescue_eligible": rescue_eligible,
-            "rescue_applied": rescue_applied,
-            "evidence_positive": raw_margin >= 0.0 or rescue_applied,
             "metadata": metadata,
         }
     )
-    detector_config = ImageOnlyDetectionConfig(
+    measurement_config = ImageOnlyMeasurementConfig(
         model_id=model_id,
+        model_revision=_FORMAL_METHOD_CONFIG.model_revision,
+        vae_class_name=_FORMAL_METHOD_CONFIG.vae_class_name,
+        transformer_class_name=_FORMAL_METHOD_CONFIG.transformer_class_name,
+        scheduler_class_name=_FORMAL_METHOD_CONFIG.scheduler_class_name,
+        vae_scaling_factor=_FORMAL_METHOD_CONFIG.vae_scaling_factor,
+        vae_shift_factor=_FORMAL_METHOD_CONFIG.vae_shift_factor,
+        latent_torch_dtype=_FORMAL_METHOD_CONFIG.latent_torch_dtype,
+        width=_FORMAL_METHOD_CONFIG.width,
+        height=_FORMAL_METHOD_CONFIG.height,
+        inference_steps=_FORMAL_METHOD_CONFIG.inference_steps,
+        public_detection_schedule_index=(
+            _FORMAL_METHOD_CONFIG.public_detection_schedule_index
+        ),
+        public_detection_noise_prg_protocol=(
+            _FORMAL_METHOD_CONFIG.public_detection_noise_prg_protocol
+        ),
+        public_detection_noise_domain=(
+            _FORMAL_METHOD_CONFIG.public_detection_noise_domain
+        ),
+        public_detection_conditioning_protocol=(
+            _FORMAL_METHOD_CONFIG.public_detection_conditioning_protocol
+        ),
+        public_detection_condition_text=(
+            _FORMAL_METHOD_CONFIG.public_detection_condition_text
+        ),
+        max_attention_tokens=_FORMAL_METHOD_CONFIG.max_attention_tokens,
+        attention_coordinate_convention=(
+            _FORMAL_METHOD_CONFIG.attention_coordinate_convention
+        ),
+        attention_grid_align_corners=(
+            _FORMAL_METHOD_CONFIG.attention_grid_align_corners
+        ),
         attention_module_names=_FORMAL_METHOD_CONFIG.attention_module_names,
-        content_threshold=content_threshold,
-        geometry_score_threshold=geometry_score_threshold,
         attention_anchor_count=_FORMAL_METHOD_CONFIG.attention_anchor_count,
         attention_residual_threshold=(
             _FORMAL_METHOD_CONFIG.attention_residual_threshold
@@ -559,27 +514,22 @@ def bind_formal_detection_record(
         tail_robust_weight=tail_robust_weight,
         tail_fraction=tail_fraction,
         keyed_prg_version=_FORMAL_METHOD_CONFIG.keyed_prg_version,
-        registration_confidence_threshold=(
-            registration_confidence_threshold
-        ),
-        attention_sync_score_threshold=attention_sync_score_threshold,
-        rescue_margin_low=rescue_margin_low,
         attention_stable_token_fraction=attention_stable_token_fraction,
         attention_unstable_pair_weight=attention_unstable_pair_weight,
         attention_relation_component_weights=tuple(component_weights),
     )
-    detector_config_identity = image_only_detector_config_identity_record(
-        detector_config,
+    measurement_config_identity = image_only_measurement_config_identity_record(
+        measurement_config,
         attention_geometry_enabled=metadata["attention_geometry_enabled"],
         image_alignment_enabled=metadata["image_alignment_enabled"],
     )
-    detector_config_digest = detector_config_identity[
-        "image_only_detector_config_digest"
+    measurement_config_digest = measurement_config_identity[
+        "image_only_measurement_config_digest"
     ]
-    metadata["image_only_detector_config_digest"] = detector_config_digest
-    resolved["image_only_detector_config_digest"] = detector_config_digest
-    resolved["detector_digest"] = build_stable_digest(
-        recompute_image_only_detection_digest_payload(resolved)
+    metadata["image_only_measurement_config_digest"] = measurement_config_digest
+    resolved["image_only_measurement_config_digest"] = measurement_config_digest
+    resolved["measurement_digest"] = build_stable_digest(
+        recompute_image_only_measurement_digest_payload(resolved)
     )
     return resolved
 

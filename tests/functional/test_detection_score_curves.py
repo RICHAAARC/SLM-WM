@@ -49,6 +49,7 @@ def _record(
     })
     equivalent_score = decision_equivalent_score(
         record,
+        geometry_rescue_enabled=True,
         rescue_margin_low=-0.2,
         geometry_score_threshold=0.5,
         registration_confidence_threshold=0.5,
@@ -63,6 +64,9 @@ def _protocol() -> dict:
 
     return {
         "content_threshold": 0.5,
+        "attention_geometry_enabled": True,
+        "image_alignment_enabled": True,
+        "geometry_rescue_enabled": True,
         "rescue_margin_low": -0.2,
         "geometry_score_threshold": 0.5,
         "registration_confidence_threshold": 0.5,
@@ -85,6 +89,7 @@ def test_decision_equivalent_score_preserves_geometry_rescue_boundary() -> None:
 
     score = decision_equivalent_score(
         record,
+        geometry_rescue_enabled=True,
         rescue_margin_low=-0.2,
         geometry_score_threshold=0.5,
         registration_confidence_threshold=0.5,
@@ -111,6 +116,7 @@ def test_decision_equivalent_score_rejects_registration_below_threshold() -> Non
 
     score = decision_equivalent_score(
         record,
+        geometry_rescue_enabled=True,
         rescue_margin_low=-0.2,
         geometry_score_threshold=0.5,
         registration_confidence_threshold=0.5,
@@ -136,6 +142,7 @@ def test_decision_equivalent_score_rejects_sync_below_threshold() -> None:
 
     score = decision_equivalent_score(
         record,
+        geometry_rescue_enabled=True,
         rescue_margin_low=-0.2,
         geometry_score_threshold=0.5,
         registration_confidence_threshold=0.5,
@@ -144,6 +151,101 @@ def test_decision_equivalent_score_rejects_sync_below_threshold() -> None:
 
     assert score == pytest.approx(0.4)
     assert score < 0.5
+
+
+def _raw_only_record(
+    prompt_id: str,
+    sample_role: str,
+    score: float,
+) -> dict:
+    """构造不含注意力与配准原子的 raw-only test 记录。"""
+
+    record = bind_formal_detection_record(
+        {
+            "run_id": f"run_{prompt_id}",
+            "prompt_id": prompt_id,
+            "split": "test",
+            "sample_role": sample_role,
+            "attack_family": "none",
+            "attack_name": "none",
+            "resource_profile": "clean",
+            "content_score": score,
+            "aligned_content_score": None,
+            "attention_geometry_score": None,
+            "registration_confidence": None,
+            "attention_sync_score": None,
+            "alignment": None,
+            "metadata": {
+                "attention_geometry_enabled": False,
+                "image_alignment_enabled": False,
+            },
+        }
+    )
+    record["formal_evidence_positive"] = score >= 0.5
+    return record
+
+
+def _raw_only_protocol() -> dict:
+    """返回禁用几何 rescue 的冻结 raw-only 协议。"""
+
+    return {
+        "content_threshold": 0.5,
+        "attention_geometry_enabled": False,
+        "image_alignment_enabled": False,
+        "geometry_rescue_enabled": False,
+        "rescue_margin_low": None,
+        "geometry_score_threshold": None,
+        "registration_confidence_threshold": None,
+        "attention_sync_score_threshold": None,
+        "threshold_digest": "raw_only_threshold_digest_test",
+    }
+
+
+@pytest.mark.quick
+def test_curve_builder_uses_raw_score_when_geometry_rescue_is_disabled() -> None:
+    """正式消融关闭 rescue 时必须以 raw 分数构造曲线。"""
+
+    records = (
+        _raw_only_record("raw_positive", "positive_source", 0.8),
+        _raw_only_record("raw_negative", "clean_negative", 0.2),
+    )
+
+    tables = build_detection_score_tables(records, _raw_only_protocol())
+
+    distribution = tables["score_distribution_table"]
+    assert len(distribution) == 4
+    expected_score_by_role = {
+        "positive_source": 0.8,
+        "clean_negative": 0.2,
+    }
+    assert all(
+        row["score"]
+        == pytest.approx(expected_score_by_role[row["sample_role"]])
+        for row in distribution
+    )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "updates",
+    (
+        {"geometry_rescue_enabled": True},
+        {"rescue_margin_low": -0.2},
+    ),
+)
+def test_curve_builder_rejects_disabled_rescue_identity_drift(
+    updates: dict,
+) -> None:
+    """机制开关与 rescue 参数不一致时不得生成曲线。"""
+
+    protocol = {**_raw_only_protocol(), **updates}
+    records = (
+        _raw_only_record("raw_positive", "positive_source", 0.8),
+        _raw_only_record("raw_negative", "clean_negative", 0.2),
+    )
+
+    with pytest.raises(ValueError, match="rescue"):
+        build_detection_score_tables(records, protocol)
 
 
 @pytest.mark.quick

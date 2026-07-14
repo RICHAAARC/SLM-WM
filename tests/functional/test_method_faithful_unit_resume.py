@@ -483,14 +483,14 @@ def test_runner_recomputes_observations_from_complete_unit_records(
             )
         ],
         threshold=threshold,
-        threshold_source="calibration_clean_negative_conformal",
+        threshold_source="nested_calibration_threshold_freeze_conformal_v1",
     )
     manifest = {
         "baseline_id": "tree_ring",
         "test_prompt_count": 1,
         "expected_formal_attack_unit_count": 2,
         "threshold": threshold,
-        "threshold_source": "calibration_clean_negative_conformal",
+        "threshold_source": "nested_calibration_threshold_freeze_conformal_v1",
         "run_config": context.run_config,
         "run_config_digest": context.run_config_digest,
         "stable_scientific_execution_identity": context.stable_execution_identity,

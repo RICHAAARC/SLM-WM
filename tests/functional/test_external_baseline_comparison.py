@@ -146,7 +146,7 @@ def write_pilot_threshold_observation_evidence(
     audit = audit_fixed_fpr_observation_threshold(
         observations,
         target_fpr=0.1,
-        expected_calibration_negative_count=330,
+        expected_calibration_source_negative_count=330,
     )
     assert audit.fixed_fpr_ready is True
     return {

@@ -26,6 +26,10 @@ from experiments.protocol.dataset_quality import (
     FORMAL_DATASET_QUALITY_METRIC_NAMES,
     build_dataset_quality_image_records,
 )
+from experiments.protocol.detection_key_identity import (
+    REGISTERED_WRONG_KEY_ROLE,
+    REGISTERED_WATERMARK_KEY_ROLE,
+)
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.formal_randomization import (
     formal_generation_seed,
@@ -167,22 +171,51 @@ def _runtime_result_payload(
 
 def _detection_record(
     *,
+    prompt_id: str,
+    split: str,
     sample_role: str,
     content_score: float,
+    attention_geometry_enabled: bool,
+    image_alignment_enabled: bool,
     attack: Any | None = None,
     generation_seed_random: int | None = None,
+    detector_guided_attack_threshold_digest: str | None = None,
 ) -> dict[str, Any]:
     """构造能够进入真实 fixed-FPR 校准和攻击覆盖检查的检测原子。"""
 
     record: dict[str, Any] = {
+        "prompt_id": prompt_id,
+        "split": split,
         "sample_role": sample_role,
+        "detection_key_role": (
+            REGISTERED_WRONG_KEY_ROLE
+            if sample_role == "wrong_key_negative"
+            else REGISTERED_WATERMARK_KEY_ROLE
+        ),
         "content_score": content_score,
-        "aligned_content_score": None,
-        "attention_geometry_score": 0.0,
-        "registration_confidence": 0.0,
-        "attention_sync_score": 0.0,
-        "alignment": {
-            "registration_geometry_reliable": False,
+        "aligned_content_score": (
+            content_score if image_alignment_enabled else None
+        ),
+        "attention_geometry_score": (
+            0.0 if image_alignment_enabled else None
+        ),
+        "raw_attention_geometry_score": (
+            0.0 if attention_geometry_enabled else None
+        ),
+        "registration_confidence": (
+            0.0 if image_alignment_enabled else None
+        ),
+        "attention_sync_score": (
+            0.0 if image_alignment_enabled else None
+        ),
+        "alignment": (
+            {"registration_geometry_reliable": False}
+            if image_alignment_enabled
+            else None
+        ),
+        "metadata": {
+            "attention_geometry_enabled": attention_geometry_enabled,
+            "image_alignment_enabled": image_alignment_enabled,
         },
     }
     if attack is not None:
@@ -209,6 +242,10 @@ def _detection_record(
                 ),
             }
         )
+        if attack.attack_name == "adversarial_removal_attack":
+            record["detector_guided_attack_threshold_digest"] = (
+                detector_guided_attack_threshold_digest
+            )
     return bind_formal_detection_record(record)
 
 
@@ -246,10 +283,10 @@ def test_runtime_rerun_writer_package_and_closure_share_manifest_config(
     prompt_path = tmp_path / prompt_relative
     prompt_path.parent.mkdir(parents=True)
     prompt_path.write_text(
-        "测试 Prompt 0\n测试 Prompt 1\n测试 Prompt 2\n",
+        "".join(f"测试 Prompt {index}\n" for index in range(6)),
         encoding="utf-8",
     )
-    paper_run = _minimal_paper_run(prompt_relative, 3)
+    paper_run = _minimal_paper_run(prompt_relative, 6)
     prompt_records = apply_split_assignments(
         build_prompt_records(
             paper_run.prompt_set,
@@ -317,22 +354,56 @@ def test_runtime_rerun_writer_package_and_closure_share_manifest_config(
         ablation_id = Path(config.output_dir).name
         positive_score = 1.0 if ablation_id == "complete_method" else 0.0
         rows = [
-            _detection_record(sample_role="clean_negative", content_score=0.0),
             _detection_record(
+                prompt_id=config.prompt_id,
+                split=config.split,
+                sample_role="clean_negative",
+                content_score=0.0,
+                attention_geometry_enabled=config.attention_geometry_enabled,
+                image_alignment_enabled=config.image_alignment_enabled,
+            ),
+            _detection_record(
+                prompt_id=config.prompt_id,
+                split=config.split,
                 sample_role="positive_source",
                 content_score=positive_score,
+                attention_geometry_enabled=config.attention_geometry_enabled,
+                image_alignment_enabled=config.image_alignment_enabled,
             ),
-            _detection_record(sample_role="wrong_key_negative", content_score=0.0),
+            _detection_record(
+                prompt_id=config.prompt_id,
+                split=config.split,
+                sample_role="wrong_key_negative",
+                content_score=0.0,
+                attention_geometry_enabled=config.attention_geometry_enabled,
+                image_alignment_enabled=config.image_alignment_enabled,
+            ),
         ]
         if config.split == "test":
             rows.extend(
-                _detection_record(
-                    sample_role=sample_role,
+                    _detection_record(
+                        prompt_id=config.prompt_id,
+                        split=config.split,
+                        sample_role=sample_role,
                     content_score=(
                         positive_score if sample_role == "positive_source" else 0.0
                     ),
+                    attention_geometry_enabled=(
+                        config.attention_geometry_enabled
+                    ),
+                    image_alignment_enabled=config.image_alignment_enabled,
                     attack=attack,
                     generation_seed_random=config.seed,
+                    detector_guided_attack_threshold_digest=(
+                        None
+                        if config.detector_guided_attack_threshold_protocol
+                        is None
+                        else str(
+                            config.detector_guided_attack_threshold_protocol[
+                                "threshold_digest"
+                            ]
+                        )
+                    ),
                 )
                 for attack in default_attack_configs()
                 if attack.enabled
@@ -394,7 +465,7 @@ def test_runtime_rerun_writer_package_and_closure_share_manifest_config(
         ablation_runtime_records=runtime_records,
         ablation_necessity_rows=necessity_rows,
         ablation_necessity_summary=necessity_summary,
-        expected_prompt_count=3,
+        expected_prompt_count=6,
         expected_test_count=paper_run.minimum_clean_negative_count,
         expected_calibration_prompt_id_digest=build_stable_digest(
             sorted(

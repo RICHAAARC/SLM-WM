@@ -438,7 +438,7 @@ def test_main_key_role_and_baseline_score_must_rebuild(
 
     monkeypatch.setattr(
         runner,
-        "validate_image_only_detection_digest_record",
+        "validate_image_only_measurement_projection_record",
         lambda row: {},
     )
     monkeypatch.setattr(
@@ -474,7 +474,7 @@ def test_main_key_role_and_baseline_score_must_rebuild(
         "formal_positive_by_content": False,
         "content_score": 0.1,
         "aligned_content_score": None,
-        "detector_digest": build_stable_digest({"detector": 1}),
+        "measurement_digest": build_stable_digest({"detector": 1}),
     }
     with pytest.raises(
         runner.RandomizationDetectionStatisticsRunnerError,
@@ -501,7 +501,7 @@ def test_main_key_role_and_baseline_score_must_rebuild(
     baseline_row = {
         "baseline_id": "tree_ring",
         "threshold": 0.5,
-        "threshold_source": "calibration_clean_negative_conformal",
+        "threshold_source": "nested_calibration_threshold_freeze_conformal_v1",
         "score": 0.9,
         "detection_decision": False,
         "image_path": "outputs/tree_ring.png",

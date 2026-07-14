@@ -11,19 +11,24 @@ from experiments.protocol.fixed_fpr_observation_audit import (
     FORMAL_THRESHOLD_SOURCE,
     audit_fixed_fpr_observation_threshold,
 )
-from experiments.runners.image_only_dataset_runtime import (
+from experiments.protocol.calibration import is_clean_unattacked_negative
+from experiments.protocol.image_only_evidence import (
     FrozenEvidenceProtocol,
     apply_frozen_evidence_protocol,
     calibrate_complete_evidence_protocol,
 )
+from experiments.protocol.detection_key_identity import (
+    REGISTERED_WATERMARK_KEY_ROLE,
+)
 from main.core.digest import build_stable_digest
+from main.methods.detection import project_image_only_measurement_record
 from paper_experiments.analysis.formal_record_statistics import (
     validate_frozen_evidence_protocol_record,
 )
 
 
 MAIN_THRESHOLD_SOURCE = (
-    "calibration_clean_negative_complete_evidence_empirical_fixed_fpr"
+    "nested_calibration_complete_evidence_empirical_fixed_fpr"
 )
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 FIXED_FPR_THRESHOLD_METHOD_IDS = (
@@ -51,7 +56,7 @@ def audit_main_method_fixed_fpr(
     *,
     observation_source_sha256: str,
     target_fpr: float,
-    expected_calibration_negative_count: int,
+    expected_calibration_source_negative_count: int,
     expected_test_negative_count: int,
 ) -> dict[str, Any]:
     """从主方法 observation 重算包含 rescue 的完整冻结判定。"""
@@ -60,16 +65,20 @@ def audit_main_method_fixed_fpr(
     calibration_rows = tuple(
         row
         for row in rows
-        if row.get("split") == "calibration"
-        and row.get("sample_role") == "clean_negative"
-        and not row.get("attack_id")
+        if is_clean_unattacked_negative(
+            row,
+            split="calibration",
+            expected_detection_key_role=REGISTERED_WATERMARK_KEY_ROLE,
+        )
     )
     test_rows = tuple(
         row
         for row in rows
-        if row.get("split") == "test"
-        and row.get("sample_role") == "clean_negative"
-        and not row.get("attack_id")
+        if is_clean_unattacked_negative(
+            row,
+            split="test",
+            expected_detection_key_role=REGISTERED_WATERMARK_KEY_ROLE,
+        )
     )
     protocol_field_names = tuple(field.name for field in fields(FrozenEvidenceProtocol))
     protocol_fields_ready = set(frozen_protocol) == set(protocol_field_names)
@@ -85,11 +94,16 @@ def audit_main_method_fixed_fpr(
     target_ready = declared_protocol is not None
     recomputed: FrozenEvidenceProtocol | None = None
     if calibration_rows and declared_protocol is not None:
-        recomputed = calibrate_complete_evidence_protocol(
-            calibration_rows,
-            float(target_fpr),
-            declared_protocol.rescue_margin_low,
-        )
+        try:
+            recomputed = calibrate_complete_evidence_protocol(
+                (
+                    project_image_only_measurement_record(row)
+                    for row in calibration_rows
+                ),
+                float(target_fpr),
+            )
+        except (TypeError, ValueError):
+            recomputed = None
     recomputed_payload = recomputed.to_dict() if recomputed is not None else {}
     protocol_value_ready = bool(
         recomputed is not None
@@ -101,9 +115,22 @@ def audit_main_method_fixed_fpr(
     )
     decision_ready = False
     if recomputed is not None:
-        reapplied = apply_frozen_evidence_protocol(rows, recomputed)
+        reapplied = apply_frozen_evidence_protocol(
+            (
+                project_image_only_measurement_record(row)
+                for row in rows
+            ),
+            recomputed,
+        )
         derived_fields = (
             "frozen_content_threshold",
+            "frozen_rescue_margin_low",
+            "frozen_geometry_score_threshold",
+            "frozen_registration_confidence_threshold",
+            "frozen_attention_sync_score_threshold",
+            "frozen_attention_geometry_enabled",
+            "frozen_image_alignment_enabled",
+            "frozen_geometry_rescue_enabled",
             "formal_raw_content_margin",
             "formal_aligned_content_margin",
             "formal_positive_by_content",
@@ -122,7 +149,7 @@ def audit_main_method_fixed_fpr(
             for original, resolved in zip(rows, reapplied)
         )
     count_ready = (
-        len(calibration_rows) == int(expected_calibration_negative_count)
+        len(calibration_rows) == int(expected_calibration_source_negative_count)
         and len(test_rows) == int(expected_test_negative_count)
     )
     ready = all((target_ready, protocol_value_ready, decision_ready, count_ready))
@@ -131,6 +158,17 @@ def audit_main_method_fixed_fpr(
         "threshold_source": MAIN_THRESHOLD_SOURCE,
         "target_fpr": float(target_fpr),
         "calibration_clean_negative_count": len(calibration_rows),
+        "threshold_freeze_negative_count": (
+            0 if recomputed is None else recomputed.threshold_freeze_negative_count
+        ),
+        "calibration_partition_digest": (
+            "" if recomputed is None else recomputed.calibration_partition_digest
+        ),
+        "threshold_freeze_prompt_id_digest": (
+            ""
+            if recomputed is None
+            else recomputed.threshold_freeze_prompt_id_digest
+        ),
         "test_clean_negative_count": len(test_rows),
         "calibrated_detection_threshold": (
             None if recomputed is None else recomputed.content_threshold
@@ -152,7 +190,7 @@ def audit_baseline_fixed_fpr(
     *,
     observation_source_sha256: str,
     target_fpr: float,
-    expected_calibration_negative_count: int,
+    expected_calibration_source_negative_count: int,
     expected_test_negative_count: int,
     declared_threshold: float | None = None,
     declared_threshold_digest: str = "",
@@ -163,14 +201,12 @@ def audit_baseline_fixed_fpr(
     audit = audit_fixed_fpr_observation_threshold(
         rows,
         target_fpr=float(target_fpr),
-        expected_calibration_negative_count=int(expected_calibration_negative_count),
+        expected_calibration_source_negative_count=int(expected_calibration_source_negative_count),
     )
     test_rows = tuple(
         row
         for row in rows
-        if row.get("split") == "test"
-        and row.get("sample_role") == "clean_negative"
-        and row.get("attack_family") == "clean"
+        if is_clean_unattacked_negative(row, split="test")
     )
     test_count_ready = len(test_rows) == int(expected_test_negative_count)
     declared_threshold_ready = bool(
@@ -199,7 +235,16 @@ def audit_baseline_fixed_fpr(
         "method_id": str(method_id),
         "threshold_source": FORMAL_THRESHOLD_SOURCE,
         "target_fpr": float(target_fpr),
-        "calibration_clean_negative_count": audit.calibration_negative_count,
+        "calibration_clean_negative_count": (
+            audit.calibration_source_negative_count
+        ),
+        "threshold_freeze_negative_count": (
+            audit.threshold_freeze_negative_count
+        ),
+        "calibration_partition_digest": audit.calibration_partition_digest,
+        "threshold_freeze_prompt_id_digest": (
+            audit.threshold_freeze_prompt_id_digest
+        ),
         "test_clean_negative_count": len(test_rows),
         "calibrated_detection_threshold": audit.frozen_threshold,
         "threshold_digest": audit.threshold_digest,
@@ -207,7 +252,9 @@ def audit_baseline_fixed_fpr(
         "protocol_target_ready": True,
         "protocol_value_ready": declared_threshold_ready and declared_digest_ready,
         "detection_decision_ready": audit.detection_decision_ready,
-        "split_count_ready": audit.calibration_count_ready and test_count_ready,
+        "split_count_ready": (
+            audit.calibration_partition_ready and test_count_ready
+        ),
         "fixed_fpr_threshold_ready": ready,
         "supports_paper_claim": False,
     }
@@ -253,6 +300,45 @@ def build_fixed_fpr_threshold_audit_report(
         if identity_ready
         else {}
     )
+    method_calibration_partition_digest_map = (
+        {
+            str(row["method_id"]): str(
+                row.get("calibration_partition_digest", "")
+            )
+            for row in canonical_rows
+        }
+        if identity_ready
+        else {}
+    )
+    method_threshold_freeze_prompt_id_digest_map = (
+        {
+            str(row["method_id"]): str(
+                row.get("threshold_freeze_prompt_id_digest", "")
+            )
+            for row in canonical_rows
+        }
+        if identity_ready
+        else {}
+    )
+    shared_calibration_partition_ready = bool(
+        identity_ready
+        and set(method_calibration_partition_digest_map) == set(expected_ids)
+        and set(method_threshold_freeze_prompt_id_digest_map)
+        == set(expected_ids)
+        and len(set(method_calibration_partition_digest_map.values())) == 1
+        and len(
+            set(method_threshold_freeze_prompt_id_digest_map.values())
+        )
+        == 1
+        and all(
+            SHA256_PATTERN.fullmatch(digest) is not None
+            for digest in method_calibration_partition_digest_map.values()
+        )
+        and all(
+            SHA256_PATTERN.fullmatch(digest) is not None
+            for digest in method_threshold_freeze_prompt_id_digest_map.values()
+        )
+    )
     threshold_observation_binding_ready = bool(
         identity_ready
         and set(method_observation_source_sha256_map) == set(expected_ids)
@@ -276,7 +362,12 @@ def build_fixed_fpr_threshold_audit_report(
         )
         for row in materialized
     )
-    ready = identity_ready and all_rows_ready and threshold_observation_binding_ready
+    ready = bool(
+        identity_ready
+        and all_rows_ready
+        and threshold_observation_binding_ready
+        and shared_calibration_partition_ready
+    )
     return {
         "paper_claim_scale": str(paper_run_name),
         "target_fpr": float(target_fpr),
@@ -285,10 +376,19 @@ def build_fixed_fpr_threshold_audit_report(
         "audited_method_count": len(materialized),
         "method_observation_source_sha256_map": method_observation_source_sha256_map,
         "method_threshold_digest_map": method_threshold_digest_map,
+        "method_calibration_partition_digest_map": (
+            method_calibration_partition_digest_map
+        ),
+        "method_threshold_freeze_prompt_id_digest_map": (
+            method_threshold_freeze_prompt_id_digest_map
+        ),
         "threshold_audit_rows_digest": threshold_audit_rows_digest,
         "method_identity_ready": identity_ready,
         "all_method_thresholds_ready": all_rows_ready,
         "threshold_observation_binding_ready": threshold_observation_binding_ready,
+        "shared_calibration_partition_ready": (
+            shared_calibration_partition_ready
+        ),
         "fixed_fpr_threshold_audit_ready": ready,
         "supports_paper_claim": ready,
     }
@@ -308,10 +408,22 @@ def build_fixed_fpr_threshold_manifest_config(
         "method_threshold_digest_map": dict(
             report.get("method_threshold_digest_map", {})
         ),
+        "method_calibration_partition_digest_map": dict(
+            report.get("method_calibration_partition_digest_map", {})
+        ),
+        "method_threshold_freeze_prompt_id_digest_map": dict(
+            report.get(
+                "method_threshold_freeze_prompt_id_digest_map",
+                {},
+            )
+        ),
         "threshold_audit_rows_digest": str(
             report.get("threshold_audit_rows_digest", "")
         ),
         "threshold_observation_binding_ready": (
             report.get("threshold_observation_binding_ready") is True
+        ),
+        "shared_calibration_partition_ready": (
+            report.get("shared_calibration_partition_ready") is True
         ),
     }

@@ -517,7 +517,6 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
         "num_inversion_steps": int(args.num_inversion_steps),
         "guidance_scale": float(args.guidance_scale),
         "target_fpr": float(args.target_fpr),
-        "explicit_threshold": args.threshold,
         "attack_families": list(attack_families),
         "attack_execution_split": "test",
         "prompt_count": len(prompt_rows),
@@ -811,7 +810,10 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
             profile=f"operation=source_pair_generation prompt={index}/{len(prompt_rows)} image_id={image_id}",
         )
 
-    threshold, threshold_source = derive_threshold(observations_without_threshold, args.threshold, args.target_fpr)
+    threshold, threshold_source = derive_threshold(
+        observations_without_threshold,
+        args.target_fpr,
+    )
     attacked_records: list[dict[str, Any]] = []
     attack_observations_without_threshold: list[dict[str, Any]] = []
     attack_unit_specs: list[Any] = []
@@ -1127,7 +1129,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--watermark-seed", type=int, default=20260622)
     parser.add_argument("--channel-copy", type=int, default=1)
     parser.add_argument("--hw-copy", type=int, default=8)
-    parser.add_argument("--threshold", type=float, default=None)
     parser.add_argument("--target-fpr", type=float, required=True)
     parser.add_argument("--attack-families", default="")
     parser.add_argument("--max-samples", type=int, default=None)

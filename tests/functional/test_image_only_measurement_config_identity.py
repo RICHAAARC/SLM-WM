@@ -1,4 +1,4 @@
-"""验证仅图像盲检器完整配置身份及摘要门禁。"""
+"""验证仅图像盲检测量配置身份及摘要门禁。"""
 
 from __future__ import annotations
 
@@ -19,10 +19,10 @@ from main.methods.carrier import (
     LowFrequencyCarrierConfig,
 )
 from main.methods.detection import (
-    ImageOnlyDetectionConfig,
-    detect_image_only_watermark,
-    image_only_detector_config_identity_record,
-    validate_image_only_detection_digest_record,
+    ImageOnlyMeasurementConfig,
+    measure_image_only_watermark,
+    image_only_measurement_config_identity_record,
+    validate_image_only_measurement_digest_record,
 )
 from main.methods.geometry import FROZEN_SD35_ATTENTION_MODULE_NAMES
 
@@ -30,14 +30,30 @@ from main.methods.geometry import FROZEN_SD35_ATTENTION_MODULE_NAMES
 pytestmark = pytest.mark.quick
 
 
-def _config() -> ImageOnlyDetectionConfig:
-    """构造显式覆盖每个正式字段的检测器配置。"""
+def _config() -> ImageOnlyMeasurementConfig:
+    """构造显式覆盖每个正式字段的阈值无关测量配置。"""
 
-    return ImageOnlyDetectionConfig(
+    return ImageOnlyMeasurementConfig(
         model_id="detector-config-model",
+        model_revision="1" * 40,
+        vae_class_name="AutoencoderKL",
+        transformer_class_name="SD3Transformer2DModel",
+        scheduler_class_name="FlowMatchEulerDiscreteScheduler",
+        vae_scaling_factor=1.5305,
+        vae_shift_factor=0.0609,
+        latent_torch_dtype="float16",
+        width=512,
+        height=512,
+        inference_steps=28,
+        public_detection_schedule_index=14,
+        public_detection_noise_prg_protocol=KEYED_PRG_VERSION,
+        public_detection_noise_domain="slm_wm_public_detection_noise_v1",
+        public_detection_conditioning_protocol="sd3_three_encoder_empty_text_v1",
+        public_detection_condition_text="",
+        max_attention_tokens=1024,
+        attention_coordinate_convention="normalized_xy_token_centers_corner_endpoints_v1",
+        attention_grid_align_corners=True,
         attention_module_names=FROZEN_SD35_ATTENTION_MODULE_NAMES,
-        content_threshold=0.10,
-        geometry_score_threshold=0.20,
         attention_anchor_count=12,
         attention_residual_threshold=0.20,
         attention_minimum_inlier_ratio=0.50,
@@ -54,9 +70,6 @@ def _config() -> ImageOnlyDetectionConfig:
         tail_robust_weight=0.30,
         tail_fraction=0.20,
         keyed_prg_version=KEYED_PRG_VERSION,
-        registration_confidence_threshold=0.30,
-        attention_sync_score_threshold=0.40,
-        rescue_margin_low=-0.05,
         attention_stable_token_fraction=0.50,
         attention_unstable_pair_weight=0.25,
         attention_relation_component_weights=(0.25, 0.25, 0.25, 0.25),
@@ -67,16 +80,28 @@ def _config() -> ImageOnlyDetectionConfig:
     ("changes"),
     (
         {"model_id": "detector-config-model-2"},
-        {"content_threshold": 0.11},
-        {"geometry_score_threshold": 0.21},
+        {"model_revision": "2" * 40},
+        {"vae_class_name": "DifferentVae"},
+        {"transformer_class_name": "DifferentTransformer"},
+        {"scheduler_class_name": "DifferentScheduler"},
+        {"vae_scaling_factor": 1.5306},
+        {"vae_shift_factor": 0.0610},
+        {"latent_torch_dtype": "bfloat16"},
+        {"width": 520},
+        {"height": 520},
+        {"inference_steps": 29},
+        {"public_detection_schedule_index": 15},
+        {"public_detection_noise_domain": "different_public_noise_domain"},
+        {"public_detection_conditioning_protocol": "different_conditioning"},
+        {"public_detection_condition_text": "different"},
+        {"max_attention_tokens": 1000},
+        {"attention_coordinate_convention": "different_coordinates"},
+        {"attention_grid_align_corners": False},
         {"attention_anchor_count": 13},
         {"attention_residual_threshold": 0.21},
         {"attention_minimum_inlier_ratio": 0.51},
         {"lf_weight": 0.60, "tail_robust_weight": 0.40},
         {"tail_fraction": 0.21},
-        {"registration_confidence_threshold": 0.31},
-        {"attention_sync_score_threshold": 0.41},
-        {"rescue_margin_low": -0.06},
         {"attention_stable_token_fraction": 0.51},
         {"attention_unstable_pair_weight": 0.26},
         {
@@ -89,24 +114,24 @@ def _config() -> ImageOnlyDetectionConfig:
         },
     ),
 )
-def test_detector_config_digest_binds_every_runtime_parameter(
+def test_measurement_config_digest_binds_every_runtime_parameter(
     changes: dict[str, object],
 ) -> None:
-    """任一有效运行参数变化都必须产生不同的配置摘要。"""
+    """任一有效测量参数变化都必须产生不同的配置摘要。"""
 
-    baseline = image_only_detector_config_identity_record(
+    baseline = image_only_measurement_config_identity_record(
         _config(),
         attention_geometry_enabled=True,
         image_alignment_enabled=True,
     )
-    changed = image_only_detector_config_identity_record(
+    changed = image_only_measurement_config_identity_record(
         replace(_config(), **changes),
         attention_geometry_enabled=True,
         image_alignment_enabled=True,
     )
 
-    assert changed["image_only_detector_config_digest"] != baseline[
-        "image_only_detector_config_digest"
+    assert changed["image_only_measurement_config_digest"] != baseline[
+        "image_only_measurement_config_digest"
     ]
 
 
@@ -114,45 +139,45 @@ def test_detector_config_digest_binds_every_runtime_parameter(
     ("attention_geometry_enabled", "image_alignment_enabled"),
     ((False, True), (True, False), (False, False)),
 )
-def test_detector_config_digest_binds_mechanism_switches(
+def test_measurement_config_digest_binds_mechanism_switches(
     attention_geometry_enabled: bool,
     image_alignment_enabled: bool,
 ) -> None:
-    """消融机制开关必须属于检测器身份而不是外部说明。"""
+    """消融机制开关必须属于测量身份而不是外部说明。"""
 
-    baseline = image_only_detector_config_identity_record(
+    baseline = image_only_measurement_config_identity_record(
         _config(),
         attention_geometry_enabled=True,
         image_alignment_enabled=True,
     )
-    changed = image_only_detector_config_identity_record(
+    changed = image_only_measurement_config_identity_record(
         _config(),
         attention_geometry_enabled=attention_geometry_enabled,
         image_alignment_enabled=image_alignment_enabled,
     )
 
-    assert changed["image_only_detector_config_digest"] != baseline[
-        "image_only_detector_config_digest"
+    assert changed["image_only_measurement_config_digest"] != baseline[
+        "image_only_measurement_config_digest"
     ]
 
 
-def test_detection_record_rejects_stale_detector_config_identity() -> None:
-    """检测正文改变后不得沿用旧配置身份并伪造新的外层摘要。"""
+def test_measurement_record_rejects_embedded_calibration_parameter() -> None:
+    """原始测量记录不得重新携带 calibration 决策参数。"""
 
     torch = pytest.importorskip("torch")
     image = torch.zeros(1, 2, 8, 8)
-    record = detect_image_only_watermark(
+    record = measure_image_only_watermark(
         image=image,
         key_material="detector-config-key",
         config=_config(),
         image_latent_encoder=lambda value: value,
     ).to_record()
-    validate_image_only_detection_digest_record(record)
+    validate_image_only_measurement_digest_record(record)
 
     drifted = deepcopy(record)
     drifted["metadata"]["content_threshold"] = 0.12
-    with pytest.raises(ValueError, match="margin|最终判定|detector digest"):
-        validate_image_only_detection_digest_record(drifted)
+    with pytest.raises(ValueError, match="calibration 参数"):
+        validate_image_only_measurement_digest_record(drifted)
 
 
 @pytest.mark.parametrize(
@@ -163,7 +188,7 @@ def test_detection_record_rejects_stale_detector_config_identity() -> None:
         ("attention_relation_component_weights", [0.25] * 4),
     ),
 )
-def test_detector_config_rejects_implicit_numeric_or_container_types(
+def test_measurement_config_rejects_implicit_numeric_or_container_types(
     field_name: str,
     invalid_value: object,
 ) -> None:
@@ -173,7 +198,7 @@ def test_detector_config_rejects_implicit_numeric_or_container_types(
         replace(_config(), **{field_name: invalid_value})
 
 
-def test_detector_config_rejects_attention_layer_order_drift() -> None:
+def test_measurement_config_rejects_attention_layer_order_drift() -> None:
     """盲检配置不得交换或替换冻结的 SD3.5 注意力层顺序."""
 
     with pytest.raises(ValueError, match="冻结 SD3.5 层顺序"):

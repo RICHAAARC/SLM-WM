@@ -63,7 +63,7 @@ from main.methods.carrier import (
     tail_robust_carrier_protocol_record,
 )
 from main.methods.detection import (
-    recompute_image_only_detection_digest_payload,
+    recompute_image_only_measurement_digest_payload,
 )
 from main.methods.method_definition import (
     semantic_conditioned_latent_method_definition_digest,
@@ -1719,8 +1719,8 @@ def test_detection_public_noise_uses_shared_global_evaluation_indices() -> None:
                 }
             )
         )
-        record["detector_digest"] = build_stable_digest(
-            recompute_image_only_detection_digest_payload(record)
+        record["measurement_digest"] = build_stable_digest(
+            recompute_image_only_measurement_digest_payload(record)
         )
 
     set_evaluation_indices(first, (3, 4))
@@ -1746,18 +1746,13 @@ def test_scientific_binding_rejects_mixed_detector_config_identities() -> None:
 
     inputs = _binding_inputs()
     drifted = deepcopy(inputs["detection_records"][1])
-    drifted["metadata"]["content_threshold"] = 0.01
-    drifted["raw_content_margin"] = drifted["content_score"] - 0.01
-    drifted["aligned_content_margin"] = (
-        drifted["aligned_content_score"] - 0.01
-    )
     config_digest = "f" * 64
-    drifted["image_only_detector_config_digest"] = config_digest
+    drifted["image_only_measurement_config_digest"] = config_digest
     drifted["metadata"][
-        "image_only_detector_config_digest"
+        "image_only_measurement_config_digest"
     ] = config_digest
-    drifted["detector_digest"] = build_stable_digest(
-        recompute_image_only_detection_digest_payload(drifted)
+    drifted["measurement_digest"] = build_stable_digest(
+        recompute_image_only_measurement_digest_payload(drifted)
     )
     inputs["detection_records"] = [
         inputs["detection_records"][0],

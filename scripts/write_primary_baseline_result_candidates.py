@@ -359,7 +359,7 @@ def _measured_baseline_readiness(
     threshold_audit = audit_fixed_fpr_observation_threshold(
         observations,
         target_fpr=target_fpr,
-        expected_calibration_negative_count=expected_splits["calibration"],
+        expected_calibration_source_negative_count=expected_splits["calibration"],
     )
     required_attack_names = {
         config.attack_name

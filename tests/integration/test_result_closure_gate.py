@@ -9,6 +9,7 @@ from functools import lru_cache
 import hashlib
 import io
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -195,54 +196,6 @@ TAIL_CARRIER_PROTOCOL = tail_robust_carrier_protocol_record(
 TAIL_CARRIER_PROTOCOL_DIGEST = str(
     TAIL_CARRIER_PROTOCOL["tail_carrier_protocol_digest"]
 )
-_DETECTOR_CONFIG_RECORD = bind_formal_detection_record(
-    {
-        "content_score": 0.0,
-        "aligned_content_score": None,
-        "alignment": None,
-        "metadata": {"rescue_margin_low": -0.2},
-    }
-)
-DETECTOR_CONFIG_DIGEST = str(
-    _DETECTOR_CONFIG_RECORD["image_only_detector_config_digest"]
-)
-_FROZEN_PROTOCOL_DIGEST_PAYLOAD = {
-    "content_threshold": 0.5,
-    "rescue_margin_low": -0.2,
-    "geometry_score_threshold": 0.5,
-    "registration_confidence_threshold": 0.5,
-    "attention_sync_score_threshold": 0.5,
-    **ATTENTION_ALIGNMENT_GATE,
-    "lf_carrier_protocol_digest": LF_CARRIER_PROTOCOL_DIGEST,
-    "lf_weight": LF_WEIGHT,
-    "tail_robust_weight": TAIL_ROBUST_WEIGHT,
-    "tail_fraction": TAIL_FRACTION,
-    "tail_carrier_protocol_digest": TAIL_CARRIER_PROTOCOL_DIGEST,
-    "image_only_detector_config_digest": DETECTOR_CONFIG_DIGEST,
-    "geometry_calibration_negative_count": 10,
-    "geometry_calibration_exceedance_count": 0,
-    "registration_calibration_negative_count": 10,
-    "registration_calibration_exceedance_count": 0,
-    "sync_calibration_negative_count": 10,
-    "sync_calibration_exceedance_count": 0,
-    "geometry_protocol_calibration_ready": True,
-    "calibration_negative_count": 10,
-    "calibration_false_positive_count": 1,
-    "target_fpr": TARGET_FPR,
-    "decision_scope": "content_or_same_threshold_aligned_content_rescue",
-}
-MAIN_THRESHOLD_DIGEST = build_stable_digest(
-    _FROZEN_PROTOCOL_DIGEST_PAYLOAD
-)
-FROZEN_PROTOCOL = {
-    **{
-        field_name: value
-        for field_name, value in _FROZEN_PROTOCOL_DIGEST_PAYLOAD.items()
-        if field_name != "decision_scope"
-    },
-    "calibration_false_positive_rate": TARGET_FPR,
-    "threshold_digest": MAIN_THRESHOLD_DIGEST,
-}
 PROMPT_RECORDS = build_prompt_records(
     SCALE,
     tuple(f"a governed prompt {index}" for index in range(PROMPT_COUNT)),
@@ -283,6 +236,42 @@ PROMPT_INDEX_BY_ID = {
 }
 _FORMAL_METHOD_CONFIG = load_formal_method_runtime_config(
     FORMAL_METHOD_PACKAGE_ROOT
+)
+_CALIBRATION_RAW_SCORE = math.nextafter(0.5, -math.inf)
+_CALIBRATION_MEASUREMENTS = tuple(
+    bind_formal_detection_record(
+        {
+            "run_id": f"calibration_{prompt_id}",
+            "prompt_id": prompt_id,
+            "split": "calibration",
+            "sample_role": "clean_negative",
+            "detection_key_role": REGISTERED_WATERMARK_KEY_ROLE,
+            "content_score": _CALIBRATION_RAW_SCORE,
+            "aligned_content_score": _CALIBRATION_RAW_SCORE,
+            "attention_geometry_score": 0.0,
+            "raw_attention_geometry_score": 0.0,
+            "registration_confidence": 0.0,
+            "attention_sync_score": 0.0,
+            "geometry_reliable": False,
+            "alignment": {
+                "registration_geometry_reliable": False,
+            },
+            "metadata": {
+                "attention_geometry_enabled": True,
+                "image_alignment_enabled": True,
+            },
+        }
+    )
+    for prompt_id in CALIBRATION_PROMPT_IDS
+)
+_FROZEN_PROTOCOL_OBJECT = calibrate_complete_evidence_protocol(
+    _CALIBRATION_MEASUREMENTS,
+    TARGET_FPR,
+)
+FROZEN_PROTOCOL = _FROZEN_PROTOCOL_OBJECT.to_dict()
+MAIN_THRESHOLD_DIGEST = _FROZEN_PROTOCOL_OBJECT.threshold_digest
+MEASUREMENT_CONFIG_DIGEST = (
+    _FROZEN_PROTOCOL_OBJECT.image_only_measurement_config_digest
 )
 _FORMAL_REPEAT = resolve_formal_randomization_repeat("seed_00_key_00")
 FORMAL_RUNTIME_RANDOMIZATION_PLAN = formal_runtime_randomization_plan_record(
@@ -1366,7 +1355,7 @@ def formal_attack_detection_records() -> tuple[dict[str, object], ...]:
                 attacked_digest = build_stable_digest(
                     ["attacked", prompt_id, sample_role, attack["attack_id"]]
                 )
-                detector_digest = build_stable_digest(
+                measurement_digest = build_stable_digest(
                     ["detector", prompt_id, sample_role, attack["attack_id"]]
                 )
                 record = {
@@ -1388,7 +1377,7 @@ def formal_attack_detection_records() -> tuple[dict[str, object], ...]:
                         f"{prompt_id}_{sample_role}_{attack['attack_id']}.png"
                     ),
                     "attacked_image_digest": attacked_digest,
-                    "detector_digest": detector_digest,
+                    "measurement_digest": measurement_digest,
                     "frozen_threshold_digest": MAIN_THRESHOLD_DIGEST,
                     "formal_evidence_positive": (
                         sample_role == "positive_source"
@@ -1684,21 +1673,6 @@ def randomization_aggregate_provenance() -> tuple[dict[str, object], dict[str, o
     return payload, manifest
 
 
-ATTENTION_ALIGNMENT_GATE = {
-    "attention_anchor_count": 12,
-    "attention_residual_threshold": 0.20,
-    "attention_minimum_inlier_ratio": 0.50,
-}
-
-
-def _bind_attention_alignment_gate(
-    record: dict[str, object],
-) -> dict[str, object]:
-    """为检测夹具绑定预注册注意力配准门禁."""
-
-    return bind_formal_detection_record(record)
-
-
 def _raw_ablation_detection(
     *,
     run_id: str,
@@ -1706,7 +1680,13 @@ def _raw_ablation_detection(
     split: str,
     sample_role: str,
     content_score: float,
+    attention_geometry_enabled: bool,
+    image_alignment_enabled: bool,
+    lf_weight: float,
+    tail_robust_weight: float,
+    tail_fraction: float,
     attack: object | None = None,
+    frozen_threshold_digest: str | None = None,
 ) -> dict[str, object]:
     """构造应用消融冻结协议前的最小图像盲检原子。"""
 
@@ -1716,12 +1696,36 @@ def _raw_ablation_detection(
         "prompt_id": prompt_id,
         "split": split,
         "sample_role": sample_role,
+        "detection_key_role": (
+            REGISTERED_WRONG_KEY_ROLE
+            if sample_role == "wrong_key_negative"
+            else REGISTERED_WATERMARK_KEY_ROLE
+        ),
         "content_score": content_score,
-        "aligned_content_score": None,
-        "attention_geometry_score": 0.0,
-        "registration_confidence": 0.0,
-        "attention_sync_score": 0.0,
-        "alignment": {"registration_geometry_reliable": False},
+        "aligned_content_score": (
+            content_score if image_alignment_enabled else None
+        ),
+        "attention_geometry_score": (
+            0.0 if image_alignment_enabled else None
+        ),
+        "raw_attention_geometry_score": (
+            0.0 if attention_geometry_enabled else None
+        ),
+        "registration_confidence": (
+            0.0 if image_alignment_enabled else None
+        ),
+        "attention_sync_score": (
+            0.0 if image_alignment_enabled else None
+        ),
+        "alignment": (
+            {"registration_geometry_reliable": False}
+            if image_alignment_enabled
+            else None
+        ),
+        "metadata": {
+            "attention_geometry_enabled": attention_geometry_enabled,
+            "image_alignment_enabled": image_alignment_enabled,
+        },
         **randomization_reference,
     }
     if attack is not None:
@@ -1748,7 +1752,18 @@ def _raw_ablation_detection(
                 ),
             }
         )
-    return _bind_attention_alignment_gate(record)
+        if attack.attack_name == "adversarial_removal_attack":
+            if not frozen_threshold_digest:
+                raise ValueError("检测器引导攻击必须绑定已冻结的阈值协议摘要")
+            record["detector_guided_attack_threshold_digest"] = (
+                frozen_threshold_digest
+            )
+    return bind_formal_detection_record(
+        record,
+        lf_weight=lf_weight,
+        tail_robust_weight=tail_robust_weight,
+        tail_fraction=tail_fraction,
+    )
 
 
 def _ablation_scientific_detection_binding(
@@ -1793,8 +1808,8 @@ def _ablation_scientific_detection_binding(
     payload: dict[str, object] = {
         "scientific_content_binding_schema": SCIENTIFIC_CONTENT_BINDING_SCHEMA,
         "run_id": run_id,
-        "image_only_detector_config_digest": (
-            protocol.image_only_detector_config_digest
+        "image_only_measurement_config_digest": (
+            protocol.image_only_measurement_config_digest
         ),
         "detection_key_plan_digest_random": key_plan[
             "detection_key_plan_digest_random"
@@ -1820,6 +1835,29 @@ def ablation_atomic_records() -> tuple[
     protocols: dict[str, dict[str, object]] = {}
     scientific_unit_identity_records: list[dict[str, object]] = []
     for spec in FORMAL_RUNTIME_RERUN_ABLATION_SPECS:
+        if spec.lf_enabled and spec.tail_robust_enabled:
+            lf_weight = _FORMAL_METHOD_CONFIG.lf_detection_score_weight
+            tail_robust_weight = (
+                _FORMAL_METHOD_CONFIG.tail_robust_detection_score_weight
+            )
+        elif spec.lf_enabled:
+            lf_weight = 1.0
+            tail_robust_weight = 0.0
+        else:
+            lf_weight = 0.0
+            tail_robust_weight = 1.0
+        tail_fraction = (
+            _FORMAL_METHOD_CONFIG.tail_fraction
+            if spec.tail_truncation_enabled
+            else 1.0
+        )
+        detection_mechanism = {
+            "attention_geometry_enabled": spec.attention_geometry_enabled,
+            "image_alignment_enabled": spec.image_alignment_enabled,
+            "lf_weight": lf_weight,
+            "tail_robust_weight": tail_robust_weight,
+            "tail_fraction": tail_fraction,
+        }
         calibration_negatives = tuple(
             _raw_ablation_detection(
                 run_id=f"ablation_{spec.ablation_id}_{prompt_id}",
@@ -1827,13 +1865,13 @@ def ablation_atomic_records() -> tuple[
                 split="calibration",
                 sample_role="clean_negative",
                 content_score=0.0,
+                **detection_mechanism,
             )
             for prompt_id in CALIBRATION_PROMPT_IDS
         )
         protocol = calibrate_complete_evidence_protocol(
             calibration_negatives,
             target_fpr=TARGET_FPR,
-            rescue_margin_low=-0.05,
         )
         protocols[spec.ablation_id] = protocol.to_dict()
         runtime_config = spec.to_dict()
@@ -1877,6 +1915,9 @@ def ablation_atomic_records() -> tuple[
                 "latent_torch_dtype": _FORMAL_METHOD_CONFIG.latent_torch_dtype,
                 "width": _FORMAL_METHOD_CONFIG.width,
                 "height": _FORMAL_METHOD_CONFIG.height,
+                "detector_guided_attack_threshold_protocol": (
+                    protocol.to_dict() if split == "test" else None
+                ),
                 **{
                     field_name: field_value
                     for field_name, field_value in runtime_config.items()
@@ -1900,6 +1941,7 @@ def ablation_atomic_records() -> tuple[
                     split=split,
                     sample_role="clean_negative",
                     content_score=0.0,
+                    **detection_mechanism,
                 ),
                 _raw_ablation_detection(
                     run_id=run_id,
@@ -1907,6 +1949,7 @@ def ablation_atomic_records() -> tuple[
                     split=split,
                     sample_role="positive_source",
                     content_score=positive_score,
+                    **detection_mechanism,
                 ),
                 _raw_ablation_detection(
                     run_id=run_id,
@@ -1914,6 +1957,7 @@ def ablation_atomic_records() -> tuple[
                     split=split,
                     sample_role="wrong_key_negative",
                     content_score=0.0,
+                    **detection_mechanism,
                 ),
             ]
             if split == "test":
@@ -1929,6 +1973,8 @@ def ablation_atomic_records() -> tuple[
                             else 0.0
                         ),
                         attack=attack,
+                        frozen_threshold_digest=protocol.threshold_digest,
+                        **detection_mechanism,
                     )
                     for attack in FORMAL_ATTACK_CONFIGS
                     for sample_role in ("clean_negative", "positive_source")
@@ -2292,11 +2338,24 @@ def _ready_bundle_template() -> ResultClosureGateInput:
             "threshold_source": "calibration_clean_negative",
             "target_fpr": TARGET_FPR,
             "calibration_clean_negative_count": len(CALIBRATION_PROMPT_IDS),
+            "threshold_freeze_negative_count": (
+                _FROZEN_PROTOCOL_OBJECT.threshold_freeze_negative_count
+            ),
             "test_clean_negative_count": TEST_COUNT,
-            "calibrated_detection_threshold": 0.5,
+            "calibrated_detection_threshold": (
+                _FROZEN_PROTOCOL_OBJECT.content_threshold
+                if method_id == "slm_wm"
+                else 0.5
+            ),
             "threshold_digest": METHOD_THRESHOLD_DIGEST_MAP[
                 "slm_wm_current" if method_id == "slm_wm" else method_id
             ],
+            "calibration_partition_digest": (
+                _FROZEN_PROTOCOL_OBJECT.calibration_partition_digest
+            ),
+            "threshold_freeze_prompt_id_digest": (
+                _FROZEN_PROTOCOL_OBJECT.threshold_freeze_prompt_id_digest
+            ),
             "observation_source_sha256": (
                 METHOD_OBSERVATION_SOURCE_SHA256_MAP[method_id]
             ),
@@ -2340,6 +2399,28 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "method_identity_ready": True,
         "all_method_thresholds_ready": True,
         "method_threshold_digest_map": threshold_method_digest_map,
+        "method_calibration_partition_digest_map": {
+            method_id: _FROZEN_PROTOCOL_OBJECT.calibration_partition_digest
+            for method_id in (
+                "slm_wm",
+                "tree_ring",
+                "gaussian_shading",
+                "shallow_diffuse",
+                "t2smark",
+            )
+        },
+        "method_threshold_freeze_prompt_id_digest_map": {
+            method_id: (
+                _FROZEN_PROTOCOL_OBJECT.threshold_freeze_prompt_id_digest
+            )
+            for method_id in (
+                "slm_wm",
+                "tree_ring",
+                "gaussian_shading",
+                "shallow_diffuse",
+                "t2smark",
+            )
+        },
         "method_observation_source_sha256_map": (
             METHOD_OBSERVATION_SOURCE_SHA256_MAP
         ),
@@ -2347,6 +2428,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
             list(canonical_threshold_rows)
         ),
         "threshold_observation_binding_ready": True,
+        "shared_calibration_partition_ready": True,
         "fixed_fpr_threshold_audit_ready": True,
         "supports_paper_claim": True,
     }

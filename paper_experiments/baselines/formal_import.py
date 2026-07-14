@@ -868,7 +868,7 @@ def _validate_threshold_provenance(
     threshold_audit = audit_fixed_fpr_observation_threshold(
         observations,
         target_fpr=target_fpr,
-        expected_calibration_negative_count=expected_calibration_count,
+        expected_calibration_source_negative_count=expected_calibration_count,
     )
     if not threshold_audit.fixed_fpr_ready:
         issues.append(
@@ -1555,7 +1555,7 @@ def _threshold_provenance_values(
     audit = audit_fixed_fpr_observation_threshold(
         observations,
         target_fpr=target_fpr,
-        expected_calibration_negative_count=calibration_count,
+        expected_calibration_source_negative_count=calibration_count,
     )
     return {
         "evaluation_split": "test",

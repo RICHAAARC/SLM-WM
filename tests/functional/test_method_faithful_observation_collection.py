@@ -31,7 +31,10 @@ pytestmark = pytest.mark.quick
 def complete_inputs(collection_root: Path) -> tuple[list[dict[str, object]], object]:
     """写出带 Prompt、adapter 和 execution 摘要绑定的完整集合。"""
 
-    prompts = prompt_rows("probe_paper", ("calibration", "test"))
+    prompts = prompt_rows(
+        "probe_paper",
+        ("calibration", "calibration", "calibration", "test"),
+    )
     protocol = collection_protocol(prompts)
     observations = {
         baseline_id: formal_observation_rows(baseline_id, prompts, protocol)

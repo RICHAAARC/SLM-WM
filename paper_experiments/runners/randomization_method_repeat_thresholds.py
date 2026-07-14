@@ -30,6 +30,10 @@ from experiments.protocol.formal_randomization import (
     formal_watermark_key_material_from_seed,
     resolve_formal_randomization_repeat,
 )
+from experiments.protocol.image_only_evidence import (
+    FrozenEvidenceProtocol,
+    validate_frozen_evidence_protocol_integrity,
+)
 from experiments.protocol.method_runtime_config import (
     FORMAL_METHOD_PACKAGE_ROOT,
     load_formal_method_runtime_config,
@@ -45,7 +49,6 @@ from experiments.protocol.prompts import (
 )
 from experiments.protocol.splits import apply_split_assignments
 from experiments.runners.semantic_watermark_runtime import (
-    FORMAL_RUNTIME_RESCUE_MARGIN_LOW,
     SemanticWatermarkRuntimeConfig,
     validate_semantic_watermark_runtime_result_provenance,
 )
@@ -237,11 +240,6 @@ def _validate_formal_runtime_method_config(
             if attacks_enabled
             else False
         ),
-        "content_threshold": 0.0,
-        "geometry_score_threshold": 0.0,
-        "registration_confidence_threshold": 0.0,
-        "attention_sync_score_threshold": 0.0,
-        "rescue_margin_low": FORMAL_RUNTIME_RESCUE_MARGIN_LOW,
         "lf_carrier_protocol_digest": (
             _FROZEN_METHOD_CONFIG.low_frequency_carrier_config.protocol_digest
         ),
@@ -262,6 +260,34 @@ def _validate_formal_runtime_method_config(
         or _plain_protocol_value(config[field_name])
         != _plain_protocol_value(expected_value)
     )
+    attack_threshold_protocol = config.get(
+        "detector_guided_attack_threshold_protocol"
+    )
+    if attacks_enabled:
+        if (
+            not isinstance(attack_threshold_protocol, Mapping)
+            or not _is_sha256(
+                attack_threshold_protocol.get("threshold_digest")
+            )
+        ):
+            raise RandomizationMethodRepeatThresholdError(
+                "test runtime 未绑定 calibration 冻结攻击协议"
+            )
+        try:
+            resolved_attack_protocol = FrozenEvidenceProtocol(
+                **dict(attack_threshold_protocol)
+            )
+            validate_frozen_evidence_protocol_integrity(
+                resolved_attack_protocol
+            )
+        except (TypeError, ValueError) as exc:
+            raise RandomizationMethodRepeatThresholdError(
+                "test runtime 的 calibration 冻结攻击协议不可重建"
+            ) from exc
+    elif attack_threshold_protocol is not None:
+        raise RandomizationMethodRepeatThresholdError(
+            "非 test runtime 不得绑定 detector-guided attack 协议"
+        )
     required_true_fields = (
         "semantic_routing_enabled",
         "null_space_enabled",
@@ -382,7 +408,6 @@ def _runtime_prompt_rows(
     canonical_prompt_rows: tuple[dict[str, Any], ...] | None = None
     canonical_prompt_text_bytes: tuple[bytes, ...] | None = None
     model_identities: set[tuple[str, str]] = set()
-    rescue_margins: set[float] = set()
     repeat_ids = formal_randomization_repeat_ids()
     registered_runtime_sources = {
         source.randomization_repeat_id: source
@@ -465,6 +490,7 @@ def _runtime_prompt_rows(
         repeat = resolve_formal_randomization_repeat(repeat_id)
         configs: list[Mapping[str, Any]] = []
         prompt_texts: list[str] = []
+        attack_threshold_digests: set[str] = set()
         for runtime_row in runtime_rows:
             unit_identity = unit_identity_by_run_id.get(
                 str(runtime_row.get("run_id", ""))
@@ -514,6 +540,14 @@ def _runtime_prompt_rows(
                 config,
                 paper_run_name=paper_run_name,
             )
+            if config.get("split") == "test":
+                attack_threshold_digests.add(
+                    str(
+                        config[
+                            "detector_guided_attack_threshold_protocol"
+                        ]["threshold_digest"]
+                    )
+                )
             prompt_text = config.get("prompt")
             if (
                 not isinstance(prompt_text, str)
@@ -563,20 +597,14 @@ def _runtime_prompt_rows(
                 )
             model_id = str(config.get("model_id", ""))
             model_revision = str(config.get("model_revision", ""))
-            rescue_margin = config.get("rescue_margin_low")
             if (
                 not model_id
                 or not model_revision
-                or isinstance(rescue_margin, bool)
-                or not isinstance(rescue_margin, int | float)
-                or not math.isfinite(float(rescue_margin))
-                or float(rescue_margin) >= 0.0
             ):
                 raise RandomizationMethodRepeatThresholdError(
-                    "runtime 记录缺少共同模型或 rescue 配置"
+                    "runtime 记录缺少共同模型配置"
                 )
             model_identities.add((model_id, model_revision))
-            rescue_margins.add(float(rescue_margin))
             configs.append(config)
             prompt_texts.append(prompt_text)
 
@@ -660,6 +688,10 @@ def _runtime_prompt_rows(
             raise RandomizationMethodRepeatThresholdError(
                 "同一 runtime 重复内的 watermark key 身份发生漂移"
             )
+        if len(attack_threshold_digests) != 1:
+            raise RandomizationMethodRepeatThresholdError(
+                "同一 runtime 重复的 test 未共享唯一冻结攻击协议"
+            )
         key_seed, key_material_digest = next(iter(repeat_key_identities))
         runtime_source_records.append(
             {
@@ -681,6 +713,9 @@ def _runtime_prompt_rows(
                 "runtime_randomization_identity_digest_random": (
                     build_stable_digest(repeat_randomization_identities)
                 ),
+                "detector_guided_attack_threshold_digest": next(
+                    iter(attack_threshold_digests)
+                ),
             }
         )
         runtime_randomization_identity_map[repeat_id] = (
@@ -690,10 +725,9 @@ def _runtime_prompt_rows(
     if (
         canonical_prompt_rows is None
         or len(model_identities) != 1
-        or len(rescue_margins) != 1
     ):
         raise RandomizationMethodRepeatThresholdError(
-            "9个 runtime 成员没有冻结共同模型与 rescue 配置"
+            "9个 runtime 成员没有冻结共同模型配置"
         )
     key_identities_by_index: dict[int, set[tuple[int, str]]] = {
         key_index: set() for key_index in range(3)
@@ -748,7 +782,6 @@ def _runtime_prompt_rows(
         frozen_prompt_rows,
         model_id,
         model_revision,
-        next(iter(rescue_margins)),
         tuple(runtime_source_records),
         runtime_randomization_identity_map,
     )
@@ -1422,7 +1455,6 @@ def _reconstruct_randomization_method_repeat_fixed_fpr(
             prompt_rows,
             expected_model_id,
             expected_model_revision,
-            main_rescue_margin_low,
             runtime_source_records,
             runtime_randomization_identity_map,
         ) = _runtime_prompt_rows(
@@ -1459,7 +1491,6 @@ def _reconstruct_randomization_method_repeat_fixed_fpr(
             target_fpr=target_fpr,
             expected_model_id=expected_model_id,
             expected_model_revision=expected_model_revision,
-            main_rescue_margin_low=main_rescue_margin_low,
             expected_base_seed=_FROZEN_BASE_GENERATION_SEED,
         )
     threshold_report = result.get("report")
@@ -1487,6 +1518,27 @@ def _reconstruct_randomization_method_repeat_fixed_fpr(
     if tuple(runtime_source_record_map) != formal_randomization_repeat_ids():
         raise RandomizationMethodRepeatThresholdError(
             "runtime 来源摘要映射未精确覆盖9个重复"
+        )
+    main_threshold_digest_map = {
+        str(record["randomization_repeat_id"]): str(
+            record["threshold_digest"]
+        )
+        for record in result["threshold_records"]
+        if record["method_id"] == "slm_wm"
+    }
+    if (
+        tuple(main_threshold_digest_map)
+        != formal_randomization_repeat_ids()
+        or any(
+            runtime_source_record_map[repeat_id][
+                "detector_guided_attack_threshold_digest"
+            ]
+            != main_threshold_digest_map[repeat_id]
+            for repeat_id in formal_randomization_repeat_ids()
+        )
+    ):
+        raise RandomizationMethodRepeatThresholdError(
+            "test runtime 攻击协议未匹配同一重复 calibration 重建阈值"
         )
     reconstruction_report = {
         "report_schema": (

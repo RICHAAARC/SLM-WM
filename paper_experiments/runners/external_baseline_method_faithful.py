@@ -697,7 +697,7 @@ def write_baseline_transfer_files(
     threshold_audit = audit_fixed_fpr_observation_threshold(
         observations,
         target_fpr=config.target_fpr,
-        expected_calibration_negative_count=expected_calibration_count,
+        expected_calibration_source_negative_count=expected_calibration_count,
     )
     if not threshold_audit.fixed_fpr_ready:
         raise ValueError("baseline observation 未通过 fixed-FPR 阈值冻结审计")
@@ -1641,7 +1641,7 @@ def _validate_package_unit_evidence(
     threshold_audit = audit_fixed_fpr_observation_threshold(
         observations,
         target_fpr=paper_run.target_fpr,
-        expected_calibration_negative_count=expected_calibration_count,
+        expected_calibration_source_negative_count=expected_calibration_count,
     )
     if not threshold_audit.fixed_fpr_ready:
         raise RuntimeError("baseline 归档 observation 未通过 fixed-FPR 复验")

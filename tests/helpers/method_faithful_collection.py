@@ -11,6 +11,9 @@ from experiments.protocol.fixed_fpr_observation_audit import (
     audit_fixed_fpr_observation_threshold,
     conformal_threshold_from_clean_negative_scores,
 )
+from experiments.protocol.image_only_evidence import (
+    partition_calibration_prompt_ids,
+)
 from experiments.protocol.paper_run_config import build_paper_run_config
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.splits import apply_split_assignments
@@ -194,10 +197,19 @@ def formal_observation_rows(
 ) -> list[dict[str, Any]]:
     """构造覆盖规范 Prompt、固定 FPR 和完整攻击集合的 observation。"""
 
-    calibration_scores = [
-        0.05 + prompt_index * 0.001
+    calibration_prompts = tuple(
+        (prompt_index, row)
         for prompt_index, row in enumerate(prompts)
         if row["split"] == "calibration"
+    )
+    _, threshold_freeze_prompt_ids, _ = partition_calibration_prompt_ids(
+        str(row["prompt_id"]) for _, row in calibration_prompts
+    )
+    threshold_freeze_prompt_id_set = set(threshold_freeze_prompt_ids)
+    calibration_scores = [
+        0.05 + prompt_index * 0.001
+        for prompt_index, row in calibration_prompts
+        if str(row["prompt_id"]) in threshold_freeze_prompt_id_set
     ]
     threshold = conformal_threshold_from_clean_negative_scores(
         calibration_scores,
@@ -221,7 +233,7 @@ def formal_observation_rows(
                     "threshold": threshold,
                     "score_name": "baseline_detection_score",
                     "higher_is_positive": True,
-                    "threshold_source": "calibration_clean_negative_conformal",
+                    "threshold_source": "nested_calibration_threshold_freeze_conformal_v1",
                     "detection_decision": score >= threshold,
                     "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
                     "generation_model_id": protocol.model_id,
@@ -259,7 +271,7 @@ def formal_observation_rows(
                         "threshold": threshold,
                         "score_name": "baseline_detection_score",
                         "higher_is_positive": True,
-                        "threshold_source": "calibration_clean_negative_conformal",
+                        "threshold_source": "nested_calibration_threshold_freeze_conformal_v1",
                         "detection_decision": score >= threshold,
                         "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
                         "generation_model_id": protocol.model_id,
@@ -326,7 +338,7 @@ def write_collection_source(
     threshold_audit = audit_fixed_fpr_observation_threshold(
         observations,
         target_fpr=protocol.target_fpr,
-        expected_calibration_negative_count=sum(row["split"] == "calibration" for row in prompts),
+        expected_calibration_source_negative_count=sum(row["split"] == "calibration" for row in prompts),
     )
     write_json(
         adapter_path,

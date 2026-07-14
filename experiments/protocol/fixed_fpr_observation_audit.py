@@ -6,10 +6,15 @@ from dataclasses import dataclass
 import math
 from typing import Any, Iterable, Mapping
 
+from experiments.protocol.image_only_evidence import (
+    CALIBRATION_PARTITION_PROTOCOL,
+    partition_calibration_prompt_ids,
+)
+from experiments.protocol.calibration import is_clean_unattacked_negative
 from main.core.digest import build_stable_digest
 
 
-FORMAL_THRESHOLD_SOURCE = "calibration_clean_negative_conformal"
+FORMAL_THRESHOLD_SOURCE = "nested_calibration_threshold_freeze_conformal_v1"
 
 
 @dataclass(frozen=True)
@@ -21,12 +26,16 @@ class FixedFprObservationAudit:
     """
 
     observation_count: int
-    calibration_negative_count: int
-    expected_calibration_negative_count: int
+    calibration_source_negative_count: int
+    expected_calibration_source_negative_count: int
+    threshold_freeze_negative_count: int
+    expected_threshold_freeze_negative_count: int
+    calibration_partition_digest: str
+    threshold_freeze_prompt_id_digest: str
     calibration_false_positive_count: int
     frozen_threshold: float | None
     expected_frozen_threshold: float | None
-    calibration_count_ready: bool
+    calibration_partition_ready: bool
     observation_fields_ready: bool
     threshold_source_ready: bool
     threshold_value_ready: bool
@@ -95,28 +104,48 @@ def audit_fixed_fpr_observation_threshold(
     rows: Iterable[Mapping[str, Any]],
     *,
     target_fpr: float,
-    expected_calibration_negative_count: int,
+    expected_calibration_source_negative_count: int,
     threshold_source: str = FORMAL_THRESHOLD_SOURCE,
 ) -> FixedFprObservationAudit:
-    """核验 observation 是否真正使用 calibration clean negative 冻结阈值。
+    """核验 observation 是否使用共享 threshold-freeze 子集冻结阈值。
 
     此处同时重算阈值和逐条 detection decision。这样即使外部记录伪造
     `threshold_source`，或直接写入与 score 不一致的 decision，也不能通过正式门禁。
-    test 与 dev 分数只参与共享阈值一致性检查，不参与阈值重算。
+    window-fit、test 与 dev 分数只参与共享阈值一致性检查，不参与阈值重算。
     """
 
-    if expected_calibration_negative_count <= 0:
-        raise ValueError("expected_calibration_negative_count 必须为正整数")
+    if expected_calibration_source_negative_count < 3:
+        raise ValueError(
+            "expected_calibration_source_negative_count 必须至少为3"
+        )
     materialized_rows = tuple(dict(row) for row in rows)
-    calibration_rows = tuple(
+    calibration_source_rows = tuple(
         row
         for row in materialized_rows
-        if row.get("split") == "calibration"
-        and row.get("sample_role") == "clean_negative"
-        and row.get("attack_family") == "clean"
+        if is_clean_unattacked_negative(row, split="calibration")
     )
-    calibration_scores = tuple(_finite_float(row, "score") for row in calibration_rows)
-    calibration_scores_ready = bool(calibration_rows) and all(score is not None for score in calibration_scores)
+    try:
+        _, threshold_freeze_prompt_ids, calibration_partition_digest = (
+            partition_calibration_prompt_ids(
+                str(row.get("prompt_id", ""))
+                for row in calibration_source_rows
+            )
+        )
+    except ValueError:
+        threshold_freeze_prompt_ids = ()
+        calibration_partition_digest = ""
+    threshold_freeze_prompt_id_set = set(threshold_freeze_prompt_ids)
+    threshold_freeze_rows = tuple(
+        row
+        for row in calibration_source_rows
+        if str(row.get("prompt_id", "")) in threshold_freeze_prompt_id_set
+    )
+    calibration_scores = tuple(
+        _finite_float(row, "score") for row in threshold_freeze_rows
+    )
+    calibration_scores_ready = bool(threshold_freeze_rows) and all(
+        score is not None for score in calibration_scores
+    )
     expected_threshold = (
         conformal_threshold_from_clean_negative_scores(
             (float(score) for score in calibration_scores if score is not None),
@@ -165,13 +194,24 @@ def audit_fixed_fpr_observation_threshold(
         else 0
     )
     empirical_fpr_ready = bool(
-        calibration_rows
-        and calibration_false_positive_count / len(calibration_rows) <= float(target_fpr)
+        threshold_freeze_rows
+        and calibration_false_positive_count / len(threshold_freeze_rows)
+        <= float(target_fpr)
     )
-    calibration_count_ready = len(calibration_rows) == int(expected_calibration_negative_count)
+    expected_threshold_freeze_count = (
+        int(expected_calibration_source_negative_count)
+        - int(expected_calibration_source_negative_count) // 3
+    )
+    calibration_partition_ready = bool(
+        calibration_partition_digest
+        and len(calibration_source_rows)
+        == int(expected_calibration_source_negative_count)
+        and len(threshold_freeze_rows) == expected_threshold_freeze_count
+        and len(threshold_freeze_prompt_ids) == expected_threshold_freeze_count
+    )
     fixed_fpr_ready = all(
         (
-            calibration_count_ready,
+            calibration_partition_ready,
             calibration_scores_ready,
             observation_fields_ready,
             threshold_source_ready,
@@ -185,13 +225,31 @@ def audit_fixed_fpr_observation_threshold(
             {
                 "target_fpr": float(target_fpr),
                 "threshold_source": threshold_source,
+                "calibration_partition_protocol": (
+                    CALIBRATION_PARTITION_PROTOCOL
+                ),
+                "calibration_partition_digest": (
+                    calibration_partition_digest
+                ),
+                "calibration_source_negative_count": len(
+                    calibration_source_rows
+                ),
+                "threshold_freeze_negative_count": len(
+                    threshold_freeze_rows
+                ),
+                "threshold_freeze_prompt_id_digest": build_stable_digest(
+                    list(threshold_freeze_prompt_ids)
+                ),
                 "calibration_scores": sorted(
                     (
                         str(row.get("prompt_id", "")),
                         str(row.get("event_id", "")),
                         float(score),
                     )
-                    for row, score in zip(calibration_rows, calibration_scores)
+                    for row, score in zip(
+                        threshold_freeze_rows,
+                        calibration_scores,
+                    )
                     if score is not None
                 ),
                 "frozen_threshold": float(frozen_threshold),
@@ -202,12 +260,24 @@ def audit_fixed_fpr_observation_threshold(
     )
     return FixedFprObservationAudit(
         observation_count=len(materialized_rows),
-        calibration_negative_count=len(calibration_rows),
-        expected_calibration_negative_count=int(expected_calibration_negative_count),
+        calibration_source_negative_count=len(calibration_source_rows),
+        expected_calibration_source_negative_count=int(
+            expected_calibration_source_negative_count
+        ),
+        threshold_freeze_negative_count=len(threshold_freeze_rows),
+        expected_threshold_freeze_negative_count=(
+            expected_threshold_freeze_count
+        ),
+        calibration_partition_digest=calibration_partition_digest,
+        threshold_freeze_prompt_id_digest=(
+            build_stable_digest(list(threshold_freeze_prompt_ids))
+            if threshold_freeze_prompt_ids
+            else ""
+        ),
         calibration_false_positive_count=calibration_false_positive_count,
         frozen_threshold=frozen_threshold,
         expected_frozen_threshold=expected_threshold,
-        calibration_count_ready=calibration_count_ready,
+        calibration_partition_ready=calibration_partition_ready,
         observation_fields_ready=observation_fields_ready,
         threshold_source_ready=threshold_source_ready,
         threshold_value_ready=threshold_value_ready,

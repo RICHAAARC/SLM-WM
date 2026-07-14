@@ -98,7 +98,7 @@ ATTACK_RECORD_DIGEST_FIELDS = (
     "attack_config_digest",
     "attack_seed_random",
     "formal_attack_seed_protocol_digest",
-    "detector_digest",
+    "measurement_digest",
     "source_image_digest",
     "attacked_image_digest",
     "frozen_threshold_digest",

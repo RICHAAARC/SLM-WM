@@ -5,26 +5,29 @@
 本报告审计当前核心方法定义与真实模型绑定实现。审计依据为:
 
 - 权威方法定义: `docs/builds/method_semantic_invariants.md`。
-- 可机读方法定义摘要: `8875c24ad29344b2ea8a6fc6ae62d8bccaafd0fa426e8072e2380bb1abca7d43`。
+- 可机读方法定义摘要: `1a7c52b29fe68bdc578f8e52029fdfc6dcccc669e0f2796d63e6eb2b9e91b9af`。
 - 密钥 PRG 算法摘要: `a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b`。
 - 正式随机化协议摘要: `d09928b763c17d2c68fa2bc3921b59b76c3df2fc264fb364ae33bcc8bdeba0d5`。
-- 方法追踪规范摘要: `e1d6d106ae3756ff9afe2a906a368d884cd8c264941f45d5ea29889cb2a264cb`。
+- 方法追踪规范摘要: `edba851e5cb7a9f1eab3f4ce4239cf7f3f117ebcfe7bb6d63e1e15fc5810f197`。
 
 本报告只判断静态实现、CPU 公式性质、反例拒绝和跨模块身份绑定。它不把尚未执行的 SD3.5 CUDA 运行、论文统计或结果包解释为已经完成的证据。
 
 ## 审计结论
 
-注意力配准结构目标已在当前冻结定义下完成 CPU 公式、反例和跨路径身份核验；完整方法仍保留一个待修复的 calibration 决策偏离:
+注意力配准结构目标、阈值无关仅图像测量与嵌套 calibration 决策协议已在冻结定义下完成 CPU 公式、反例和跨路径身份核验:
 
-- 方法语义偏离 P0: 1项。正式运行仍由运行时常量提供 `rescue_margin_low`, 尚未从 calibration clean negatives 独立冻结。
-- 除上述未校准的 rescue window 外, 未发现其他代理、占位或静默科学算子替代。
+- 方法语义偏离 P0: 0项。
+- 会改变论文数值或实验公平性的 P1: 0项。
+- 静态正式路径未发现 proxy、stub、placeholder、启发式科学算子替代、fallback 或静默替代。
 - `main/` 核心方法与 `experiments/` 真实 SD3.5 绑定使用同一公式和同一内容身份, 未发现第二套简化实现。
 - 注意力配准结构门禁已唯一冻结为12个锚点、0.20归一化 xy 欧氏残差上界和相对有效覆盖锚点的0.50最小内点率；方法配置、对齐、检测与冻结阈值摘要逐字段绑定该协议, calibration 和 test 不参与三项常量选择。
+- 仅图像 Measure 使用 `slm_wm_image_only_measurement_config_v2` 和完整 extraction profile, 不包含阈值、rescue window、失败原因或判定字段。calibration clean negatives 按 Prompt 散列拆分为互斥的1/3 `window_fit` 和2/3 `threshold_freeze`; 前者拟合几何门与最宽可行 rescue window, 后者使用判定等价分数冻结最终 fixed-FPR 阈值。
+- 关闭 attention geometry 或 image alignment 的消融执行 raw-only 阈值冻结, 不保留伪造零值几何门、rescue window 或配准原子。
 - LF 嵌入、raw/aligned 检测共同消费唯一 YAML 的七字段低通协议；高斯幅值尾部载体共同绑定选择协议、模板计数和内容摘要。完整注入、carrier-only、注册密钥检测与预注册 wrong-key 对照在总科学内容记录中形成角色明确的跨路径身份。
 - 正式主方法、baseline 与消融入口逐 Prompt 重建实际生成 seed、预注册密钥和基础 latent 身份；顶层 manifest 保存相同的9重复、3密钥与基础 latent 完整计划, 样本仅保存必要引用。
 - 主方法、4个 baseline 与消融统一按生成 seed 和攻击 ID 派生攻击 seed；统计重建会独立复算并拒绝任一路径漂移。
 
-除 calibration 派生 rescue window 尚未闭合外, 其余本地方法机制与正式运行身份已达到静态冻结边界。真实模型层名、CUDA 混合精度、无阻尼 PSD-CG 收敛、实际 Q/K hook、float16 非零写回和最终成图归因仍必须由 Colab GPU 预检验证；在这些运行事实产生前, 不得声称已经获得论文效果证据。
+本地方法机制与正式运行身份已达到静态冻结边界。真实模型层名、CUDA 混合精度、无阻尼 PSD-CG 收敛、实际 Q/K hook、float16 非零写回和最终成图归因仍必须由 Colab GPU 预检验证；在这些运行事实产生前, 不得声称已经获得论文效果证据。
 
 ## 原语一致性矩阵
 
@@ -38,7 +41,8 @@
 | 注意力几何 | 已对齐 | 直接读取冻结层 `to_q`/`to_k`, 使用四分量关系、真实 autograd 和单调回溯。 |
 | 注意力配准结构门禁 | 已对齐 | 每层候选集合实际包含精确 identity, 并以 $\Delta J(l)=J(\widehat T_l,l)-J(I,l)>0$ 门禁结构增益；两个冻结层分别完成层内搜索, 再按注册目标、观测关系分、注册置信度与冻结层顺序执行唯一字典序裁决。 |
 | 三分支实际写回 | 已对齐 | 冻结顺序 float32 合成、单次 dtype cast、共同缩放后重新执行包络、JVP、有限特征和 Q/K 门禁。 |
-| 仅图像盲检 | 已对齐 | 检测接口不接收 Prompt、源 latent、采样轨迹、生成 seed 或样本级安全基底；aligned 图像固定使用 bilinear、border、`align_corners=True` 与 RGB uint8 floor 量化。 |
+| 仅图像盲检 | 已对齐 | 检测接口不接收 Prompt、源 latent、采样轨迹、生成 seed 或样本级安全基底；测量配置完整绑定图像到 latent/Q/K 的 extraction profile, aligned 图像固定使用 bilinear、border、`align_corners=True` 与 RGB uint8 floor 量化。 |
+| 嵌套 calibration 判定 | 已对齐 | Measure、Calibrate 与 Apply 是显式边界；`window_fit` 和 `threshold_freeze` 互斥, rescue window 由 calibration 负样本候选集独立选择, 最终阈值由判定等价连续分数冻结。 |
 | 版本化密钥 PRG | 已对齐 | `sha256_counter_normal_icdf_table20_float32_v2` 从 SHA-256 大端计数器的 MSB-first 连续比特流提取20位索引, 查询冻结 Q20 中点逆 CDF float32 表；53位开区间 uniform 路径只生成注意力关系符号。 |
 | 科学内容证据 | 已对齐 | 风险、基底、分支更新、Q/K、图像像素、公开噪声、载体模板和反事实从持久化叶子重建；注册密钥与 wrong-key 计划分角色绑定。 |
 
@@ -68,6 +72,10 @@ Q20 表定义为 $q_i=\operatorname{round}_{\mathrm{binary32}}(\Phi^{-1}((i+0.5)
 18. 冻结 evidence 协议正文、派生假阳性率或 `threshold_digest` 在应用阶段不能独立重建。
 19. 跨层配准依赖回调遍历顺序、交换冻结层顺序或跳过注册目标、观测关系分、注册置信度的字典序裁决。
 20. aligned 图像改用非 bilinear 采样、非 border 边界、不同 `align_corners` 或非 floor 的 RGB uint8 量化。
+21. 原始 measurement 混入阈值、rescue window 或判定字段, 或将 Applied 记录不经显式无阈值投影直接送回 calibrator。
+22. `window_fit` 与 `threshold_freeze` Prompt 身份重叠、不同方法使用不同 threshold-freeze 子集, 或将 test/positive/wrong-key/攻击记录用于冻结参数。
+23. 从运行时常量、CLI 默认值或旧结果回灌 `rescue_margin_low` 和检测阈值。
+24. 禁用 attention geometry 或 image alignment 的消融仍使用几何 rescue, 或保留会影响判定的配准原子。
 
 ## 本地核验
 
@@ -75,7 +83,7 @@ Q20 表定义为 $q_i=\operatorname{round}_{\mathrm{binary32}}(\Phi^{-1}((i+0.5)
 
 ```text
 pytest -q
-1458 passed, 8 skipped, 70 deselected
+1484 passed, 8 skipped, 70 deselected
 
 python tools/harness/run_all_audits.py
 10/10 audits passed

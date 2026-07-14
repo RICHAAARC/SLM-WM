@@ -183,7 +183,7 @@ def _observation_protocol_readiness(
     threshold_audit = audit_fixed_fpr_observation_threshold(
         rows,
         target_fpr=paper_run.target_fpr,
-        expected_calibration_negative_count=expected_calibration_count,
+        expected_calibration_source_negative_count=expected_calibration_count,
     )
     required_attacks = _required_attack_names()
     attacked_keys = [
@@ -339,7 +339,7 @@ def load_t2smark_formal_evidence(
         and adapter_manifest.get("strict_pair_quality_ready") is True
         and not adapter_manifest.get("missing_result_indices")
         and set(adapter_manifest.get("formal_attack_names", [])) == _required_attack_names()
-        and str(adapter_manifest.get("threshold_source", "")) == "calibration_clean_negative_conformal"
+        and str(adapter_manifest.get("threshold_source", "")) == "nested_calibration_threshold_freeze_conformal_v1"
         and int(command_result.get("return_code", -1)) == 0
         and all(str(row.get("baseline_id", "")) == "t2smark" for row in observations)
     )

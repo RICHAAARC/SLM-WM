@@ -19,7 +19,7 @@ METHOD_CONFIG_RELATIVE_PATH = PurePosixPath("configs/model_sd35.yaml")
 REGISTRY_SCHEMA = "slm_wm_method_semantic_registry_v1"
 REGISTRY_SCOPE = "normative_traceability_without_scientific_conformance_decision"
 EXPECTED_NORMATIVE_TRACE_DIGEST = (
-    "e1d6d106ae3756ff9afe2a906a368d884cd8c264941f45d5ea29889cb2a264cb"
+    "edba851e5cb7a9f1eab3f4ce4239cf7f3f117ebcfe7bb6d63e1e15fc5810f197"
 )
 EXPECTED_INVARIANT_IDS = (
     "constructive_local_tangent_scope",
@@ -215,7 +215,7 @@ EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS = {
             "validate_tail_robust_carrier_protocol_record",
         ),
         ("main/methods/carrier/keyed_tensor.py", "project_canonical_template"),
-        ("main/methods/detection/image_only.py", "detect_image_only_watermark"),
+        ("main/methods/detection/image_only.py", "measure_image_only_watermark"),
     ),
     "direct_qk_four_component_relation": _bindings(
         (
@@ -286,7 +286,23 @@ EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS = {
             "main/methods/detection/image_only.py",
             "select_image_only_alignment_candidate",
         ),
-        ("main/methods/detection/image_only.py", "detect_image_only_watermark"),
+        ("main/methods/detection/image_only.py", "measure_image_only_watermark"),
+        (
+            "main/methods/detection/image_only.py",
+            "image_only_measurement_config_identity_record",
+        ),
+        (
+            "main/methods/detection/image_only.py",
+            "validate_image_only_measurement_digest_record",
+        ),
+        (
+            "main/methods/detection/image_only.py",
+            "validate_image_only_measurement_projection_record",
+        ),
+        (
+            "main/methods/detection/image_only.py",
+            "project_image_only_measurement_record",
+        ),
     ),
     "versioned_key_prg_reconstruction": _bindings(
         ("main/core/keyed_prg.py", "build_keyed_gaussian_tensor"),
@@ -328,7 +344,23 @@ EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS = {
             "main/methods/detection/image_only.py",
             "select_image_only_alignment_candidate",
         ),
-        ("main/methods/detection/image_only.py", "detect_image_only_watermark"),
+        ("main/methods/detection/image_only.py", "measure_image_only_watermark"),
+        (
+            "main/methods/detection/image_only.py",
+            "image_only_measurement_config_identity_record",
+        ),
+        (
+            "main/methods/detection/image_only.py",
+            "validate_image_only_measurement_digest_record",
+        ),
+        (
+            "main/methods/detection/image_only.py",
+            "validate_image_only_measurement_projection_record",
+        ),
+        (
+            "main/methods/detection/image_only.py",
+            "project_image_only_measurement_record",
+        ),
     ),
     "scientific_content_binding": _bindings(
         ("main/core/digest.py", "tensor_content_sha256"),
@@ -427,7 +459,22 @@ EXPECTED_RUNTIME_BINDING_SYMBOLS.update(
             ),
         ),
         "same_threshold_geometry_rescue": _bindings(
-            ("experiments/protocol/calibration.py", "empirical_threshold_at_fpr"),
+            (
+                "experiments/protocol/image_only_evidence.py",
+                "partition_calibration_prompt_ids",
+            ),
+            (
+                "experiments/protocol/image_only_evidence.py",
+                "calibrate_complete_evidence_protocol",
+            ),
+            (
+                "experiments/protocol/image_only_evidence.py",
+                "decision_equivalent_score",
+            ),
+            (
+                "experiments/protocol/image_only_evidence.py",
+                "apply_frozen_evidence_protocol",
+            ),
             (
                 "experiments/runners/image_only_dataset_runtime.py",
                 "run_image_only_dataset_runtime",
@@ -613,16 +660,16 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
     "image_only_detection_boundary": (
         "tests/functional/test_real_scientific_operators.py::"
         "test_image_only_detector_interface_and_positive_content_path",
-        "tests/functional/test_attention_affine_protocol_geometry.py::"
-        "test_generic_hierarchical_search_recovers_random_continuous_affine",
+        "tests/functional/test_image_only_measurement_config_identity.py::"
+        "test_measurement_record_rejects_embedded_calibration_parameter",
+        "tests/functional/test_image_only_measurement_config_identity.py::"
+        "test_measurement_config_digest_binds_every_runtime_parameter",
         "tests/functional/test_attention_affine_protocol_geometry.py::"
         "test_identity_alignment_cannot_pass_positive_objective_gain_gate",
         "tests/functional/test_attention_affine_protocol_geometry.py::"
         "test_alignment_fails_closed_when_exact_identity_candidate_is_missing",
         "tests/functional/test_attention_affine_protocol_geometry.py::"
         "test_complete_alignment_record_digest_rebuild_rejects_field_mutations",
-        "tests/functional/test_real_scientific_operators.py::"
-        "test_identity_alignment_cannot_propagate_into_detector_rescue",
         "tests/functional/test_attention_affine_protocol_geometry.py::"
         "test_cross_layer_alignment_selection_uses_frozen_lexicographic_rule",
         "tests/functional/test_real_scientific_operators.py::"
@@ -644,27 +691,23 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
     ),
     "same_threshold_geometry_rescue": (
         "tests/functional/test_real_scientific_operators.py::"
-        "test_complete_evidence_calibration_includes_geometry_rescue",
-        "tests/functional/test_attention_affine_protocol_geometry.py::"
-        "test_generic_hierarchical_search_recovers_random_continuous_affine",
-        "tests/functional/test_attention_affine_protocol_geometry.py::"
-        "test_identity_alignment_cannot_pass_positive_objective_gain_gate",
-        "tests/functional/test_attention_affine_protocol_geometry.py::"
-        "test_alignment_fails_closed_when_exact_identity_candidate_is_missing",
-        "tests/functional/test_attention_affine_protocol_geometry.py::"
-        "test_complete_alignment_record_digest_rebuild_rejects_field_mutations",
+        "test_nested_calibration_partition_is_order_invariant",
         "tests/functional/test_real_scientific_operators.py::"
-        "test_identity_alignment_cannot_propagate_into_detector_rescue",
-        "tests/functional/test_attention_affine_protocol_geometry.py::"
-        "test_cross_layer_alignment_selection_uses_frozen_lexicographic_rule",
+        "test_complete_evidence_calibration_derives_rescue_window",
         "tests/functional/test_real_scientific_operators.py::"
-        "test_image_alignment_quantizes_fractional_rgb_with_floor",
+        "test_complete_evidence_calibration_rejects_nonnegative_role",
         "tests/functional/test_real_scientific_operators.py::"
-        "test_frozen_protocol_recomputes_threshold_dependent_failure_reason",
+        "test_decision_equivalent_score_matches_complete_boolean_boundaries",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_frozen_rescue_rejects_unbound_stable_pair_identity",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_frozen_protocol_application_rejects_protocol_drift",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_identity_alignment_cannot_propagate_into_calibrated_rescue",
         "tests/functional/test_fixed_fpr_threshold_audit.py::"
         "test_main_method_threshold_audit_recomputes_complete_rescue_protocol",
-        "tests/functional/test_real_scientific_operators.py::"
-        "test_frozen_evidence_protocol_rejects_alignment_gate_drift",
+        "tests/functional/test_image_only_measurement_config_identity.py::"
+        "test_measurement_record_rejects_embedded_calibration_parameter",
     ),
     "scientific_content_binding": (
         "tests/functional/test_semantic_feature_conditions.py::"

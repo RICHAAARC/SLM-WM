@@ -28,6 +28,9 @@ from scripts.write_primary_baseline_result_candidates import (
 from experiments.protocol.fixed_fpr_observation_audit import (
     conformal_threshold_from_clean_negative_scores,
 )
+from experiments.protocol.image_only_evidence import (
+    partition_calibration_prompt_ids,
+)
 
 
 pytestmark = pytest.mark.quick
@@ -48,7 +51,24 @@ def probe_observations(*, baseline_id: str = "tree_ring") -> list[dict[str, obje
     root_path = Path(__file__).resolve().parents[2]
     canonical_prompts, _ = load_canonical_prompt_protocol(root_path)
     calibration_scores = tuple(index / 100.0 for index in range(33))
-    threshold = conformal_threshold_from_clean_negative_scores(calibration_scores, 0.1)
+    calibration_prompt_ids = tuple(
+        prompt_id
+        for prompt_id, identity in canonical_prompts.items()
+        if identity["split"] == "calibration"
+    )
+    score_by_prompt_id = dict(
+        zip(calibration_prompt_ids, calibration_scores, strict=True)
+    )
+    _, threshold_freeze_prompt_ids, _ = partition_calibration_prompt_ids(
+        calibration_prompt_ids
+    )
+    threshold = conformal_threshold_from_clean_negative_scores(
+        (
+            score_by_prompt_id[prompt_id]
+            for prompt_id in threshold_freeze_prompt_ids
+        ),
+        0.1,
+    )
     rows: list[dict[str, object]] = []
     calibration_index = 0
     for prompt_id, identity in canonical_prompts.items():
@@ -63,7 +83,7 @@ def probe_observations(*, baseline_id: str = "tree_ring") -> list[dict[str, obje
             "prompt_text": identity["prompt_text"],
             "prompt_digest": identity["prompt_digest"],
             "threshold": threshold,
-            "threshold_source": "calibration_clean_negative_conformal",
+            "threshold_source": "nested_calibration_threshold_freeze_conformal_v1",
             "attack_family": "clean",
             "attack_name": "clean_none",
         }
@@ -86,6 +106,37 @@ def probe_observations(*, baseline_id: str = "tree_ring") -> list[dict[str, obje
             }
         )
     return rows
+
+
+def _minimal_nested_calibration_rows() -> tuple[
+    tuple[tuple[str, str, float, float], ...],
+    float,
+]:
+    """构造3条 calibration 与独立 test 的最小共享阈值夹具。"""
+
+    entries = (
+        ("dev", "dev_prompt", 0.90, 0.10),
+        ("calibration", "calibration_prompt_0", 0.10, 0.30),
+        ("calibration", "calibration_prompt_1", 0.20, 0.30),
+        ("calibration", "calibration_prompt_2", 0.30, 0.30),
+        ("test", "test_prompt", 0.10, 0.80),
+    )
+    score_by_prompt_id = {
+        prompt_id: score
+        for split, prompt_id, score, _quality_score in entries
+        if split == "calibration"
+    }
+    _, threshold_freeze_prompt_ids, _ = partition_calibration_prompt_ids(
+        score_by_prompt_id
+    )
+    threshold = conformal_threshold_from_clean_negative_scores(
+        (
+            score_by_prompt_id[prompt_id]
+            for prompt_id in threshold_freeze_prompt_ids
+        ),
+        0.1,
+    )
+    return entries, threshold
 
 
 def test_t2smark_package_must_contain_canonical_entry(tmp_path: Path) -> None:
@@ -245,18 +296,15 @@ def test_method_candidate_statistics_use_test_split_only(
         "attack_config_digest": attack_config_digest(attack_config),
     }
     observations: list[dict[str, object]] = []
-    for split, quality_score in (
-        ("dev", 0.1),
-        ("calibration", 0.3),
-        ("test", 0.8),
-    ):
+    split_entries, threshold = _minimal_nested_calibration_rows()
+    for split, prompt_id, clean_score, quality_score in split_entries:
         common = {
             "baseline_id": baseline_id,
             "split": split,
-            "prompt_id": f"{split}_prompt",
+            "prompt_id": prompt_id,
             "prompt_text": "a ceramic fox",
-            "threshold": 0.5,
-            "threshold_source": "calibration_clean_negative_conformal",
+            "threshold": threshold,
+            "threshold_source": "nested_calibration_threshold_freeze_conformal_v1",
             "quality_score": quality_score,
         }
         observations.extend(
@@ -266,8 +314,8 @@ def test_method_candidate_statistics_use_test_split_only(
                     "attack_family": "clean",
                     "attack_name": "clean_none",
                     "sample_role": "clean_negative",
-                    "score": 0.1,
-                    "detection_decision": split != "test",
+                    "score": clean_score,
+                    "detection_decision": clean_score >= threshold,
                 },
                 {
                     **common,
@@ -275,7 +323,7 @@ def test_method_candidate_statistics_use_test_split_only(
                     "attack_name": "clean_none",
                     "sample_role": "positive_source",
                     "score": 0.9,
-                    "detection_decision": split == "test",
+                    "detection_decision": 0.9 >= threshold,
                 },
                 {
                     **common,
@@ -283,8 +331,8 @@ def test_method_candidate_statistics_use_test_split_only(
                     "attack_family": "standard_distortion",
                     "attack_name": "jpeg_compression",
                     "sample_role": "attacked_negative",
-                    "score": 0.1,
-                    "detection_decision": split != "test",
+                    "score": clean_score,
+                    "detection_decision": clean_score >= threshold,
                 },
                 {
                     **common,
@@ -293,7 +341,7 @@ def test_method_candidate_statistics_use_test_split_only(
                     "attack_name": "jpeg_compression",
                     "sample_role": "attacked_positive",
                     "score": 0.9,
-                    "detection_decision": split == "test",
+                    "detection_decision": 0.9 >= threshold,
                 },
             )
         )
@@ -356,16 +404,17 @@ def test_t2smark_candidate_statistics_use_test_split_only() -> None:
         "attack_config_digest": attack_config_digest(attack_config),
     }
     observations: list[dict[str, object]] = []
-    for split, quality_score in (
-        ("dev", 0.1),
-        ("calibration", 0.3),
-        ("test", 0.8),
-    ):
+    split_entries, threshold = _minimal_nested_calibration_rows()
+    for split, prompt_id, clean_score, quality_score in split_entries:
         common = {
             "baseline_id": "t2smark",
             "split": split,
-            "prompt_id": f"{split}_prompt",
+            "prompt_id": prompt_id,
             "quality_score": quality_score,
+            "threshold": threshold,
+            "threshold_source": (
+                "nested_calibration_threshold_freeze_conformal_v1"
+            ),
         }
         observations.extend(
             (
@@ -374,7 +423,8 @@ def test_t2smark_candidate_statistics_use_test_split_only() -> None:
                     "attack_family": "clean",
                     "attack_condition": "clean_none",
                     "sample_role": "clean_negative",
-                    "detection_decision": split != "test",
+                    "score": clean_score,
+                    "detection_decision": clean_score >= threshold,
                 },
                 {
                     **common,
@@ -382,7 +432,8 @@ def test_t2smark_candidate_statistics_use_test_split_only() -> None:
                     "attack_family": "standard_distortion",
                     "attack_condition": "jpeg_compression",
                     "sample_role": "attacked_negative",
-                    "detection_decision": split != "test",
+                    "score": clean_score,
+                    "detection_decision": clean_score >= threshold,
                 },
                 {
                     **common,
@@ -390,7 +441,8 @@ def test_t2smark_candidate_statistics_use_test_split_only() -> None:
                     "attack_family": "standard_distortion",
                     "attack_condition": "jpeg_compression",
                     "sample_role": "attacked_positive",
-                    "detection_decision": split == "test",
+                    "score": 0.9,
+                    "detection_decision": 0.9 >= threshold,
                 },
             )
         )

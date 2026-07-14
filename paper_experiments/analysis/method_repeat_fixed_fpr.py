@@ -23,6 +23,7 @@ from experiments.protocol.attacks import (
     formal_attack_seed_protocol_record,
     formal_attack_seed_random,
 )
+from experiments.protocol.calibration import is_clean_unattacked_negative
 from experiments.protocol.formal_randomization import (
     FORMAL_BASE_LATENT_GENERATION_PROTOCOL,
     formal_randomization_protocol_record,
@@ -37,11 +38,17 @@ from experiments.protocol.paper_run_config import (
 )
 from experiments.protocol.prompts import build_prompt_id, normalize_prompt_text
 from experiments.protocol.splits import build_group_split_counts
-from experiments.runners.image_only_dataset_runtime import (
+from experiments.protocol.image_only_evidence import (
     FrozenEvidenceProtocol,
+    allowed_false_positive_count,
     calibrate_complete_evidence_protocol,
+    partition_calibration_prompt_ids,
+)
+from experiments.protocol.detection_key_identity import (
+    REGISTERED_WATERMARK_KEY_ROLE,
 )
 from main.core.digest import build_stable_digest
+from main.methods.detection import project_image_only_measurement_record
 from paper_experiments.analysis.fixed_fpr_threshold_audit import (
     FIXED_FPR_THRESHOLD_METHOD_IDS,
     MAIN_THRESHOLD_SOURCE,
@@ -374,15 +381,16 @@ def build_prompt_split_contract(
     }
 
 
-def _clean_unattacked_negative(row: Mapping[str, Any]) -> bool:
+def _clean_unattacked_negative(
+    row: Mapping[str, Any],
+    *,
+    expected_detection_key_role: str | None = None,
+) -> bool:
     """判断一行是否为阈值校准允许消费的未攻击 clean negative."""
 
-    return bool(
-        row.get("sample_role") == "clean_negative"
-        and not str(row.get("attack_id", "")).strip()
-        and str(row.get("attack_family", "")).strip() in {"", "clean"}
-        and str(row.get("attack_name", "")).strip()
-        in {"", "none", "clean", "clean_none"}
+    return is_clean_unattacked_negative(
+        row,
+        expected_detection_key_role=expected_detection_key_role,
     )
 
 
@@ -574,7 +582,14 @@ def _validate_source_rows(
         previous = identities.setdefault(prompt_id, identity)
         if previous != identity:
             raise MethodRepeatFixedFprError("同一方法内同 Prompt 随机身份发生漂移")
-        if _clean_unattacked_negative(row):
+        if _clean_unattacked_negative(
+            row,
+            expected_detection_key_role=(
+                REGISTERED_WATERMARK_KEY_ROLE
+                if source.method_id == "slm_wm"
+                else None
+            ),
+        ):
             clean_rows_by_prompt[prompt_id].append(row)
     if any(len(rows) != 1 for rows in clean_rows_by_prompt.values()):
         raise MethodRepeatFixedFprError(
@@ -739,7 +754,6 @@ def _recompute_threshold_record(
     prompt_contract: Mapping[str, Any],
     fairness_identity_digest: str,
     target_fpr: float,
-    main_rescue_margin_low: float,
 ) -> dict[str, Any]:
     """在一个 method-repeat 内独立重算并核对 producer 阈值声明."""
 
@@ -758,17 +772,35 @@ def _recompute_threshold_record(
     calibration_rows = tuple(
         row
         for row in rows
-        if _clean_unattacked_negative(row)
+        if _clean_unattacked_negative(
+            row,
+            expected_detection_key_role=(
+                REGISTERED_WATERMARK_KEY_ROLE
+                if source.method_id == "slm_wm"
+                else None
+            ),
+        )
         and str(row["prompt_id"]) in calibration_ids
     )
     expected_calibration_count = len(calibration_ids)
     expected_test_count = len(test_ids)
+    (
+        window_fit_prompt_ids,
+        threshold_freeze_prompt_ids,
+        shared_calibration_partition_digest,
+    ) = partition_calibration_prompt_ids(calibration_ids)
+    threshold_freeze_prompt_id_digest = build_stable_digest(
+        list(threshold_freeze_prompt_ids)
+    )
+    threshold_freeze_count = len(threshold_freeze_prompt_ids)
     declaration = dict(source.declared_threshold_protocol)
     if source.method_id == "slm_wm":
         recomputed = calibrate_complete_evidence_protocol(
-            calibration_rows,
+            (
+                project_image_only_measurement_record(row)
+                for row in calibration_rows
+            ),
             target_fpr,
-            main_rescue_margin_low,
         )
         recomputed_protocol = recomputed.to_dict()
         expected_declaration_fields = {
@@ -798,26 +830,37 @@ def _recompute_threshold_record(
             declaration,
             observation_source_sha256=source.observation_source_sha256,
             target_fpr=target_fpr,
-            expected_calibration_negative_count=expected_calibration_count,
+            expected_calibration_source_negative_count=expected_calibration_count,
             expected_test_negative_count=expected_test_count,
         )
         if (
-            not recomputed.geometry_protocol_calibration_ready
-            or recomputed.geometry_calibration_negative_count
-            != expected_calibration_count
-            or recomputed.registration_calibration_negative_count
-            != expected_calibration_count
-            or recomputed.sync_calibration_negative_count
-            != expected_calibration_count
+                not recomputed.geometry_protocol_calibration_ready
+                or recomputed.geometry_calibration_negative_count
+                != recomputed.rescue_window_fit_negative_count
+                or recomputed.registration_calibration_negative_count
+                != recomputed.rescue_window_fit_negative_count
+                or recomputed.sync_calibration_negative_count
+                != recomputed.rescue_window_fit_negative_count
+                or recomputed.calibration_source_negative_count
+                != expected_calibration_count
+                or recomputed.rescue_window_fit_negative_count
+                != len(window_fit_prompt_ids)
+                or recomputed.threshold_freeze_negative_count
+                != threshold_freeze_count
+                or recomputed.calibration_partition_digest
+                != shared_calibration_partition_digest
+                or recomputed.threshold_freeze_prompt_id_digest
+                != threshold_freeze_prompt_id_digest
         ):
             raise MethodRepeatFixedFprError("主方法完整几何 rescue 校准字段不完整")
         false_positive_count = recomputed.calibration_false_positive_count
+        calibration_partition_digest = recomputed.calibration_partition_digest
         threshold_protocol = recomputed_protocol
     else:
         primitive = audit_fixed_fpr_observation_threshold(
             rows,
             target_fpr=target_fpr,
-            expected_calibration_negative_count=expected_calibration_count,
+            expected_calibration_source_negative_count=expected_calibration_count,
         )
         try:
             declared_threshold = float(
@@ -831,26 +874,51 @@ def _recompute_threshold_record(
             rows,
             observation_source_sha256=source.observation_source_sha256,
             target_fpr=target_fpr,
-            expected_calibration_negative_count=expected_calibration_count,
+            expected_calibration_source_negative_count=expected_calibration_count,
             expected_test_negative_count=expected_test_count,
             declared_threshold=declared_threshold,
             declared_threshold_digest=declared_digest,
         )
         false_positive_count = primitive.calibration_false_positive_count
+        if (
+            primitive.calibration_partition_digest
+            != shared_calibration_partition_digest
+            or primitive.threshold_freeze_prompt_id_digest
+            != threshold_freeze_prompt_id_digest
+            or primitive.threshold_freeze_negative_count
+            != threshold_freeze_count
+        ):
+            raise MethodRepeatFixedFprError(
+                "baseline 未使用主方法共享的 threshold-freeze Prompt 子集"
+            )
+        calibration_partition_digest = (
+            primitive.calibration_partition_digest
+        )
         threshold_protocol = {
             "threshold": primitive.frozen_threshold,
             "threshold_source": FORMAL_THRESHOLD_SOURCE,
             "threshold_digest": primitive.threshold_digest,
             "target_fpr": target_fpr,
-            "calibration_negative_count": primitive.calibration_negative_count,
+            "calibration_source_negative_count": (
+                primitive.calibration_source_negative_count
+            ),
+            "threshold_freeze_negative_count": (
+                primitive.threshold_freeze_negative_count
+            ),
+            "calibration_partition_digest": (
+                primitive.calibration_partition_digest
+            ),
+            "threshold_freeze_prompt_id_digest": (
+                primitive.threshold_freeze_prompt_id_digest
+            ),
             "calibration_false_positive_count": false_positive_count,
             "decision_scope": "score_greater_than_or_equal_to_threshold",
         }
     if audit["fixed_fpr_threshold_ready"] is not True:
         raise MethodRepeatFixedFprError("method-repeat fixed-FPR 重算或逐条判定未通过")
-    allowed_false_positive_count = max(
-        0,
-        math.floor(target_fpr * (expected_calibration_count + 1)) - 1,
+    threshold_freeze_false_positive_budget = allowed_false_positive_count(
+        threshold_freeze_count,
+        target_fpr,
     )
     repeat = resolve_formal_randomization_repeat(source.randomization_repeat_id)
     payload = {
@@ -871,11 +939,18 @@ def _recompute_threshold_record(
             else FORMAL_THRESHOLD_SOURCE
         ),
         "calibration_clean_negative_count": expected_calibration_count,
+        "threshold_freeze_negative_count": threshold_freeze_count,
+        "calibration_partition_digest": calibration_partition_digest,
+        "threshold_freeze_prompt_id_digest": (
+            threshold_freeze_prompt_id_digest
+        ),
         "test_clean_negative_count": expected_test_count,
-        "allowed_calibration_false_positive_count": allowed_false_positive_count,
+        "allowed_threshold_freeze_false_positive_count": (
+            threshold_freeze_false_positive_budget
+        ),
         "calibration_false_positive_count": false_positive_count,
         "calibration_false_positive_rate": (
-            false_positive_count / expected_calibration_count
+            false_positive_count / threshold_freeze_count
         ),
         "calibrated_detection_threshold": audit[
             "calibrated_detection_threshold"
@@ -936,7 +1011,6 @@ def recompute_exact_method_repeat_fixed_fpr(
     expected_model_id: str,
     expected_model_revision: str,
     expected_base_seed: int,
-    main_rescue_margin_low: float,
 ) -> dict[str, Any]:
     """重算精确45个 method-repeat 阈值并返回可持久化纯数据.
 
@@ -956,8 +1030,6 @@ def recompute_exact_method_repeat_fixed_fpr(
         raise MethodRepeatFixedFprError(
             "expected_base_seed 必须是非负整数"
         )
-    if not math.isfinite(main_rescue_margin_low) or main_rescue_margin_low >= 0.0:
-        raise MethodRepeatFixedFprError("main_rescue_margin_low 必须是负有限数")
     prompt_contract = build_prompt_split_contract(
         prompt_rows,
         paper_run_name=run_name,
@@ -1049,7 +1121,6 @@ def recompute_exact_method_repeat_fixed_fpr(
             prompt_contract=prompt_contract,
             fairness_identity_digest=fairness_digest_by_repeat[repeat_id],
             target_fpr=resolved_target_fpr,
-            main_rescue_margin_low=main_rescue_margin_low,
         )
         for repeat_id, method_id in expected_keys
     )

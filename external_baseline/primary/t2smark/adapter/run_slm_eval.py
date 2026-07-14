@@ -21,6 +21,9 @@ from experiments.protocol.attacks import (
     formal_attack_seed_random,
     resolve_formal_attack_config,
 )
+from experiments.protocol.image_only_evidence import (
+    partition_calibration_prompt_ids,
+)
 from main.core.digest import build_stable_digest
 from external_baseline.primary.t2smark.adapter.formal_unit_checkpoint import (
     atomic_write_json,
@@ -230,9 +233,23 @@ def _auto_threshold(
 
     if not 0.0 < target_fpr < 1.0:
         raise ValueError("target_fpr 必须位于 (0, 1)")
+    calibration_indices = tuple(
+        index
+        for index, row in enumerate(image_pairs)
+        if _split(row) == "calibration" and index in results_by_index
+    )
+    _, threshold_freeze_prompt_ids, _ = partition_calibration_prompt_ids(
+        str(image_pairs[index].get("prompt_id", ""))
+        for index in calibration_indices
+    )
+    threshold_freeze_prompt_id_set = set(threshold_freeze_prompt_ids)
     negative_scores: list[float] = []
     for index, row in enumerate(image_pairs):
-        if _split(row) != "calibration":
+        if (
+            _split(row) != "calibration"
+            or str(row.get("prompt_id", ""))
+            not in threshold_freeze_prompt_id_set
+        ):
             continue
         if index not in results_by_index:
             continue
@@ -251,7 +268,7 @@ def _auto_threshold(
     )
     for threshold in sorted({math.nextafter(score, math.inf) for score in negative_scores}):
         if sum(score >= threshold for score in negative_scores) <= allowed_false_positives:
-            return threshold, "calibration_clean_negative_conformal"
+            return threshold, "nested_calibration_threshold_freeze_conformal_v1"
     raise RuntimeError("无法冻结 T2SMark fixed-FPR 阈值")
 
 
@@ -383,7 +400,6 @@ def build_t2smark_observations(
     model_id: str,
     model_revision: str,
     attacked_image_manifest: dict[str, Any] | None = None,
-    threshold: float | None = None,
     target_fpr: float = 0.1,
     attack_family: str = "clean",
     attack_condition: str = "clean_none",
@@ -403,10 +419,11 @@ def build_t2smark_observations(
 
     results_by_index = _result_items(t2smark_results)
     _require_complete_result_set(results_by_index, image_pairs)
-    if threshold is None:
-        threshold_value, threshold_source = _auto_threshold(results_by_index, image_pairs, target_fpr)
-    else:
-        threshold_value, threshold_source = float(threshold), "cli_threshold"
+    threshold_value, threshold_source = _auto_threshold(
+        results_by_index,
+        image_pairs,
+        target_fpr,
+    )
 
     observations: list[dict[str, Any]] = []
     missing_indices: list[int] = []
@@ -728,7 +745,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", required=True, help="输出 baseline_observations.json 路径。")
     parser.add_argument("--artifact-root", default=None, help="adapter 诊断产物目录。")
     parser.add_argument("--attacked-image-manifest", default=None, help="可选 attacked_image_manifest.json。")
-    parser.add_argument("--threshold", type=float, default=None, help="显式检测阈值。")
     parser.add_argument("--target-fpr", type=float, required=True, help="calibration clean negative 的目标 FPR。")
     parser.add_argument("--attack-family", default="clean", help="无 attack manifest 时使用的攻击族标签。")
     parser.add_argument("--attack-condition", default="clean_none", help="无 attack manifest 时使用的攻击条件标签。")
@@ -762,7 +778,6 @@ def main() -> None:
         model_id=args.model_id,
         model_revision=args.model_revision,
         attacked_image_manifest=attacked_manifest,
-        threshold=args.threshold,
         target_fpr=args.target_fpr,
         attack_family=args.attack_family,
         attack_condition=args.attack_condition,

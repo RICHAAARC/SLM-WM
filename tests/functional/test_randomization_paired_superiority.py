@@ -94,7 +94,7 @@ def _paired_outcomes(
                     "proposed_decision": proposed_decision,
                     "baseline_decision": False,
                     "paired_difference": int(proposed_decision),
-                    "proposed_detector_digest": _digest(
+                    "proposed_measurement_digest": _digest(
                         "detector", repeat_id, prompt_id
                     ),
                     "proposed_attacked_image_digest": _digest(
@@ -418,7 +418,7 @@ def test_registered_repeat_statistics_reject_cross_baseline_main_drift() -> None
     _replace_row(
         outcomes,
         1,
-        proposed_detector_digest=_digest("forged_detector"),
+        proposed_measurement_digest=_digest("forged_detector"),
     )
 
     with pytest.raises(

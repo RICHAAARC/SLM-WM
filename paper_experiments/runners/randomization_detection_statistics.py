@@ -49,7 +49,7 @@ from experiments.protocol.splits import build_group_split_counts
 from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
 from main.methods.detection.image_only import (
-    validate_image_only_detection_digest_record,
+    validate_image_only_measurement_projection_record,
 )
 from paper_experiments.analysis.paired_superiority import (
     PRIMARY_BASELINE_IDS,
@@ -294,7 +294,7 @@ def _main_decision_and_source_atom(
             "主方法 observation 未使用当前 repeat 的冻结阈值"
         )
     try:
-        validate_image_only_detection_digest_record(row)
+        validate_image_only_measurement_projection_record(row)
     except (TypeError, ValueError) as exc:
         raise RandomizationDetectionStatisticsRunnerError(
             "主方法仅图像检测原子无法独立重建"
@@ -376,8 +376,8 @@ def _main_decision_and_source_atom(
                 row.get("aligned_content_score"), "aligned_content_score"
             )
         ),
-        "detector_digest": _require_sha256(
-            row.get("detector_digest", ""), "detector_digest"
+        "measurement_digest": _require_sha256(
+            row.get("measurement_digest", ""), "measurement_digest"
         ),
         "evaluated_image_digest": evaluated_digest,
         "evaluated_image_path": evaluated_path,

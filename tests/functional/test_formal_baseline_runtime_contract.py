@@ -16,6 +16,9 @@ from experiments.protocol.attacks import (
     formal_attack_seed_random,
     resolve_formal_attack_config,
 )
+from experiments.protocol.image_only_evidence import (
+    partition_calibration_prompt_ids,
+)
 from external_baseline.primary.sd35_method_faithful_common import (
     DEFAULT_SD35_MODEL_REVISION,
     derive_threshold,
@@ -46,23 +49,35 @@ def test_method_faithful_threshold_uses_calibration_negatives_only() -> None:
     """改变阳性分数不得改变 fixed-FPR 阈值。"""
 
     negatives = [
-        {"split": "calibration", "sample_role": "clean_negative", "score": value}
-        for value in (0.1, 0.2, 0.3, 0.4, 0.5)
+        {
+            "prompt_id": f"calibration_{index}",
+            "split": "calibration",
+            "sample_role": "clean_negative",
+            "attack_family": "clean",
+            "score": value,
+        }
+        for index, value in enumerate((0.1, 0.2, 0.3, 0.4, 0.5, 0.6))
     ]
     first, source = derive_threshold(
         (*negatives, {"split": "calibration", "sample_role": "positive_source", "score": 0.6}),
-        None,
         0.1,
     )
     second, _ = derive_threshold(
         (*negatives, {"split": "calibration", "sample_role": "positive_source", "score": 100.0}),
-        None,
         0.1,
     )
+    _, freeze_ids, _ = partition_calibration_prompt_ids(
+        row["prompt_id"] for row in negatives
+    )
+    freeze_id_set = set(freeze_ids)
 
     assert first == second
-    assert source == "calibration_clean_negative_conformal"
-    assert sum(row["score"] >= first for row in negatives) == 0
+    assert source == "nested_calibration_threshold_freeze_conformal_v1"
+    assert sum(
+        row["score"] >= first
+        for row in negatives
+        if row["prompt_id"] in freeze_id_set
+    ) == 0
 
 
 @pytest.mark.quick
@@ -153,7 +168,7 @@ def test_common_backbone_producers_bind_formal_attack_identity(
         "event_id": "event_0001",
         "score": 0.9,
         "threshold": 0.5,
-        "threshold_source": "calibration_clean_negative_conformal",
+        "threshold_source": "nested_calibration_threshold_freeze_conformal_v1",
         "row": {"split": "test", "prompt_id": "prompt_0001"},
         "index": 1,
         "sample_role": "attacked_positive",
@@ -191,20 +206,22 @@ def test_t2smark_threshold_uses_only_calibration_clean_scores() -> None:
     """T2SMark 适配阈值必须遵循同一负样本校准协议。"""
 
     pairs = [
-        {"split": "calibration"},
-        {"split": "calibration"},
-        {"split": "test"},
+        {"prompt_id": "calibration_0", "split": "calibration"},
+        {"prompt_id": "calibration_1", "split": "calibration"},
+        {"prompt_id": "calibration_2", "split": "calibration"},
+        {"prompt_id": "test_0", "split": "test"},
     ]
     results = {
         0: {"image_only_detection": {"clean_score": 0.1, "watermarked_score": 0.9}},
         1: {"image_only_detection": {"clean_score": 0.2, "watermarked_score": -100.0}},
-        2: {"image_only_detection": {"clean_score": 999.0, "watermarked_score": 999.0}},
+        2: {"image_only_detection": {"clean_score": 0.3, "watermarked_score": -200.0}},
+        3: {"image_only_detection": {"clean_score": 999.0, "watermarked_score": 999.0}},
     }
 
     threshold, source = _auto_threshold(results, pairs, 0.1)
 
-    assert threshold > 0.2
-    assert source == "calibration_clean_negative_conformal"
+    assert threshold > 0.1
+    assert source == "nested_calibration_threshold_freeze_conformal_v1"
 
 
 @pytest.mark.quick
@@ -279,12 +296,37 @@ def test_t2smark_formal_attacks_use_distinct_clean_and_watermarked_images(
             "strict_pair_quality_ready": True,
         }
     ]
+    calibration_rows = [
+        {
+            **rows[0],
+            "image_id": f"calibration_image_{index}",
+            "prompt_id": f"calibration_prompt_{index}",
+            "prompt_text": f"calibration prompt {index}",
+            "split": "calibration",
+        }
+        for index in range(3)
+    ]
+    rows = calibration_rows + rows
     attack_seed = formal_attack_seed_random(1703, "jpeg_compression_main")
     attack_seed_protocol_digest = formal_attack_seed_protocol_record()[
         "formal_attack_seed_protocol_digest"
     ]
     results = {
-        "0": {
+        **{
+            str(index): {
+                "robustness": {
+                    "norm1_no_w": 0.2,
+                    "norm1_w": 0.9,
+                    "acc_msg": 1.0,
+                },
+                "image_only_detection": {
+                    "clean_score": 0.1 + index * 0.01,
+                    "watermarked_score": 0.9,
+                },
+            }
+            for index in range(3)
+        },
+        "3": {
             "robustness": {"norm1_no_w": 0.2, "norm1_w": 0.9, "acc_msg": 1.0},
             "image_only_detection": {"clean_score": 0.1, "watermarked_score": 0.9},
             "formal_attacks": {
@@ -348,7 +390,6 @@ def test_t2smark_formal_attacks_use_distinct_clean_and_watermarked_images(
         t2smark_results=results,
         model_id=T2SMARK_MODEL_ID,
         model_revision=DEFAULT_SD35_MODEL_REVISION,
-        threshold=0.5,
         target_fpr=0.1,
     )
 
@@ -365,7 +406,7 @@ def test_t2smark_formal_attacks_use_distinct_clean_and_watermarked_images(
     assert by_role["attacked_negative"]["score"] == pytest.approx(0.12)
     assert by_role["attacked_positive"]["score"] == pytest.approx(0.75)
 
-    del results["0"]["formal_attacks"]["jpeg_compression"]["attacked_positive"][
+    del results["3"]["formal_attacks"]["jpeg_compression"]["attacked_positive"][
         "attack_config_digest"
     ]
     with pytest.raises(ValueError, match="AttackConfig"):
@@ -374,7 +415,6 @@ def test_t2smark_formal_attacks_use_distinct_clean_and_watermarked_images(
             t2smark_results=results,
             model_id=T2SMARK_MODEL_ID,
             model_revision=DEFAULT_SD35_MODEL_REVISION,
-            threshold=0.5,
             target_fpr=0.1,
         )
 

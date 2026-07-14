@@ -17,6 +17,10 @@ from experiments.runtime import repository_environment
 from experiments.protocol.attacks import attack_config_digest, resolve_formal_attack_config
 from experiments.protocol.fixed_fpr_observation_audit import (
     audit_fixed_fpr_observation_threshold,
+    conformal_threshold_from_clean_negative_scores,
+)
+from experiments.protocol.image_only_evidence import (
+    partition_calibration_prompt_ids,
 )
 from experiments.protocol.formal_randomization import (
     formal_randomization_protocol_record,
@@ -125,7 +129,7 @@ def thresholded_row(
         "attack_name": attack_name,
         "score": score,
         "threshold": threshold,
-        "threshold_source": "calibration_clean_negative_conformal",
+        "threshold_source": "nested_calibration_threshold_freeze_conformal_v1",
         "detection_decision": score >= threshold,
         "generation_model_id": DEFAULT_MODEL_ID,
         "generation_model_revision": DEFAULT_MODEL_REVISION,
@@ -155,27 +159,38 @@ def prepare_transfer_inputs(
 
     paths = output_paths(root, config)
     baseline_id = config.primary_baseline_id
-    clean_score = 0.1
-    threshold = math.nextafter(clean_score, math.inf)
+    calibration_prompt_ids = tuple(
+        f"prompt_{index:06d}" for index in range(1, 4)
+    )
+    calibration_scores = {
+        prompt_id: 0.1 + index * 0.01
+        for index, prompt_id in enumerate(calibration_prompt_ids)
+    }
+    _, freeze_ids, _ = partition_calibration_prompt_ids(
+        calibration_prompt_ids
+    )
+    threshold = conformal_threshold_from_clean_negative_scores(
+        (calibration_scores[prompt_id] for prompt_id in freeze_ids),
+        config.target_fpr,
+    )
     rows = [
         thresholded_row(
             baseline_id=baseline_id,
-            event_id="clean_negative",
-            score=clean_score,
+            event_id=f"{prompt_id}_{sample_role}",
+            score=(
+                calibration_scores[prompt_id]
+                if sample_role == "clean_negative"
+                else 0.9
+            ),
             threshold=threshold,
-            sample_role="clean_negative",
+            sample_role=sample_role,
             attack_family="clean",
             attack_name="clean_none",
-        ),
-        thresholded_row(
-            baseline_id=baseline_id,
-            event_id="positive_source",
-            score=0.9,
-            threshold=threshold,
-            sample_role="positive_source",
-            attack_family="clean",
-            attack_name="clean_none",
-        ),
+            prompt_id=prompt_id,
+        )
+        for prompt_id in calibration_prompt_ids
+        for sample_role in ("clean_negative", "positive_source")
+    ] + [
         thresholded_row(
             baseline_id=baseline_id,
             event_id="attacked_positive",
@@ -184,6 +199,8 @@ def prepare_transfer_inputs(
             sample_role="attacked_positive",
             attack_family="standard_distortion",
             attack_name="jpeg_compression",
+            prompt_id="prompt_000004",
+            split="test",
         ),
     ]
     declared_count = len(rows) + declared_count_delta
@@ -197,13 +214,14 @@ def prepare_transfer_inputs(
         paths["primary_prompt_plan"],
         [
             {
-                "prompt_id": "prompt_000001",
-                "prompt_index": 0,
+                "prompt_id": f"prompt_{index:06d}",
+                "prompt_index": index - 1,
                 "prompt_set": config.prompt_set,
-                "prompt_text": "a ceramic fox",
-                "prompt_digest": "1" * 64,
-                "split": "calibration",
+                "prompt_text": f"prompt {index}",
+                "prompt_digest": f"{index:x}" * 64,
+                "split": "calibration" if index <= 3 else "test",
             }
+            for index in range(1, 5)
         ],
     )
     write_json(
@@ -355,7 +373,7 @@ def test_transfer_manifest_binds_actual_observations_and_threshold(
     config = ExternalBaselineMethodFaithfulConfig(
         primary_baseline_id="tree_ring",
         target_fpr=0.1,
-        primary_baseline_max_samples=1,
+        primary_baseline_max_samples=4,
         tree_ring_attack_families="jpeg_compression",
         require_cuda=False,
     )
@@ -364,7 +382,7 @@ def test_transfer_manifest_binds_actual_observations_and_threshold(
     manifest = write_baseline_transfer_files(tmp_path, config, paths)
 
     assert manifest["baseline_id"] == "tree_ring"
-    assert manifest["baseline_observation_count"] == 3
+    assert manifest["baseline_observation_count"] == 7
     assert len(manifest["baseline_observations_sha256"]) == 64
     assert len(manifest["threshold_digest"]) == 64
     assert manifest["generation_protocol"]["num_inference_steps"] == 20
@@ -383,7 +401,7 @@ def test_transfer_manifest_rejects_declared_observation_count_mismatch(
     config = ExternalBaselineMethodFaithfulConfig(
         primary_baseline_id="tree_ring",
         target_fpr=0.1,
-        primary_baseline_max_samples=1,
+        primary_baseline_max_samples=4,
         tree_ring_attack_families="jpeg_compression",
         require_cuda=False,
     )
@@ -542,7 +560,7 @@ def _sha256(path: Path) -> str:
 
 
 def _package_prompt_rows() -> list[dict[str, object]]:
-    """构造一个 calibration Prompt 和一个 test Prompt."""
+    """构造3个 calibration Prompt 和1个 test Prompt."""
 
     return [
         {
@@ -553,7 +571,12 @@ def _package_prompt_rows() -> list[dict[str, object]]:
             "prompt_digest": build_stable_digest(f"package prompt {index}"),
             "split": split,
         }
-        for index, split in ((1, "calibration"), (2, "test"))
+        for index, split in (
+            (1, "calibration"),
+            (2, "calibration"),
+            (3, "calibration"),
+            (4, "test"),
+        )
     ]
 
 
@@ -646,18 +669,18 @@ def prepare_package_source(
         specs.append(spec)
         raw_observations.extend(source_rows)
 
-    test_prompt = prompt_rows[1]
+    test_prompt = prompt_rows[-1]
     for offset, role in enumerate(("attacked_negative", "attacked_positive"), start=11):
         attack_row = units.threshold_independent_observation(
             thresholded_row(
                 baseline_id=baseline_id,
-                event_id=f"prompt_000002_jpeg_{role}",
+                event_id=f"prompt_000004_jpeg_{role}",
                 score=0.3 if role == "attacked_negative" else 0.8,
                 threshold=0.5,
                 sample_role=role,
                 attack_family="standard_distortion",
                 attack_name="jpeg_compression",
-                prompt_id="prompt_000002",
+                prompt_id="prompt_000004",
                 prompt_text=str(test_prompt["prompt_text"]),
                 split="test",
             )
@@ -666,11 +689,11 @@ def prepare_package_source(
             context,
             unit_kind=f"formal_attack_jpeg_compression_{role}",
             row=test_prompt,
-            index=2,
+            index=4,
             random_identity_random={"attack_seed_random": offset},
             unit_parameters={"sample_role": role},
         )
-        image_path = artifact_root / "images" / f"prompt_000002_jpeg_{role}.png"
+        image_path = artifact_root / "images" / f"prompt_000004_jpeg_{role}.png"
         image_path.write_bytes(f"{baseline_id}-{role}".encode("ascii"))
         image_paths.append(image_path)
         records.append(
@@ -690,7 +713,7 @@ def prepare_package_source(
         expected_specs=specs,
     )
     threshold = math.nextafter(0.1, math.inf)
-    threshold_source = "calibration_clean_negative_conformal"
+    threshold_source = "nested_calibration_threshold_freeze_conformal_v1"
     observations = units.apply_frozen_threshold(
         raw_observations,
         threshold=threshold,
@@ -699,7 +722,7 @@ def prepare_package_source(
     threshold_audit = audit_fixed_fpr_observation_threshold(
         observations,
         target_fpr=0.1,
-        expected_calibration_negative_count=1,
+        expected_calibration_source_negative_count=3,
     )
     assert threshold_audit.fixed_fpr_ready
     image_pairs_path = artifact_root / f"{baseline_id}_image_pairs.json"
@@ -904,15 +927,15 @@ def prepare_package_source(
     }
 
 
-def _patch_two_prompt_package_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    """把归档层级缩到仍包含 calibration 和 test 的真实两 Prompt 协议."""
+def _patch_nested_calibration_package_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """把归档层级缩到仍满足嵌套 calibration 的4 Prompt 协议."""
 
     repeat = resolve_formal_randomization_repeat(None)
     monkeypatch.setattr(
         "paper_experiments.runners.external_baseline_method_faithful.build_paper_run_config",
         lambda _root=".": SimpleNamespace(
             run_name="pilot_paper",
-            prompt_count=2,
+            prompt_count=4,
             target_fpr=0.1,
             randomization_repeat_id=repeat.randomization_repeat_id,
             generation_seed_index=repeat.generation_seed_index,
@@ -949,7 +972,7 @@ def test_packages_are_baseline_isolated_and_failure_is_not_packaged(
         "paper_experiments.runners.external_baseline_method_faithful.resolve_code_version",
         lambda _root: PACKAGE_TEST_CODE_VERSION,
     )
-    _patch_two_prompt_package_run(monkeypatch)
+    _patch_nested_calibration_package_run(monkeypatch)
     root = _short_package_root(tmp_path)
     drive_dir = root / "drive"
     archive_entries: list[set[str]] = []
@@ -1040,7 +1063,7 @@ def test_package_rejects_transfer_member_digest_tampering(
 ) -> None:
     """transfer 成员字节变化但 manifest 摘要未变化时必须闭锁."""
 
-    _patch_two_prompt_package_run(monkeypatch)
+    _patch_nested_calibration_package_run(monkeypatch)
     root = _short_package_root(tmp_path)
     paths = prepare_package_source(root, "tree_ring", monkeypatch)
     split_observations = paths["split_observations"]
@@ -1064,7 +1087,7 @@ def test_package_rejects_atomic_unit_or_image_tampering(
 ) -> None:
     """完成单元 JSON 或其绑定图像变化时不得生成正式结果包."""
 
-    _patch_two_prompt_package_run(monkeypatch)
+    _patch_nested_calibration_package_run(monkeypatch)
     root = _short_package_root(tmp_path)
     paths = prepare_package_source(root, "tree_ring", monkeypatch)
     if tamper_kind == "unit_record":
@@ -1101,7 +1124,7 @@ def test_package_rejects_unexpected_run_directory_members(
 ) -> None:
     """运行目录中的额外文件,目录或符号链接均不得进入归档."""
 
-    _patch_two_prompt_package_run(monkeypatch)
+    _patch_nested_calibration_package_run(monkeypatch)
     root = _short_package_root(tmp_path)
     paths = prepare_package_source(root, "tree_ring", monkeypatch)
     run_dir = paths["run_dir"]

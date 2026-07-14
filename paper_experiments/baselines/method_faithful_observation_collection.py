@@ -630,7 +630,7 @@ def load_method_faithful_observation_collection(
         threshold_audit = audit_fixed_fpr_observation_threshold(
             rows,
             target_fpr=resolved_protocol.target_fpr,
-            expected_calibration_negative_count=expected_calibration_count,
+            expected_calibration_source_negative_count=expected_calibration_count,
         )
         if not threshold_audit.fixed_fpr_ready:
             raise ValueError(f"method_faithful_transfer_threshold_audit_failed:{baseline_id}")

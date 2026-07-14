@@ -84,6 +84,8 @@ ABLATION_RUNTIME_CONFIGS = {
 ABLATION_RUNTIME_OUTPUT_ROOT = "outputs/formal/runs"
 PROMPT_SPLITS = {
     "prompt_calibration": "calibration",
+    "prompt_calibration_01": "calibration",
+    "prompt_calibration_02": "calibration",
     "prompt_test": "test",
 }
 PROMPT_DIGESTS = {
@@ -113,15 +115,21 @@ RANDOMIZATION_REPEAT_IDENTITY = {
 }
 _FORMAL_DERIVED_DETECTION_FIELDS = {
     "frozen_content_threshold",
+    "frozen_rescue_margin_low",
     "frozen_geometry_score_threshold",
     "frozen_registration_confidence_threshold",
     "frozen_attention_sync_score_threshold",
     "frozen_threshold_digest",
-    "frozen_image_only_detector_config_digest",
+    "frozen_image_only_measurement_config_digest",
+    "frozen_attention_geometry_enabled",
+    "frozen_image_alignment_enabled",
+    "frozen_geometry_rescue_enabled",
     "formal_raw_content_margin",
     "formal_aligned_content_margin",
     "formal_positive_by_content",
+    "formal_geometry_reliable",
     "formal_content_failure_reason",
+    "formal_rescue_eligible",
     "formal_rescue_applied",
     "formal_evidence_positive",
     "formal_metric_status",
@@ -211,8 +219,8 @@ def _scientific_detection_binding_record(
     payload = {
         "scientific_content_binding_schema": SCIENTIFIC_CONTENT_BINDING_SCHEMA,
         "run_id": run_id,
-        "image_only_detector_config_digest": (
-            protocol.image_only_detector_config_digest
+        "image_only_measurement_config_digest": (
+            protocol.image_only_measurement_config_digest
         ),
         "detection_key_plan_digest_random": key_plan[
             "detection_key_plan_digest_random"
@@ -242,6 +250,9 @@ def _raw_detection(
     content_score: float,
     randomization_reference: dict[str, Any],
     attack: Any | None = None,
+    attention_geometry_enabled: bool = True,
+    image_alignment_enabled: bool = True,
+    detector_guided_attack_threshold_digest: str = "",
 ) -> dict[str, Any]:
     """构造冻结协议尚未应用的图像盲检原子。"""
 
@@ -250,12 +261,36 @@ def _raw_detection(
         "prompt_id": prompt_id,
         "split": split,
         "sample_role": sample_role,
+        "detection_key_role": (
+            REGISTERED_WRONG_KEY_ROLE
+            if sample_role == "wrong_key_negative"
+            else REGISTERED_WATERMARK_KEY_ROLE
+        ),
         "content_score": content_score,
-        "aligned_content_score": None,
-        "attention_geometry_score": 0.0,
-        "registration_confidence": 0.0,
-        "attention_sync_score": 0.0,
-        "alignment": {"registration_geometry_reliable": False},
+        "aligned_content_score": (
+            content_score if image_alignment_enabled else None
+        ),
+        "raw_attention_geometry_score": (
+            0.0 if attention_geometry_enabled else None
+        ),
+        "attention_geometry_score": (
+            0.0 if image_alignment_enabled else None
+        ),
+        "registration_confidence": (
+            0.0 if image_alignment_enabled else None
+        ),
+        "attention_sync_score": (
+            0.0 if image_alignment_enabled else None
+        ),
+        "alignment": (
+            {"registration_geometry_reliable": False}
+            if image_alignment_enabled
+            else None
+        ),
+        "metadata": {
+            "attention_geometry_enabled": attention_geometry_enabled,
+            "image_alignment_enabled": image_alignment_enabled,
+        },
         **randomization_reference,
     }
     if attack is not None:
@@ -283,6 +318,10 @@ def _raw_detection(
                 ),
             }
         )
+        if attack.attack_name == "adversarial_removal_attack":
+            record["detector_guided_attack_threshold_digest"] = (
+                detector_guided_attack_threshold_digest
+            )
     return _bind_attention_alignment_gate(record)
 
 
@@ -298,6 +337,13 @@ def _formal_detection_group(
 
     run_id = f"run_{ablation_id}_{prompt_id}"
     positive_score = 1.0 if ablation_id == "complete_method" else 0.75
+    runtime_config = ABLATION_RUNTIME_CONFIGS[ablation_id]
+    attention_geometry_enabled = bool(
+        runtime_config.get("attention_geometry_enabled", True)
+    )
+    image_alignment_enabled = bool(
+        runtime_config.get("image_alignment_enabled", True)
+    )
     records = [
         _raw_detection(
             run_id=run_id,
@@ -306,6 +352,8 @@ def _formal_detection_group(
             sample_role="clean_negative",
             content_score=0.0,
             randomization_reference=randomization_reference,
+            attention_geometry_enabled=attention_geometry_enabled,
+            image_alignment_enabled=image_alignment_enabled,
         ),
         _raw_detection(
             run_id=run_id,
@@ -314,6 +362,8 @@ def _formal_detection_group(
             sample_role="positive_source",
             content_score=positive_score,
             randomization_reference=randomization_reference,
+            attention_geometry_enabled=attention_geometry_enabled,
+            image_alignment_enabled=image_alignment_enabled,
         ),
         _raw_detection(
             run_id=run_id,
@@ -322,6 +372,8 @@ def _formal_detection_group(
             sample_role="wrong_key_negative",
             content_score=0.0,
             randomization_reference=randomization_reference,
+            attention_geometry_enabled=attention_geometry_enabled,
+            image_alignment_enabled=image_alignment_enabled,
         ),
     ]
     if split == "test":
@@ -336,6 +388,11 @@ def _formal_detection_group(
                 ),
                 randomization_reference=randomization_reference,
                 attack=attack,
+                attention_geometry_enabled=attention_geometry_enabled,
+                image_alignment_enabled=image_alignment_enabled,
+                detector_guided_attack_threshold_digest=(
+                    protocol.threshold_digest
+                ),
             )
             for attack in default_attack_configs()
             if attack.enabled
@@ -365,24 +422,33 @@ def _ablation_atomic_fixture() -> tuple[
     protocols: dict[str, dict[str, Any]] = {}
     unit_identity_records: list[dict[str, Any]] = []
     for ablation_id in ABLATION_IDS:
-        calibration_randomization_reference = (
-            CANONICAL_RANDOMIZATION_REFERENCES["prompt_calibration"]
-        )
-        calibration_negative = _raw_detection(
-            run_id=f"run_{ablation_id}_prompt_calibration",
-            prompt_id="prompt_calibration",
-            split="calibration",
-            sample_role="clean_negative",
-            content_score=0.0,
-            randomization_reference=calibration_randomization_reference,
+        runtime_config = ABLATION_RUNTIME_CONFIGS[ablation_id]
+        calibration_negatives = tuple(
+            _raw_detection(
+                run_id=f"run_{ablation_id}_{prompt_id}",
+                prompt_id=prompt_id,
+                split="calibration",
+                sample_role="clean_negative",
+                content_score=0.0,
+                randomization_reference=(
+                    CANONICAL_RANDOMIZATION_REFERENCES[prompt_id]
+                ),
+                attention_geometry_enabled=bool(
+                    runtime_config.get("attention_geometry_enabled", True)
+                ),
+                image_alignment_enabled=bool(
+                    runtime_config.get("image_alignment_enabled", True)
+                ),
+            )
+            for prompt_id, split in PROMPT_SPLITS.items()
+            if split == "calibration"
         )
         protocol = calibrate_complete_evidence_protocol(
-            (calibration_negative,),
+            calibration_negatives,
             target_fpr=TARGET_FPR,
-            rescue_margin_low=-0.05,
         )
         protocols[ablation_id] = protocol.to_dict()
-        runtime_config = dict(ABLATION_RUNTIME_CONFIGS[ablation_id])
+        runtime_config = dict(runtime_config)
         for prompt_index, (prompt_id, split) in enumerate(PROMPT_SPLITS.items()):
             prompt_text = f"正式消融 {prompt_id}"
             randomization_reference = CANONICAL_RANDOMIZATION_REFERENCES[
@@ -421,6 +487,9 @@ def _ablation_atomic_fixture() -> tuple[
                 "latent_torch_dtype": _FORMAL_METHOD_CONFIG.latent_torch_dtype,
                 "width": _FORMAL_METHOD_CONFIG.width,
                 "height": _FORMAL_METHOD_CONFIG.height,
+                "detector_guided_attack_threshold_protocol": (
+                    protocol.to_dict() if split == "test" else None
+                ),
                 **{
                     field_name: field_value
                     for field_name, field_value in runtime_config.items()
@@ -590,7 +659,7 @@ def test_ablation_runtime_aggregates_rebuild_from_detection_atoms() -> None:
     )
 
     assert result["ablation_runtime_aggregate_rebuild_ready"] is True
-    assert result["ablation_runtime_record_count"] == 4
+    assert result["ablation_runtime_record_count"] == 8
     assert result["ablation_detection_record_count"] == len(detections)
 
 

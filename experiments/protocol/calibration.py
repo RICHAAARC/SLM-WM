@@ -5,12 +5,50 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import asdict, dataclass
 import math
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from experiments.protocol.events import EventProtocolRecord
 from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from experiments.protocol.prompts import PromptProtocolRecord
 from experiments.protocol.splits import assert_disjoint_calibration_and_test, group_prompt_ids_by_split
+
+
+_CLEAN_ATTACK_FAMILIES = frozenset({"", "none", "clean"})
+_CLEAN_ATTACK_NAMES = frozenset({"", "none", "clean", "clean_none"})
+
+
+def is_clean_unattacked_negative(
+    record: Mapping[str, Any],
+    *,
+    split: str | None = None,
+    expected_detection_key_role: str | None = None,
+) -> bool:
+    """判断记录是否为可用于 fixed-FPR 的未攻击 clean negative。
+
+    该谓词同时检查攻击 ID、执行标志以及 family/name/condition,
+    防止只清空 `attack_id` 的攻击记录混入 calibration 或 test clean 计数。
+    """
+
+    if not isinstance(record, Mapping):
+        return False
+    if split is not None and record.get("split") != split:
+        return False
+    if record.get("sample_role") != "clean_negative":
+        return False
+    if expected_detection_key_role is not None and record.get(
+        "detection_key_role"
+    ) != expected_detection_key_role:
+        return False
+    return bool(
+        not str(record.get("attack_id", "")).strip()
+        and record.get("attack_performed") is not True
+        and str(record.get("attack_family", "")).strip().lower()
+        in _CLEAN_ATTACK_FAMILIES
+        and str(record.get("attack_name", "")).strip().lower()
+        in _CLEAN_ATTACK_NAMES
+        and str(record.get("attack_condition", "")).strip().lower()
+        in _CLEAN_ATTACK_NAMES
+    )
 
 
 def build_prompt_statistics(
@@ -41,8 +79,8 @@ def build_prompt_statistics(
 class FixedFprCalibrationConfig:
     """描述 fixed-FPR 阈值校准协议。
 
-    该对象属于通用工程写法: 将目标 FPR、样本角色和 rescue 窗口集中
-    到配置对象, 让统计函数只关注阈值和指标计算。
+    该对象属于通用工程写法: 将目标 FPR 与样本角色集中到配置对象,
+    让不含几何救回的 baseline 统计函数只关注阈值和指标计算。
     """
 
     target_fpr: float = PILOT_PAPER_FIXED_FPR
@@ -51,8 +89,6 @@ class FixedFprCalibrationConfig:
     positive_role: str = "positive_source"
     clean_negative_role: str = "clean_negative"
     attacked_negative_role: str = "attacked_negative"
-    rescue_margin_low: float = -0.05
-    allowed_fail_reasons: tuple[str, ...] = ("geometry_suspected", "low_confidence")
     confidence_level: float = 0.95
     false_positive_budget_mode: str = "empirical"
 
@@ -60,8 +96,6 @@ class FixedFprCalibrationConfig:
         """集中校验校准协议边界。"""
         if not 0.0 < self.target_fpr < 1.0:
             raise ValueError("target_fpr 必须位于 (0, 1)")
-        if self.rescue_margin_low >= 0.0:
-            raise ValueError("rescue_margin_low 必须小于 0")
         if not 0.0 < self.confidence_level < 1.0:
             raise ValueError("confidence_level 必须位于 (0, 1)")
         if self.false_positive_budget_mode not in {"empirical", "confidence_controlled"}:
@@ -269,7 +303,7 @@ def decision_fields_at_threshold(
     threshold: FixedFprThreshold,
     config: FixedFprCalibrationConfig,
 ) -> dict[str, Any]:
-    """在冻结阈值下重算 raw content 与 rescue 后 evidence 判定。"""
+    """在冻结阈值下重算不含几何救回的通用分数判定。"""
     raw_score = float(record["raw_content_score"])
     aligned_score = float(record["aligned_content_score"])
     formal_score_field = threshold_score_field(threshold)
@@ -285,15 +319,9 @@ def decision_fields_at_threshold(
     positive_by_content = raw_margin >= 0.0
     formal_detection_decision = formal_margin >= 0.0
     formal_score_is_raw = formal_score_field == "raw_content_score"
-    rescue_eligible = (
-        formal_score_is_raw
-        and config.rescue_margin_low <= raw_margin < 0.0
-        and bool(record.get("geometry_reliable", False))
-        and str(record.get("fail_reason", "")) in config.allowed_fail_reasons
-        and record.get("rescue_ablation_mode") == "full_rescue"
-    )
-    rescue_applied = rescue_eligible and aligned_margin >= 0.0
-    evidence_decision = (positive_by_content or rescue_applied) if formal_score_is_raw else formal_detection_decision
+    rescue_eligible = False
+    rescue_applied = False
+    evidence_decision = formal_detection_decision
     return {
         "raw_content_margin": raw_margin,
         "aligned_content_margin": aligned_margin,

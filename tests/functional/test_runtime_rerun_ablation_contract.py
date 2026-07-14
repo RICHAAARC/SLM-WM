@@ -209,11 +209,23 @@ def _formal_attack_records() -> tuple[dict[str, object], ...]:
             "formal_attack_seed_protocol_digest": (
                 attack_seed_protocol_digest
             ),
+            **(
+                {
+                    "detector_guided_attack_threshold_digest": (
+                        FORMAL_ATTACK_THRESHOLD_DIGEST
+                    )
+                }
+                if config.attack_name == "adversarial_removal_attack"
+                else {}
+            ),
         }
         for config in default_attack_configs()
         if config.enabled and config.resource_profile in {"full_main", "full_extra"}
         for sample_role in ("clean_negative", "positive_source")
     )
+
+
+FORMAL_ATTACK_THRESHOLD_DIGEST = "d" * 64
 
 
 @pytest.mark.quick
@@ -226,16 +238,19 @@ def test_formal_ablation_attack_coverage_is_exact_on_test_only() -> None:
         records,
         split="test",
         expected_generation_seed_random=1703,
+        expected_threshold_digest=FORMAL_ATTACK_THRESHOLD_DIGEST,
     ) is True
     assert _formal_attack_coverage_ready(
         (),
         split="calibration",
         expected_generation_seed_random=1703,
+        expected_threshold_digest=FORMAL_ATTACK_THRESHOLD_DIGEST,
     ) is True
     assert _formal_attack_coverage_ready(
         records,
         split="calibration",
         expected_generation_seed_random=1703,
+        expected_threshold_digest=FORMAL_ATTACK_THRESHOLD_DIGEST,
     ) is False
 
 
@@ -249,11 +264,13 @@ def test_formal_ablation_attack_coverage_rejects_missing_or_duplicate_record() -
         records[:-1],
         split="test",
         expected_generation_seed_random=1703,
+        expected_threshold_digest=FORMAL_ATTACK_THRESHOLD_DIGEST,
     ) is False
     assert _formal_attack_coverage_ready(
         (*records, records[0]),
         split="test",
         expected_generation_seed_random=1703,
+        expected_threshold_digest=FORMAL_ATTACK_THRESHOLD_DIGEST,
     ) is False
 
 
@@ -270,6 +287,7 @@ def test_formal_ablation_attack_coverage_rejects_seed_drift() -> None:
         tuple(records),
         split="test",
         expected_generation_seed_random=1703,
+        expected_threshold_digest=FORMAL_ATTACK_THRESHOLD_DIGEST,
     ) is False
 
 
@@ -289,4 +307,25 @@ def test_formal_ablation_attack_coverage_rejects_joint_seed_rewrite() -> None:
         tuple(records),
         split="test",
         expected_generation_seed_random=1703,
+        expected_threshold_digest=FORMAL_ATTACK_THRESHOLD_DIGEST,
+    ) is False
+
+
+@pytest.mark.quick
+def test_formal_ablation_attack_coverage_rejects_guided_threshold_drift() -> None:
+    """检测器引导移除攻击必须绑定当前消融的冻结阈值摘要."""
+
+    records = [dict(record) for record in _formal_attack_records()]
+    guided_record = next(
+        record
+        for record in records
+        if record["attack_name"] == "adversarial_removal_attack"
+    )
+    guided_record["detector_guided_attack_threshold_digest"] = "e" * 64
+
+    assert _formal_attack_coverage_ready(
+        tuple(records),
+        split="test",
+        expected_generation_seed_random=1703,
+        expected_threshold_digest=FORMAL_ATTACK_THRESHOLD_DIGEST,
     ) is False

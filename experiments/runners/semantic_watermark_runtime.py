@@ -33,6 +33,11 @@ from experiments.protocol.detection_key_identity import (
     build_detection_key_plan_record,
     resolve_detection_key_material_and_identity,
 )
+from experiments.protocol.image_only_evidence import (
+    FrozenEvidenceProtocol,
+    decision_equivalent_score,
+    validate_frozen_evidence_protocol_integrity,
+)
 from experiments.runtime.diffusion.semantic_features import (
     DifferentiableSemanticFeatureRuntime,
     load_clip_vision_model,
@@ -86,9 +91,10 @@ from main.methods.carrier import (
     tail_robust_carrier_protocol_record,
 )
 from main.methods.detection import (
-    ImageOnlyDetectionConfig,
-    detect_image_only_watermark,
-    recompute_image_only_detection_digest_payload,
+    ImageOnlyMeasurementConfig,
+    image_only_measurement_config_identity_record,
+    measure_image_only_watermark,
+    recompute_image_only_measurement_digest_payload,
 )
 from main.methods.geometry import (
     ATTENTION_COORDINATE_CONVENTION,
@@ -149,9 +155,6 @@ _FORMAL_ATTENTION_COMPONENT_WEIGHT_PROTOCOLS = (
     (1.0 / 3.0, 1.0 / 3.0, 0.0, 1.0 / 3.0),
     (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0, 0.0),
 )
-FORMAL_RUNTIME_RESCUE_MARGIN_LOW = -0.05
-
-
 @dataclass(frozen=True)
 class SemanticWatermarkRuntimeConfig:
     """定义一次真实方法嵌入和仅图像检测运行。"""
@@ -384,15 +387,26 @@ class SemanticWatermarkRuntimeConfig:
     image_alignment_enabled: bool = True
     standard_attack_profiles: tuple[str, ...] = ("full_main",)
     diffusion_attacks_enabled: bool = _FORMAL_METHOD_CONFIG.diffusion_attacks_enabled
-    content_threshold: float = 0.0
-    geometry_score_threshold: float = 0.0
-    registration_confidence_threshold: float = 0.0
-    attention_sync_score_threshold: float = 0.0
-    rescue_margin_low: float = FORMAL_RUNTIME_RESCUE_MARGIN_LOW
+    detector_guided_attack_threshold_protocol: dict[str, Any] | None = None
     output_dir: str = "outputs/semantic_watermark_runtime"
 
     def __post_init__(self) -> None:
         """集中校验重型运行配置。"""
+
+        if self.detector_guided_attack_threshold_protocol is not None:
+            if type(self.detector_guided_attack_threshold_protocol) is not dict:
+                raise TypeError(
+                    "detector_guided_attack_threshold_protocol 必须为 dict 或 None"
+                )
+            try:
+                attack_protocol = FrozenEvidenceProtocol(
+                    **self.detector_guided_attack_threshold_protocol
+                )
+                validate_frozen_evidence_protocol_integrity(attack_protocol)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "detector-guided attack 必须绑定完整可重建的冻结协议"
+                ) from exc
 
         require_registered_model_reference(
             self.model_id,
@@ -576,8 +590,6 @@ class SemanticWatermarkRuntimeResult:
     detection_record_path: str
     manifest_path: str
     update_count: int
-    clean_detection_positive: bool
-    watermarked_detection_positive: bool
     elapsed_seconds: float
     metadata: dict[str, Any]
 
@@ -3098,30 +3110,53 @@ def _image_attention_extractor(
     return extract
 
 
-def _build_image_only_detection_config(
+def _build_image_only_measurement_config(
     config: SemanticWatermarkRuntimeConfig,
-) -> ImageOnlyDetectionConfig:
-    """把唯一正式运行配置完整映射为核心仅图像检测配置."""
+) -> ImageOnlyMeasurementConfig:
+    """把正式运行配置映射为阈值无关的核心盲检测量配置."""
 
     lf_weight = (
         config.lf_detection_score_weight
         if config.lf_enabled and config.tail_robust_enabled
         else (1.0 if config.lf_enabled else 0.0)
     )
-    return ImageOnlyDetectionConfig(
+    return ImageOnlyMeasurementConfig(
         model_id=config.carrier_model_reference,
+        model_revision=config.model_revision,
+        vae_class_name=config.vae_class_name,
+        transformer_class_name=config.transformer_class_name,
+        scheduler_class_name=config.scheduler_class_name,
+        vae_scaling_factor=config.vae_scaling_factor,
+        vae_shift_factor=config.vae_shift_factor,
+        latent_torch_dtype=config.latent_torch_dtype,
+        width=config.width,
+        height=config.height,
+        inference_steps=config.inference_steps,
+        public_detection_schedule_index=(
+            config.public_detection_schedule_index
+        ),
+        public_detection_noise_prg_protocol=(
+            config.public_detection_noise_prg_protocol
+        ),
+        public_detection_noise_domain=(
+            config.public_detection_noise_domain
+        ),
+        public_detection_conditioning_protocol=(
+            config.public_detection_conditioning_protocol
+        ),
+        public_detection_condition_text=(
+            config.public_detection_condition_text
+        ),
+        max_attention_tokens=config.max_attention_tokens,
+        attention_coordinate_convention=(
+            config.attention_coordinate_convention
+        ),
+        attention_grid_align_corners=(
+            config.attention_grid_align_corners
+        ),
         attention_module_names=config.attention_module_names,
         low_frequency_config=config.low_frequency_carrier_config,
         keyed_prg_version=config.keyed_prg_version,
-        content_threshold=config.content_threshold,
-        geometry_score_threshold=config.geometry_score_threshold,
-        registration_confidence_threshold=(
-            config.registration_confidence_threshold
-        ),
-        attention_sync_score_threshold=(
-            config.attention_sync_score_threshold
-        ),
-        rescue_margin_low=config.rescue_margin_low,
         lf_weight=lf_weight,
         tail_robust_weight=(
             config.tail_robust_detection_score_weight
@@ -3270,8 +3305,8 @@ def _bind_public_detection_noise_qk_evidence(
             "public_detection_noise_evidence_digest": noise_evidence_digest,
         }
     )
-    record["detector_digest"] = build_stable_digest(
-        recompute_image_only_detection_digest_payload(record)
+    record["measurement_digest"] = build_stable_digest(
+        recompute_image_only_measurement_digest_payload(record)
     )
 
 
@@ -5126,7 +5161,27 @@ def run_semantic_watermark_runtime(
         raise RuntimeError("最终 clean/watermarked 成图未通过累计完整特征保持门禁")
     paired_quality = compute_image_quality_metrics(clean_image, watermarked_image)
 
-    detector_config = _build_image_only_detection_config(config)
+    measurement_config = _build_image_only_measurement_config(config)
+    measurement_config_identity = image_only_measurement_config_identity_record(
+        measurement_config,
+        attention_geometry_enabled=config.attention_geometry_enabled,
+        image_alignment_enabled=config.image_alignment_enabled,
+    )
+    attack_threshold_protocol = (
+        None
+        if config.detector_guided_attack_threshold_protocol is None
+        else FrozenEvidenceProtocol(
+            **config.detector_guided_attack_threshold_protocol
+        )
+    )
+    if (
+        attack_threshold_protocol is not None
+        and attack_threshold_protocol.image_only_measurement_config_digest
+        != measurement_config_identity["image_only_measurement_config_digest"]
+    ):
+        raise RuntimeError(
+            "detector-guided attack 协议与当前图像测量配置身份不一致"
+        )
 
     def adversarial_detection_score(candidate: Any) -> float:
         """返回与最终内容主判和几何对齐救回一致的连续攻击目标。"""
@@ -5134,10 +5189,10 @@ def run_semantic_watermark_runtime(
         noise_evidence_cursor = _public_detection_noise_evidence_cursor(
             attention_extractor
         )
-        evaluated = detect_image_only_watermark(
+        evaluated = measure_image_only_watermark(
             image=candidate,
             key_material=config.key_material,
-            config=detector_config,
+            config=measurement_config,
             image_latent_encoder=lambda image: _encode_image_latent(pipeline, image),
             image_attention_extractor=(
                 attention_extractor if config.attention_geometry_enabled else None
@@ -5148,10 +5203,26 @@ def run_semantic_watermark_runtime(
             attention_extractor,
             noise_evidence_cursor,
         )
-        scores = [evaluated.content.content_score]
-        if evaluated.geometry_reliable and evaluated.aligned_content_score is not None:
-            scores.append(evaluated.aligned_content_score)
-        return max(scores)
+        if attack_threshold_protocol is None:
+            raise RuntimeError(
+                "detector-guided attack 不得使用未冻结的临时检测器"
+            )
+        return decision_equivalent_score(
+            evaluated.to_record(),
+            geometry_rescue_enabled=(
+                attack_threshold_protocol.geometry_rescue_enabled
+            ),
+            rescue_margin_low=attack_threshold_protocol.rescue_margin_low,
+            geometry_score_threshold=(
+                attack_threshold_protocol.geometry_score_threshold
+            ),
+            registration_confidence_threshold=(
+                attack_threshold_protocol.registration_confidence_threshold
+            ),
+            attention_sync_score_threshold=(
+                attack_threshold_protocol.attention_sync_score_threshold
+            ),
+        )
 
     detection_key_plan = build_detection_key_plan_record(
         config.key_material
@@ -5183,10 +5254,10 @@ def run_semantic_watermark_runtime(
         noise_evidence_cursor = _public_detection_noise_evidence_cursor(
             attention_extractor
         )
-        detection = detect_image_only_watermark(
+        detection = measure_image_only_watermark(
             image=image,
             key_material=detection_key,
-            config=detector_config,
+            config=measurement_config,
             image_latent_encoder=lambda candidate: _encode_image_latent(pipeline, candidate),
             image_attention_extractor=attention_extractor if config.attention_geometry_enabled else None,
             image_aligner=_align_image if config.image_alignment_enabled else None,
@@ -5208,7 +5279,7 @@ def run_semantic_watermark_runtime(
         record["metadata"] = {
             **record["metadata"],
             "supports_paper_claim": False,
-            "threshold_status": "development_only_until_calibration_freeze",
+            "measurement_status": "threshold_independent_image_only_evidence",
         }
         detections.append(record)
 
@@ -5242,10 +5313,10 @@ def run_semantic_watermark_runtime(
             noise_evidence_cursor = _public_detection_noise_evidence_cursor(
                 attention_extractor
             )
-            detection = detect_image_only_watermark(
+            detection = measure_image_only_watermark(
                 image=attacked_image,
                 key_material=config.key_material,
-                config=detector_config,
+                config=measurement_config,
                 image_latent_encoder=lambda candidate: _encode_image_latent(pipeline, candidate),
                 image_attention_extractor=attention_extractor if config.attention_geometry_enabled else None,
                 image_aligner=_align_image if config.image_alignment_enabled else None,
@@ -5286,13 +5357,17 @@ def run_semantic_watermark_runtime(
                 **record["metadata"],
                 "metric_status": "measured_from_real_attacked_image",
                 "supports_paper_claim": False,
-                "threshold_status": "development_only_until_calibration_freeze",
+                "measurement_status": "threshold_independent_image_only_evidence",
             }
             detections.append(record)
 
     if config.diffusion_attacks_enabled:
         if diffusion_attack_runtime is None:
             raise RuntimeError("diffusion_attacks_enabled 要求共享再扩散攻击运行时")
+        if attack_threshold_protocol is None:
+            raise RuntimeError(
+                "detector-guided 再扩散攻击必须在 calibration 协议冻结后运行"
+            )
         formal_attack_configs_by_id = {
             attack.attack_id: attack for attack in default_attack_configs()
         }
@@ -5315,10 +5390,10 @@ def run_semantic_watermark_runtime(
                 noise_evidence_cursor = _public_detection_noise_evidence_cursor(
                     attention_extractor
                 )
-                detection = detect_image_only_watermark(
+                detection = measure_image_only_watermark(
                     image=attacked_image,
                     key_material=config.key_material,
-                    config=detector_config,
+                    config=measurement_config,
                     image_latent_encoder=lambda candidate: _encode_image_latent(pipeline, candidate),
                     image_attention_extractor=attention_extractor if config.attention_geometry_enabled else None,
                     image_aligner=_align_image if config.image_alignment_enabled else None,
@@ -5357,13 +5432,16 @@ def run_semantic_watermark_runtime(
                         "attack_execution": attack_execution.to_record(),
                         "attack_performed": True,
                         "attacked_image_key": image_key,
+                        "detector_guided_attack_threshold_digest": (
+                            attack_threshold_protocol.threshold_digest
+                        ),
                     }
                 )
                 record["metadata"] = {
                     **record["metadata"],
                     "metric_status": "measured_from_real_diffusion_attacked_image",
                     "supports_paper_claim": False,
-                    "threshold_status": "development_only_until_calibration_freeze",
+                    "measurement_status": "threshold_independent_image_only_evidence",
                 }
                 detections.append(record)
 
@@ -5426,8 +5504,6 @@ def run_semantic_watermark_runtime(
         detection_record_path="",
         manifest_path="",
         update_count=len(update_records),
-        clean_detection_positive=bool(detections[0]["evidence_positive"]),
-        watermarked_detection_positive=bool(detections[1]["evidence_positive"]),
         elapsed_seconds=elapsed_seconds,
         metadata={
             **runtime_versions,

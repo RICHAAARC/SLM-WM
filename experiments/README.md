@@ -10,7 +10,7 @@
 - `runners/semantic_watermark_runtime.py`: 完整执行分支风险、716维完整语义与视觉条件 Jacobian、20候选方向的4维 Null Space、LF、Gaussian 幅值尾部截断、真实多层 Q/K 几何更新、同种子 carrier-only 总机制效应反事实、逐注入无 attention 原子持久化、三边最终完整特征保持门禁、真实 Q/K 双归因增益门禁和仅图像盲检；每次注入同时持久化完整风险/预算/mask、候选/响应/基底、三分支更新及 Q/K 输入输出的版本化内容摘要。持久化运行配置删除密钥原文字段, 只写入后缀合规的 `key_material_digest_random`。
 - `protocol/formal_randomization.py`: 冻结3个生成种子与3个水印密钥的9个交叉重复, 在任何运行前预注册3个 key seed 与 key material 摘要计划, 从公开生成 seed 构造设备无关规范基础 latent, 并为主方法与全部主表 baseline 生成可逐字段核验的随机化身份。正式入口逐 Prompt 复算实际 seed、key 和基础 latent 身份并拒绝漂移；完整计划只保存在顶层运行 manifest, 样本记录只保存必要引用和摘要。`protocol/attacks.py` 以实际生成 seed 与攻击 ID 规范派生跨方法共享的攻击 seed, producer 与统计重建均独立复算。
 - `runners/image_only_dataset_workload.py`: 从唯一方法 YAML 和论文运行配置构造完整主方法工作负载, 执行主运行与正式 Inception FID / KID, 并根据科学 session 的打包边界返回续跑或完成状态。`scripts/run_image_only_dataset_runtime.py` 只转发到该模块。
-- `runners/image_only_dataset_runtime.py`: 运行完整 Prompt 集, 在 calibration split 独立冻结检测协议, 只在 test split 形成论文统计; 同时从每条仅图像检测记录的真实连续分数生成分数分布、ROC 与 DET 数据。
+- `runners/image_only_dataset_runtime.py`: 运行完整 Prompt 集, 先对 calibration 和 test 图像执行不含阈值与判定字段的 Measure, 再将 calibration registered-key clean negatives 按版本化 Prompt 散列拆分为互斥的1/3 `window_fit` 和2/3 `threshold_freeze`, 分别拟合几何 rescue 参数与冻结最终 fixed-FPR 阈值, 最后对原始测量执行唯一一次 Apply。只有 test split 进入论文统计；分数分布、ROC 与 DET 使用与布尔判定严格等价的连续分数。
 - `ablations/mechanism_ablation_workload.py`: 构造当前论文规模的全部消融配置, 调用正式重运行消融并执行受治理打包。`scripts/run_runtime_rerun_ablations.py` 只转发到该模块。
 - `ablations/runtime_rerun.py`: 对完整方法与14个消融配置分别重新生成、攻击、检测并独立校准, 包括中心化 Q/K logit、可微行内 rank、关系概率和距离调制中心化概率四个逐项留一变体；不读取或变换完整方法分数。
 - `artifacts/dataset_level_quality_outputs.py`: 从真实 clean/watermarked 图像对提取正式 Inception 特征, 并构建 `fid`、`kid_mean`、`kid_std` 三行质量证据。KID 在 canonical feature population 上执行100轮均匀无放回子集估计, std 表示子集估计值的总体标准差而不是标准误。
@@ -40,8 +40,8 @@ summary 必须同时记录带时区的 `generated_at`、`paper_run_name`、`targ
 
 科学内容门禁同时使用 `slm_wm_tensor_content_v1` 和 `slm_wm_image_rgb_uint8_content_v1`。单次运行写入端先持久化更新 JSONL、检测 JSONL 和图像, 再从磁盘重读这些文件构造总证据；完成结果加载器同样从磁盘重算并要求记录完全相等。联合身份覆盖风险来源与预算、Null Space 八类 Tensor、实际量化写回的完整716维参考特征和 JVP Tensor、三分支更新、注入五角色 Q/K、最终三图的规范 RGB uint8 像素及 Q/K、检测 raw/aligned Q/K、公开检测噪声和 carrier-only 反事实。最终三图 Q/K 逐角色持久化公开噪声 Tensor、PRG 身份和索引0、1、2, 像素-Q/K binding 也包含噪声身份；检测必须共享该身份并从3开始连续。alignment 摘要必须规范。attention 开启时, 写后和打包前都使用同一 carrier-only validator；该 validator 同时消费完整配置或持久化脱敏配置, 并拒绝任何残留 attention 字段。数据集汇总先重算每个内嵌绑定记录；每个单元 manifest 必须自包含且无重复路径, 其配置和配置摘要必须匹配结果内脱敏配置。数据集 manifest 必须无重复并覆盖全部互斥单元叶子, 打包器拒绝仅摘要结果、遗漏叶子及叶子篡改。SHA-256 只证明包内内容一致性, 不能替代模型来源锁、真实 CUDA 运行或论文统计证据。
 
-四分量留一变体在生成端和检测端共用同一归一化权重。被移除分量的权重严格为0, 其余三个分量各为 $1/3$；该权重同时进入梯度、回溯、最终归因、注册和同步评分。每个变体继续执行完整 Prompt、攻击和独立 calibration 流程, 因而属于真实方法重运行而不是汇总层算术消融。
+四分量留一变体在生成端和检测端共用同一归一化权重。被移除分量的权重严格为0, 其余三个分量各为 $1/3$；该权重同时进入梯度、回溯、最终归因、注册和同步评分。每个变体继续执行完整 Prompt、攻击和独立 calibration 流程, 因而属于真实方法重运行而不是汇总层算术消融。关闭 attention geometry 或 image alignment 时, `geometry_rescue_enabled=false`, 正式判定只使用 raw 内容分数冻结阈值；运行记录不构造零值几何门、伪 rescue 窗口或残留配准原子。
 
-主方法检测协议在 calibration clean negative 上联合冻结内容阈值、几何可靠性阈值与同阈值救回规则, 随后只在独立 test split 应用该冻结协议。正式 FPR 证据是 test clean negative 的经验 operating point 及95%单侧 Wilson 上界; 该协议不声明 calibration 导出的 split-conformal 有限样本总体 FPR 保证。
+主方法检测协议先在 calibration clean negatives 的1/3 `window_fit` 子集拟合几何可靠性门与最宽可行 rescue 窗口, 再在互斥的2/3 `threshold_freeze` 子集上用判定等价连续分数冻结唯一最终阈值。冻结协议随后只在独立 test split 应用。正式 FPR 证据是 test clean negative 的经验 operating point 及95%单侧 Wilson 上界; 该协议不声明 calibration 导出的 split-conformal 有限样本总体 FPR 保证。
 
 所有持久化输出必须写入 `outputs/`。本层不得导入 `paper_experiments/`、`scripts/` 或 `paper_workflow/`。

@@ -18,6 +18,9 @@ from experiments.protocol.formal_randomization import (
     formal_randomization_repeats,
     formal_watermark_key_plan_record,
 )
+from experiments.protocol.image_only_evidence import (
+    partition_calibration_prompt_ids,
+)
 from experiments.protocol.prompts import (
     PROMPT_FILES,
     build_prompt_records,
@@ -51,7 +54,6 @@ PAPER_RUN_NAME = "probe_paper"
 TARGET_FPR = 0.1
 MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 MODEL_REVISION = "b940f670f0eda2d07fbb75229e779da1ad11eb80"
-RESCUE_MARGIN_LOW = -0.05
 EXPECTED_BASE_SEED = 1703
 def _bind_attention_alignment_gate(
     record: dict[str, object],
@@ -212,6 +214,7 @@ def _source(
             "prompt_id": str(prompt["prompt_id"]),
             "split": str(prompt["split"]),
             "sample_role": "clean_negative",
+            "detection_key_role": "registered_watermark_key",
             "attack_id": "",
             "attack_family": "" if method_id == "slm_wm" else "clean",
             "attack_name": "" if method_id == "slm_wm" else "clean_none",
@@ -263,13 +266,20 @@ def _source(
         protocol = calibrate_complete_evidence_protocol(
             calibration_rows,
             TARGET_FPR,
-            RESCUE_MARGIN_LOW,
         )
         observation_rows = apply_frozen_evidence_protocol(raw_rows, protocol)
         declaration = protocol.to_dict()
     else:
+        _, threshold_freeze_ids, _ = partition_calibration_prompt_ids(
+            str(row["prompt_id"]) for row in calibration_rows
+        )
+        threshold_freeze_id_set = set(threshold_freeze_ids)
         threshold = conformal_threshold_from_clean_negative_scores(
-            (float(row["score"]) for row in calibration_rows),
+            (
+                float(row["score"])
+                for row in calibration_rows
+                if str(row["prompt_id"]) in threshold_freeze_id_set
+            ),
             TARGET_FPR,
         )
         observation_rows = tuple(
@@ -284,7 +294,7 @@ def _source(
         audit = audit_fixed_fpr_observation_threshold(
             observation_rows,
             target_fpr=TARGET_FPR,
-            expected_calibration_negative_count=33,
+            expected_calibration_source_negative_count=33,
         )
         declaration = {
             "calibrated_detection_threshold": threshold,
@@ -369,7 +379,6 @@ def _run(
         expected_model_id=MODEL_ID,
         expected_model_revision=MODEL_REVISION,
         expected_base_seed=EXPECTED_BASE_SEED,
-        main_rescue_margin_low=RESCUE_MARGIN_LOW,
     )
 
 
@@ -564,7 +573,6 @@ def test_recomputation_rejects_prompt_id_not_derived_from_text(
             expected_model_id=MODEL_ID,
             expected_model_revision=MODEL_REVISION,
             expected_base_seed=EXPECTED_BASE_SEED,
-            main_rescue_margin_low=RESCUE_MARGIN_LOW,
         )
 
 

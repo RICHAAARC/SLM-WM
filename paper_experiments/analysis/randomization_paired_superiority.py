@@ -77,7 +77,7 @@ _COMMON_CELL_FIELDS = (
     "formal_attack_seed_protocol_digest",
     "proposed_method_threshold_digest",
     "proposed_decision",
-    "proposed_detector_digest",
+    "proposed_measurement_digest",
     "proposed_attacked_image_digest",
 )
 
@@ -458,7 +458,7 @@ def _build_randomization_aggregate_paired_superiority_statistics(
             "formal_attack_seed_protocol_digest",
             "proposed_method_threshold_digest",
             "baseline_method_threshold_digest",
-            "proposed_detector_digest",
+            "proposed_measurement_digest",
             "proposed_attacked_image_digest",
             "baseline_attacked_image_digest",
         ):
@@ -490,7 +490,7 @@ def _build_randomization_aggregate_paired_superiority_statistics(
                 "formal_attack_seed_protocol_digest",
                 "proposed_method_threshold_digest",
                 "proposed_decision",
-                "proposed_detector_digest",
+                "proposed_measurement_digest",
                 "proposed_attacked_image_digest",
             }
         }

@@ -18,9 +18,13 @@ from experiments.runners.image_only_dataset_runtime import (
     apply_frozen_evidence_protocol,
     calibrate_complete_evidence_protocol,
 )
+from experiments.protocol.image_only_evidence import (
+    partition_calibration_prompt_ids,
+)
 from main.core.digest import build_stable_digest
 from main.methods.detection.image_only import (
-    recompute_image_only_detection_digest_payload,
+    project_image_only_measurement_record,
+    recompute_image_only_measurement_digest_payload,
 )
 from paper_experiments.analysis.fixed_fpr_threshold_audit import (
     MAIN_THRESHOLD_SOURCE,
@@ -36,6 +40,14 @@ pytestmark = pytest.mark.quick
 
 
 OBSERVATION_SOURCE_SHA256 = "a" * 64
+
+
+def _raw_measurements(
+    rows: tuple[dict[str, object], ...] | list[dict[str, object]],
+) -> tuple[dict[str, object], ...]:
+    """显式投影最终记录中的阈值无关测量原子。"""
+
+    return tuple(project_image_only_measurement_record(row) for row in rows)
 
 
 def _bind_attention_alignment_gate(
@@ -54,6 +66,7 @@ def _main_method_rows() -> tuple[tuple[dict[str, object], ...], dict[str, object
             "prompt_id": f"prompt-{index}",
             "split": split,
             "sample_role": "clean_negative",
+            "detection_key_role": "registered_watermark_key",
             "attack_id": "",
             "content_score": score,
             "aligned_content_score": score,
@@ -78,7 +91,6 @@ def _main_method_rows() -> tuple[tuple[dict[str, object], ...], dict[str, object
     protocol = calibrate_complete_evidence_protocol(
         raw_rows[:3],
         target_fpr=0.25,
-        rescue_margin_low=-0.05,
     )
     return apply_frozen_evidence_protocol(raw_rows, protocol), protocol.to_dict()
 
@@ -86,7 +98,17 @@ def _main_method_rows() -> tuple[tuple[dict[str, object], ...], dict[str, object
 def _baseline_rows() -> tuple[dict[str, object], ...]:
     """构造共享 calibration 冻结阈值的 baseline observation。"""
 
-    threshold = conformal_threshold_from_clean_negative_scores((0.1, 0.2, 0.3), 0.25)
+    calibration_scores = {
+        f"prompt-{index}": score
+        for index, score in enumerate((0.1, 0.2, 0.3))
+    }
+    _, threshold_freeze_ids, _ = partition_calibration_prompt_ids(
+        calibration_scores
+    )
+    threshold = conformal_threshold_from_clean_negative_scores(
+        (calibration_scores[prompt_id] for prompt_id in threshold_freeze_ids),
+        0.25,
+    )
     return tuple(
         {
             "prompt_id": f"prompt-{index}",
@@ -119,7 +141,7 @@ def test_main_method_threshold_audit_recomputes_complete_rescue_protocol() -> No
         protocol,
         observation_source_sha256=OBSERVATION_SOURCE_SHA256,
         target_fpr=0.25,
-        expected_calibration_negative_count=3,
+        expected_calibration_source_negative_count=3,
         expected_test_negative_count=2,
     )
 
@@ -128,11 +150,11 @@ def test_main_method_threshold_audit_recomputes_complete_rescue_protocol() -> No
     assert result["threshold_source"] == MAIN_THRESHOLD_SOURCE
     assert "conformal" not in result["threshold_source"]
     detector_config_digest = protocol[
-        "image_only_detector_config_digest"
+        "image_only_measurement_config_digest"
     ]
     assert all(
-        row["image_only_detector_config_digest"]
-        == row["frozen_image_only_detector_config_digest"]
+        row["image_only_measurement_config_digest"]
+        == row["frozen_image_only_measurement_config_digest"]
         == detector_config_digest
         for row in rows
     )
@@ -145,7 +167,7 @@ def test_main_method_threshold_audit_recomputes_complete_rescue_protocol() -> No
         protocol,
         observation_source_sha256=OBSERVATION_SOURCE_SHA256,
         target_fpr=0.25,
-        expected_calibration_negative_count=3,
+        expected_calibration_source_negative_count=3,
         expected_test_negative_count=2,
     )
     assert failed["detection_decision_ready"] is False
@@ -158,10 +180,55 @@ def test_main_method_threshold_audit_recomputes_complete_rescue_protocol() -> No
         protocol,
         observation_source_sha256=OBSERVATION_SOURCE_SHA256,
         target_fpr=0.25,
-        expected_calibration_negative_count=3,
+        expected_calibration_source_negative_count=3,
         expected_test_negative_count=2,
     )
     assert failed_margin["detection_decision_ready"] is False
+
+
+@pytest.mark.parametrize(
+    ("record_index", "field_name", "invalid_value"),
+    (
+        (0, "attack_condition", "jpeg_compression"),
+        (3, "detection_key_role", "registered_wrong_key_negative"),
+    ),
+)
+def test_main_method_threshold_audit_rejects_non_registered_clean_rows(
+    record_index: int,
+    field_name: str,
+    invalid_value: str,
+) -> None:
+    """攻击条件或 wrong-key 身份不得冒充 registered-key clean negative。"""
+
+    rows, protocol = _main_method_rows()
+    changed = [dict(row) for row in rows]
+    changed[record_index][field_name] = invalid_value
+
+    result = audit_main_method_fixed_fpr(
+        changed,
+        protocol,
+        observation_source_sha256=OBSERVATION_SOURCE_SHA256,
+        target_fpr=0.25,
+        expected_calibration_source_negative_count=3,
+        expected_test_negative_count=2,
+    )
+
+    assert result["split_count_ready"] is False
+    assert result["fixed_fpr_threshold_ready"] is False
+
+
+def test_calibrator_rejects_hidden_attack_condition_on_clean_negative() -> None:
+    """calibrator 不得只因 `attack_id` 为空就接受攻击记录。"""
+
+    rows, _protocol = _main_method_rows()
+    changed = list(_raw_measurements(rows[:3]))
+    changed[0] = {
+        **changed[0],
+        "attack_condition": "jpeg_compression",
+    }
+
+    with pytest.raises(ValueError, match="registered-key clean negatives"):
+        calibrate_complete_evidence_protocol(changed, target_fpr=0.25)
 
 
 @pytest.mark.parametrize(
@@ -191,7 +258,7 @@ def test_main_method_threshold_audit_rejects_protocol_type_and_schema_drift(
         changed_protocol,
         observation_source_sha256=OBSERVATION_SOURCE_SHA256,
         target_fpr=0.25,
-        expected_calibration_negative_count=3,
+        expected_calibration_source_negative_count=3,
         expected_test_negative_count=2,
     )
 
@@ -204,7 +271,7 @@ def test_calibration_rejects_mixed_low_frequency_carrier_identity() -> None:
     """Calibration 记录不得混用不同的 LF 检测权重身份."""
 
     rows, _protocol = _main_method_rows()
-    mixed_rows = [dict(row) for row in rows[:3]]
+    mixed_rows = list(_raw_measurements(rows[:3]))
     mixed_rows[1] = bind_formal_detection_record(
         mixed_rows[1],
         lf_weight=1.0,
@@ -214,12 +281,11 @@ def test_calibration_rejects_mixed_low_frequency_carrier_identity() -> None:
 
     with pytest.raises(
         ValueError,
-        match="混用了内容载体协议|混用了检测器配置身份",
+        match="混用了测量配置或载体身份",
     ):
         calibrate_complete_evidence_protocol(
             mixed_rows,
             target_fpr=0.25,
-            rescue_margin_low=-0.05,
         )
 
 
@@ -227,11 +293,11 @@ def test_calibration_rejects_low_frequency_carrier_protocol_drift() -> None:
     """Calibration 记录不得混入摘要漂移的 LF 载体协议."""
 
     rows, _protocol = _main_method_rows()
-    mixed_rows = [dict(row) for row in rows[:3]]
+    mixed_rows = list(_raw_measurements(rows[:3]))
     drifted = dict(mixed_rows[1])
     drifted["lf_carrier_protocol_digest"] = "f" * 64
-    drifted["detector_digest"] = build_stable_digest(
-        recompute_image_only_detection_digest_payload(drifted)
+    drifted["measurement_digest"] = build_stable_digest(
+        recompute_image_only_measurement_digest_payload(drifted)
     )
     mixed_rows[1] = drifted
 
@@ -239,7 +305,6 @@ def test_calibration_rejects_low_frequency_carrier_protocol_drift() -> None:
         calibrate_complete_evidence_protocol(
             mixed_rows,
             target_fpr=0.25,
-            rescue_margin_low=-0.05,
         )
 
 
@@ -247,11 +312,11 @@ def test_calibration_rejects_tail_carrier_protocol_drift() -> None:
     """Calibration 记录不得混入摘要漂移的尾部载体协议."""
 
     rows, _protocol = _main_method_rows()
-    mixed_rows = [dict(row) for row in rows[:3]]
+    mixed_rows = list(_raw_measurements(rows[:3]))
     drifted = dict(mixed_rows[1])
     drifted["tail_carrier_protocol_digest"] = "f" * 64
-    drifted["detector_digest"] = build_stable_digest(
-        recompute_image_only_detection_digest_payload(drifted)
+    drifted["measurement_digest"] = build_stable_digest(
+        recompute_image_only_measurement_digest_payload(drifted)
     )
     mixed_rows[1] = drifted
 
@@ -259,7 +324,6 @@ def test_calibration_rejects_tail_carrier_protocol_drift() -> None:
         calibrate_complete_evidence_protocol(
             mixed_rows,
             target_fpr=0.25,
-            rescue_margin_low=-0.05,
         )
 
 
@@ -268,13 +332,12 @@ def test_apply_frozen_protocol_rejects_low_frequency_record_drift() -> None:
 
     rows, protocol_record = _main_method_rows()
     protocol = calibrate_complete_evidence_protocol(
-        rows[:3],
+        _raw_measurements(rows[:3]),
         target_fpr=0.25,
-        rescue_margin_low=-0.05,
     )
     assert protocol.to_dict() == protocol_record
     drifted = bind_formal_detection_record(
-        rows[3],
+        project_image_only_measurement_record(rows[3]),
         lf_weight=1.0,
         tail_robust_weight=0.0,
         tail_fraction=1.0,
@@ -282,7 +345,7 @@ def test_apply_frozen_protocol_rejects_low_frequency_record_drift() -> None:
 
     with pytest.raises(
         ValueError,
-        match="冻结内容载体协议|冻结载体或检测器配置身份",
+        match="配置或载体身份不一致",
     ):
         apply_frozen_evidence_protocol((drifted,), protocol)
 
@@ -292,9 +355,8 @@ def test_apply_rejects_test_record_with_different_detector_config() -> None:
 
     rows, _protocol_record = _main_method_rows()
     protocol = calibrate_complete_evidence_protocol(
-        rows[:3],
+        _raw_measurements(rows[:3]),
         target_fpr=0.25,
-        rescue_margin_low=-0.05,
     )
     drifted_metadata = {
         **dict(rows[3]["metadata"]),
@@ -302,12 +364,12 @@ def test_apply_rejects_test_record_with_different_detector_config() -> None:
     }
     drifted = bind_formal_detection_record(
         {
-            **rows[3],
+            **project_image_only_measurement_record(rows[3]),
             "metadata": drifted_metadata,
         }
     )
 
-    with pytest.raises(ValueError, match="检测器配置身份"):
+    with pytest.raises(ValueError, match="配置或载体身份"):
         apply_frozen_evidence_protocol((drifted,), protocol)
 
 
@@ -332,17 +394,19 @@ def test_apply_frozen_protocol_rejects_protocol_integrity_drift(
 
     rows, _protocol_record = _main_method_rows()
     protocol = calibrate_complete_evidence_protocol(
-        rows[:3],
+        _raw_measurements(rows[:3]),
         target_fpr=0.25,
-        rescue_margin_low=-0.05,
     )
     drifted = replace(protocol, **{field_name: value})
 
     with pytest.raises(
         ValueError,
-        match="阈值摘要|假阳性率|数值或计数语义|检测器配置身份",
+        match="阈值摘要|假阳性率|连续参数|配置或载体身份|几何 rescue 冻结参数",
     ):
-        apply_frozen_evidence_protocol((rows[3],), drifted)
+        apply_frozen_evidence_protocol(
+            (project_image_only_measurement_record(rows[3]),),
+            drifted,
+        )
 
 
 def test_baseline_threshold_audit_binds_recomputed_threshold_and_digest() -> None:
@@ -350,7 +414,7 @@ def test_baseline_threshold_audit_binds_recomputed_threshold_and_digest() -> Non
     primitive_audit = audit_fixed_fpr_observation_threshold(
         rows,
         target_fpr=0.25,
-        expected_calibration_negative_count=3,
+        expected_calibration_source_negative_count=3,
     )
 
     result = audit_baseline_fixed_fpr(
@@ -358,7 +422,7 @@ def test_baseline_threshold_audit_binds_recomputed_threshold_and_digest() -> Non
         rows,
         observation_source_sha256=OBSERVATION_SOURCE_SHA256,
         target_fpr=0.25,
-        expected_calibration_negative_count=3,
+        expected_calibration_source_negative_count=3,
         expected_test_negative_count=2,
         declared_threshold=primitive_audit.frozen_threshold,
         declared_threshold_digest=primitive_audit.threshold_digest,
@@ -370,7 +434,7 @@ def test_baseline_threshold_audit_binds_recomputed_threshold_and_digest() -> Non
         rows,
         observation_source_sha256=OBSERVATION_SOURCE_SHA256,
         target_fpr=0.25,
-        expected_calibration_negative_count=3,
+        expected_calibration_source_negative_count=3,
         expected_test_negative_count=2,
         declared_threshold=primitive_audit.frozen_threshold,
         declared_threshold_digest="0" * 64,
@@ -393,6 +457,8 @@ def test_threshold_audit_report_requires_exact_five_method_identity_set() -> Non
             "target_fpr": 0.1,
             "threshold_digest": f"{index + 1:x}" * 64,
             "observation_source_sha256": f"{index + 6:x}" * 64,
+            "calibration_partition_digest": "b" * 64,
+            "threshold_freeze_prompt_id_digest": "c" * 64,
             "fixed_fpr_threshold_ready": True,
         }
         for index, method_id in enumerate(method_ids)
@@ -405,6 +471,7 @@ def test_threshold_audit_report_requires_exact_five_method_identity_set() -> Non
     )
     assert report["fixed_fpr_threshold_audit_ready"] is True
     assert report["threshold_observation_binding_ready"] is True
+    assert report["shared_calibration_partition_ready"] is True
     assert report["method_observation_source_sha256_map"] == {
         method_id: f"{index + 6:x}" * 64
         for index, method_id in enumerate(method_ids)
@@ -451,3 +518,13 @@ def test_threshold_audit_report_requires_exact_five_method_identity_set() -> Non
     assert malformed["all_method_thresholds_ready"] is True
     assert malformed["threshold_observation_binding_ready"] is False
     assert malformed["fixed_fpr_threshold_audit_ready"] is False
+
+    different_partition = tuple(dict(row) for row in rows)
+    different_partition[0]["threshold_freeze_prompt_id_digest"] = "d" * 64
+    partition_failed = build_fixed_fpr_threshold_audit_report(
+        different_partition,
+        paper_run_name="probe_paper",
+        target_fpr=0.1,
+    )
+    assert partition_failed["shared_calibration_partition_ready"] is False
+    assert partition_failed["supports_paper_claim"] is False

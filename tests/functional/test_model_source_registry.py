@@ -18,7 +18,7 @@ from experiments.protocol.method_runtime_config import (
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
-    _build_image_only_detection_config,
+    _build_image_only_measurement_config,
     semantic_watermark_runtime_config_payload,
 )
 from experiments.runtime.diffusion import sd3_pipeline_runtime, semantic_features
@@ -472,7 +472,7 @@ def test_runtime_detector_config_consumes_formal_alignment_gate() -> None:
     """运行层必须把唯一正式门禁显式传递给核心盲检器."""
 
     runtime = SemanticWatermarkRuntimeConfig()
-    detector = _build_image_only_detection_config(runtime)
+    detector = _build_image_only_measurement_config(runtime)
     payload = semantic_watermark_runtime_config_payload(runtime)
 
     assert detector.attention_anchor_count == runtime.attention_anchor_count == 12
@@ -496,7 +496,7 @@ def test_runtime_detector_config_consumes_formal_low_frequency_protocol() -> Non
     """嵌入运行与核心盲检器必须消费同一 LF 对象、权重和 tail 比例."""
 
     runtime = SemanticWatermarkRuntimeConfig()
-    detector = _build_image_only_detection_config(runtime)
+    detector = _build_image_only_measurement_config(runtime)
     payload = semantic_watermark_runtime_config_payload(runtime)
 
     assert isinstance(detector.low_frequency_config, LowFrequencyCarrierConfig)

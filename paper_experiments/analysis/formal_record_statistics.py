@@ -58,13 +58,15 @@ from experiments.protocol.formal_randomization import (
     resolve_formal_randomization_repeat,
     validate_formal_prompt_randomization_identity,
 )
-from experiments.runners.image_only_dataset_runtime import (
+from experiments.protocol.image_only_evidence import (
     FrozenEvidenceProtocol,
     apply_frozen_evidence_protocol,
     calibrate_complete_evidence_protocol,
     frozen_evidence_protocol_digest_payload,
-    formal_low_frequency_carrier_protocol_record,
     validate_frozen_evidence_protocol_integrity,
+)
+from experiments.runners.image_only_dataset_runtime import (
+    formal_low_frequency_carrier_protocol_record,
 )
 from experiments.runners.semantic_watermark_runtime import (
     validate_semantic_watermark_runtime_result_provenance,
@@ -79,6 +81,7 @@ from experiments.runtime.scientific_content_binding import (
 )
 from main.core.digest import build_stable_digest
 from main.methods.carrier import tail_robust_carrier_protocol_record
+from main.methods.detection import project_image_only_measurement_record
 from main.methods.geometry import (
     ATTENTION_ALIGNMENT_ANCHOR_COUNT,
     ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
@@ -121,15 +124,21 @@ FORMAL_FEATURE_DIMENSION = int(
 _SHA256_CHARACTERS = frozenset("0123456789abcdef")
 _FORMAL_DETECTION_DERIVED_FIELDS = (
     "frozen_content_threshold",
+    "frozen_rescue_margin_low",
     "frozen_geometry_score_threshold",
     "frozen_registration_confidence_threshold",
     "frozen_attention_sync_score_threshold",
     "frozen_threshold_digest",
-    "frozen_image_only_detector_config_digest",
+    "frozen_image_only_measurement_config_digest",
+    "frozen_attention_geometry_enabled",
+    "frozen_image_alignment_enabled",
+    "frozen_geometry_rescue_enabled",
     "formal_raw_content_margin",
     "formal_aligned_content_margin",
     "formal_positive_by_content",
+    "formal_geometry_reliable",
     "formal_content_failure_reason",
+    "formal_rescue_eligible",
     "formal_rescue_applied",
     "formal_evidence_positive",
     "formal_metric_status",
@@ -371,7 +380,11 @@ def validate_frozen_evidence_protocol_record(
         abs_tol=1e-12,
     ):
         raise FormalRecordStatisticsError("消融冻结检测协议的 target_fpr 漂移")
-    if _finite_float(protocol.rescue_margin_low, "rescue_margin_low") >= 0.0:
+    if (
+        protocol.geometry_rescue_enabled
+        and _finite_float(protocol.rescue_margin_low, "rescue_margin_low")
+        >= 0.0
+    ):
         raise FormalRecordStatisticsError(
             "消融冻结检测协议的 rescue_margin_low 必须小于0"
         )
@@ -451,112 +464,6 @@ def validate_frozen_evidence_protocol_record(
         raise FormalRecordStatisticsError(
             "消融冻结检测协议的尾部载体协议发生漂移"
         )
-    digest_payload = {
-        "content_threshold": _finite_float(
-            protocol.content_threshold,
-            "content_threshold",
-        ),
-        "rescue_margin_low": _finite_float(
-            protocol.rescue_margin_low,
-            "rescue_margin_low",
-        ),
-        "geometry_score_threshold": _finite_float(
-            protocol.geometry_score_threshold,
-            "geometry_score_threshold",
-        ),
-        "registration_confidence_threshold": _finite_float(
-            protocol.registration_confidence_threshold,
-            "registration_confidence_threshold",
-        ),
-        "attention_sync_score_threshold": _finite_float(
-            protocol.attention_sync_score_threshold,
-            "attention_sync_score_threshold",
-        ),
-        **alignment_gate,
-        "lf_carrier_protocol_digest": protocol.lf_carrier_protocol_digest,
-        "tail_carrier_protocol_digest": (
-            protocol.tail_carrier_protocol_digest
-        ),
-        "lf_weight": protocol.lf_weight,
-        "tail_robust_weight": protocol.tail_robust_weight,
-        "tail_fraction": protocol.tail_fraction,
-        "image_only_detector_config_digest": (
-            protocol.image_only_detector_config_digest
-        ),
-        "geometry_calibration_negative_count": _nonnegative_int(
-            protocol.geometry_calibration_negative_count,
-            "geometry_calibration_negative_count",
-        ),
-        "geometry_calibration_exceedance_count": _nonnegative_int(
-            protocol.geometry_calibration_exceedance_count,
-            "geometry_calibration_exceedance_count",
-        ),
-        "registration_calibration_negative_count": _nonnegative_int(
-            protocol.registration_calibration_negative_count,
-            "registration_calibration_negative_count",
-        ),
-        "registration_calibration_exceedance_count": _nonnegative_int(
-            protocol.registration_calibration_exceedance_count,
-            "registration_calibration_exceedance_count",
-        ),
-        "sync_calibration_negative_count": _nonnegative_int(
-            protocol.sync_calibration_negative_count,
-            "sync_calibration_negative_count",
-        ),
-        "sync_calibration_exceedance_count": _nonnegative_int(
-            protocol.sync_calibration_exceedance_count,
-            "sync_calibration_exceedance_count",
-        ),
-        "geometry_protocol_calibration_ready": (
-            protocol.geometry_protocol_calibration_ready
-        ),
-        "calibration_negative_count": calibration_negative_count,
-        "calibration_false_positive_count": calibration_false_positive_count,
-        "target_fpr": float(protocol.target_fpr),
-        "decision_scope": "content_or_same_threshold_aligned_content_rescue",
-    }
-    if protocol.geometry_protocol_calibration_ready is not True:
-        raise FormalRecordStatisticsError("消融冻结检测协议未完成几何校准")
-    if any(
-        digest_payload[field_name] != calibration_negative_count
-        for field_name in (
-            "geometry_calibration_negative_count",
-            "registration_calibration_negative_count",
-            "sync_calibration_negative_count",
-        )
-    ):
-        raise FormalRecordStatisticsError(
-            "消融冻结检测协议的几何校准覆盖未包含全部负样本"
-        )
-    for negative_field, exceedance_field in (
-        (
-            "geometry_calibration_negative_count",
-            "geometry_calibration_exceedance_count",
-        ),
-        (
-            "registration_calibration_negative_count",
-            "registration_calibration_exceedance_count",
-        ),
-        (
-            "sync_calibration_negative_count",
-            "sync_calibration_exceedance_count",
-        ),
-    ):
-        if digest_payload[exceedance_field] > digest_payload[negative_field]:
-            raise FormalRecordStatisticsError(
-                "消融冻结检测协议的几何超限计数超过负样本数量"
-            )
-    shared_digest_payload = frozen_evidence_protocol_digest_payload(protocol)
-    if digest_payload != shared_digest_payload:
-        raise FormalRecordStatisticsError(
-            "消融冻结检测协议摘要字段与共享定义不一致"
-        )
-    if (
-        not _is_sha256(protocol.threshold_digest)
-        or build_stable_digest(shared_digest_payload)
-        != protocol.threshold_digest
-    ):
-        raise FormalRecordStatisticsError("消融冻结检测协议摘要与正文不一致")
     return protocol
 
 
@@ -565,6 +472,7 @@ def _formal_attack_coverage_ready(
     *,
     split: str,
     expected_generation_seed_random: int | None = None,
+    expected_threshold_digest: str,
 ) -> bool:
     """独立核验 test split 的完整攻击笛卡尔积及其冻结配置身份."""
 
@@ -620,6 +528,13 @@ def _formal_attack_coverage_ready(
                 == expected_attack_seed
                 and record.get("formal_attack_seed_protocol_digest")
                 == attack_seed_protocol_digest
+                and (
+                    config.attack_name != "adversarial_removal_attack"
+                    or record.get(
+                        "detector_guided_attack_threshold_digest"
+                    )
+                    == expected_threshold_digest
+                )
             ):
                 return False
     return True
@@ -633,12 +548,15 @@ def _revalidated_detection_records(
 
     rebuilt_records: list[dict[str, Any]] = []
     for detection in detections:
-        source = {
+        source_with_identity = {
             key: value
             for key, value in detection.items()
             if key not in {"ablation_id", "ablation_prompt_id"}
         }
         try:
+            source = project_image_only_measurement_record(
+                source_with_identity
+            )
             rebuilt = apply_frozen_evidence_protocol((source,), protocol)[0]
         except (KeyError, TypeError, ValueError) as exc:
             raise FormalRecordStatisticsError(
@@ -702,8 +620,8 @@ def _validate_formal_detections_against_scientific_binding(
         or recompute_scientific_content_binding_digest(binding)
         != supplied_digest
         or binding.get("run_id") != runtime_result.get("run_id")
-        or binding.get("image_only_detector_config_digest")
-        != protocol.image_only_detector_config_digest
+        or binding.get("image_only_measurement_config_digest")
+        != protocol.image_only_measurement_config_digest
         or binding.get("detection_key_plan_digest_random")
         != expected_detection_key_plan_digest_random
         or not isinstance(identities, list)
@@ -908,7 +826,7 @@ def rebuild_and_validate_ablation_runtime_aggregates(
 
     for ablation_id, protocol in protocols.items():
         calibration_negatives = tuple(
-            detection
+            project_image_only_measurement_record(detection)
             for (record_ablation_id, prompt_id), detections in detections_by_key.items()
             if record_ablation_id == ablation_id
             and expected_prompt_map[prompt_id] == "calibration"
@@ -920,7 +838,6 @@ def rebuild_and_validate_ablation_runtime_aggregates(
             rebuilt_protocol = calibrate_complete_evidence_protocol(
                 calibration_negatives,
                 target_fpr=expected_target_fpr,
-                rescue_margin_low=protocol.rescue_margin_low,
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise FormalRecordStatisticsError(
@@ -1029,8 +946,17 @@ def rebuild_and_validate_ablation_runtime_aggregates(
             "width": _FORMAL_METHOD_CONFIG.width,
             "height": _FORMAL_METHOD_CONFIG.height,
         }
+        scientific_attack_protocol = scientific_config.get(
+            "detector_guided_attack_threshold_protocol"
+        )
+        attack_protocol_ready = (
+            scientific_attack_protocol == protocol.to_dict()
+            if split == "test"
+            else scientific_attack_protocol is None
+        )
         if (
             str(runtime_config.get("ablation_id", "")) != ablation_id
+            or not attack_protocol_ready
             or scientific_config.get("prompt_id") != prompt_id
             or scientific_config.get("split") != split
             or str(scientific_config.get("output_dir", "")).replace("\\", "/")
@@ -1132,6 +1058,7 @@ def rebuild_and_validate_ablation_runtime_aggregates(
             expected_generation_seed_random=int(
                 expected_randomization_reference["generation_seed_random"]
             ),
+            expected_threshold_digest=protocol.threshold_digest,
         )
         rebuilt = {
             "generation_rerun": True,
@@ -1187,8 +1114,8 @@ def rebuild_and_validate_ablation_runtime_aggregates(
                 "ablation_id": ablation_id,
                 "prompt_id": prompt_id,
                 "split": split,
-                "image_only_detector_config_digest": (
-                    protocol.image_only_detector_config_digest
+                "image_only_measurement_config_digest": (
+                    protocol.image_only_measurement_config_digest
                 ),
                 **rebuilt,
             }
@@ -1212,10 +1139,10 @@ def rebuild_and_validate_ablation_runtime_aggregates(
         "ablation_expected_runtime_configs_digest": build_stable_digest(
             expected_runtime_configs
         ),
-        "ablation_image_only_detector_config_digests": {
+        "ablation_image_only_measurement_config_digests": {
             ablation_id: protocols[
                 ablation_id
-            ].image_only_detector_config_digest
+            ].image_only_measurement_config_digest
             for ablation_id in declared_ablation_ids
         },
         "ablation_runtime_aggregate_rebuild_ready": True,

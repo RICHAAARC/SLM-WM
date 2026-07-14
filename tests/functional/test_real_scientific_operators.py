@@ -31,10 +31,11 @@ from main.methods.carrier import (
     tail_robust_carrier_protocol_record,
 )
 from main.methods.detection import (
-    ImageOnlyDetectionConfig,
-    detect_image_only_watermark,
-    recompute_image_only_detection_digest_payload,
-    validate_image_only_detection_digest_record,
+    ImageOnlyMeasurementConfig,
+    measure_image_only_watermark,
+    recompute_image_only_measurement_digest_payload,
+    validate_image_only_measurement_digest_record,
+    validate_image_only_measurement_projection_record,
 )
 from main.methods.geometry import (
     ATTENTION_ALIGNMENT_ANCHOR_COUNT,
@@ -88,13 +89,17 @@ from main.methods.update_composition import (
     compose_ordered_float32_update_once,
     recompute_quantized_composition_evidence_digest,
 )
-from experiments.runners.image_only_dataset_runtime import (
+from experiments.protocol.image_only_evidence import (
     FrozenEvidenceProtocol,
-    _decision,
-    _scientific_update_record_ready,
     apply_frozen_evidence_protocol,
     calibrate_complete_evidence_protocol,
+    complete_evidence_decision,
+    decision_equivalent_score,
     frozen_evidence_protocol_digest_payload,
+    partition_calibration_clean_negatives,
+)
+from experiments.runners.image_only_dataset_runtime import (
+    _scientific_update_record_ready,
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
@@ -214,16 +219,34 @@ def _fixture_keyed_tensor_carrier_identity(
     }
 
 
-def _image_only_detection_config(
+def _image_only_measurement_config(
     **overrides: object,
-) -> ImageOnlyDetectionConfig:
+) -> ImageOnlyMeasurementConfig:
     """构造显式绑定全部内容协议字段的轻量盲检配置."""
 
     values: dict[str, object] = {
         "model_id": "model",
+        "model_revision": "1" * 40,
+        "vae_class_name": "AutoencoderKL",
+        "transformer_class_name": "SD3Transformer2DModel",
+        "scheduler_class_name": "FlowMatchEulerDiscreteScheduler",
+        "vae_scaling_factor": 1.5305,
+        "vae_shift_factor": 0.0609,
+        "latent_torch_dtype": "float16",
+        "width": 512,
+        "height": 512,
+        "inference_steps": 28,
+        "public_detection_schedule_index": 14,
+        "public_detection_noise_prg_protocol": KEYED_PRG_VERSION,
+        "public_detection_noise_domain": "slm_wm_public_detection_noise_v1",
+        "public_detection_conditioning_protocol": "sd3_three_encoder_empty_text_v1",
+        "public_detection_condition_text": "",
+        "max_attention_tokens": 1024,
+        "attention_coordinate_convention": (
+            "normalized_xy_token_centers_corner_endpoints_v1"
+        ),
+        "attention_grid_align_corners": True,
         "attention_module_names": FROZEN_SD35_ATTENTION_MODULE_NAMES,
-        "content_threshold": 0.20,
-        "geometry_score_threshold": 0.0,
         "attention_anchor_count": ATTENTION_ALIGNMENT_ANCHOR_COUNT,
         "attention_residual_threshold": ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
         "attention_minimum_inlier_ratio": (
@@ -234,9 +257,6 @@ def _image_only_detection_config(
         "tail_robust_weight": _FORMAL_TAIL_ROBUST_WEIGHT,
         "tail_fraction": _FORMAL_TAIL_FRACTION,
         "keyed_prg_version": KEYED_PRG_VERSION,
-        "registration_confidence_threshold": 0.0,
-        "attention_sync_score_threshold": 0.0,
-        "rescue_margin_low": -0.05,
         "attention_stable_token_fraction": 0.50,
         "attention_unstable_pair_weight": 0.25,
         "attention_relation_component_weights": (
@@ -247,7 +267,7 @@ def _image_only_detection_config(
         ),
     }
     values.update(overrides)
-    return ImageOnlyDetectionConfig(**values)
+    return ImageOnlyMeasurementConfig(**values)
 
 
 def _formal_detection_alignment_identity(
@@ -279,16 +299,18 @@ def _formal_detection_alignment_identity(
 
 
 @pytest.mark.quick
-def test_image_only_detection_config_has_no_method_parameter_defaults() -> None:
-    """盲检全部科学参数必须由正式运行配置显式提供."""
+def test_image_only_measurement_config_has_no_method_parameter_defaults() -> None:
+    """盲检测量的全部科学参数必须由正式运行配置显式提供."""
 
-    config_fields = ImageOnlyDetectionConfig.__dataclass_fields__
+    config_fields = ImageOnlyMeasurementConfig.__dataclass_fields__
     for field_name in config_fields:
         field = config_fields[field_name]
         assert field.default is MISSING
         assert field.default_factory is MISSING
 
-    decision_parameters = inspect.signature(_decision).parameters
+    decision_parameters = inspect.signature(
+        complete_evidence_decision
+    ).parameters
     for field_name in (
         "geometry_score_threshold",
         "registration_confidence_threshold",
@@ -2719,10 +2741,16 @@ def test_attention_registration_is_equivariant_to_query_and_key_permutation(
 
 
 @pytest.mark.quick
+@pytest.mark.parametrize(
+    "force_unreliable_alignment",
+    (False, True),
+    ids=("reliable_alignment", "unreliable_alignment"),
+)
 def test_image_only_detector_reextracts_qk_after_alignment(
     monkeypatch: pytest.MonkeyPatch,
+    force_unreliable_alignment: bool,
 ) -> None:
-    """几何可靠性必须包含图像对齐后重新提取的真实 Q/K sync。"""
+    """对齐后必须重新测量 Q/K 和内容, 再独立判断可靠性。"""
 
     token_count = 64
     key_material = "detector_sync_key"
@@ -2832,6 +2860,45 @@ def test_image_only_detector_reextracts_qk_after_alignment(
         "select_stable_attention_tokens",
         select_stable_tokens_once,
     )
+    if force_unreliable_alignment:
+        original_recover_alignment = (
+            detector_module.recover_attention_affine_alignment
+        )
+
+        def recover_unreliable_alignment(
+            *args: object,
+            **kwargs: object,
+        ) -> object:
+            """保留真实选中变换, 但构造相对 identity 无增益反例。"""
+
+            recovered = original_recover_alignment(*args, **kwargs)
+            unresolved = replace(
+                recovered,
+                identity_registration_objective_score=(
+                    recovered.registration_objective_score
+                ),
+                registration_objective_margin=0.0,
+                geometry_reliable=False,
+                alignment_digest="",
+            )
+            unresolved_record = {
+                **unresolved.__dict__,
+                "registration_geometry_reliable": False,
+            }
+            return replace(
+                unresolved,
+                alignment_digest=build_stable_digest(
+                    recompute_attention_alignment_digest_payload(
+                        unresolved_record
+                    )
+                ),
+            )
+
+        monkeypatch.setattr(
+            detector_module,
+            "recover_attention_affine_alignment",
+            recover_unreliable_alignment,
+        )
 
     def extract(sample: dict[str, object]) -> tuple[tuple[str, object, tuple[int, ...]], ...]:
         nonlocal extraction_count
@@ -2850,19 +2917,14 @@ def test_image_only_detector_reextracts_qk_after_alignment(
             ),
         )
 
-    result = detect_image_only_watermark(
+    result = measure_image_only_watermark(
         image=original,
         key_material=key_material,
-        config=_image_only_detection_config(
+        config=_image_only_measurement_config(
             model_id=model_id,
-            content_threshold=0.2,
-            geometry_score_threshold=0.5,
             attention_anchor_count=12,
             attention_residual_threshold=0.20,
             attention_minimum_inlier_ratio=0.50,
-            registration_confidence_threshold=0.5,
-            attention_sync_score_threshold=0.5,
-            rescue_margin_low=-0.5,
             attention_relation_component_weights=(
                 1.0 / 3.0,
                 0.0,
@@ -2889,8 +2951,7 @@ def test_image_only_detector_reextracts_qk_after_alignment(
     assert result.attention_geometry_score > 0.65
     assert result.attention_sync_score is not None and result.attention_sync_score > 0.65
     assert result.metadata["attention_relation_direct_qk_source_ready"] is True
-    assert result.geometry_reliable is True
-    assert result.rescue_applied is True
+    assert result.aligned_content_score is not None
     assert result.metadata["stable_pair_weight_identity_ready"] is True
     assert len(result.metadata["stable_pair_weight_identity_digest"]) == 64
     assert result.metadata["detection_qk_atomic_content_ready"] is True
@@ -2900,6 +2961,9 @@ def test_image_only_detector_reextracts_qk_after_alignment(
     ) == ("raw_detection_image", "aligned_detection_image")
     assert len(result.metadata["detection_qk_atomic_content_digest"]) == 64
     assert result.alignment is not None
+    assert result.alignment.geometry_reliable is (
+        not force_unreliable_alignment
+    )
     assert result.alignment.attention_relation_component_weights == (
         1.0 / 3.0,
         0.0,
@@ -3031,7 +3095,7 @@ def test_image_attention_extractor_batches_flowmatch_timestep(monkeypatch: pytes
     ][0]["public_detection_noise_content_sha256"] == (
         detection_record["public_detection_noise_content_sha256"]
     )
-    validate_image_only_detection_digest_record(detection_record)
+    validate_image_only_measurement_digest_record(detection_record)
     assert scheduler.received_timestep is not None
     assert scheduler.received_timestep.shape == (2,)
     assert scheduler.received_timestep[0].item() == pytest.approx(7.0)
@@ -3107,7 +3171,7 @@ def test_post_step_injection_requires_adjacent_scheduler_steps() -> None:
 def test_image_only_detector_interface_and_positive_content_path() -> None:
     """正式检测接口不得接收生成轨迹, 且能从图像编码 latent 完成内容主判。"""
 
-    parameters = set(inspect.signature(detect_image_only_watermark).parameters)
+    parameters = set(inspect.signature(measure_image_only_watermark).parameters)
     assert "generation_latent_trace" not in parameters
     assert "source_latent" not in parameters
     assert "prompt" not in parameters
@@ -3128,13 +3192,11 @@ def test_image_only_detector_interface_and_positive_content_path() -> None:
         prg_version=KEYED_PRG_VERSION,
     )[0]
     encoded = 0.8 * lf_template + 0.4 * tail_template
-    result = detect_image_only_watermark(
+    result = measure_image_only_watermark(
         image=encoded,
         key_material="blind_key",
-        config=_image_only_detection_config(
+        config=_image_only_measurement_config(
             model_id="model",
-            content_threshold=0.20,
-            geometry_score_threshold=0.0,
             attention_anchor_count=12,
             attention_residual_threshold=0.20,
             attention_minimum_inlier_ratio=0.50,
@@ -3142,10 +3204,7 @@ def test_image_only_detector_interface_and_positive_content_path() -> None:
         image_latent_encoder=lambda image: image,
     )
 
-    assert result.positive_by_content is True
-    assert result.evidence_positive is True
-    assert result.content_failure_reason == "content_positive"
-    assert result.rescue_applied is False
+    assert result.content.content_score > 0.20
     assert result.metadata["blind_image_detector"] is True
     assert result.metadata["generation_latent_trace_required"] is False
     assert result.metadata["attention_alignment_gate"] == (
@@ -3188,10 +3247,10 @@ def test_disabled_detector_carrier_is_not_built_or_scored(
         )
         lf_weight, tail_weight = 1.0, 0.0
 
-    result = detect_image_only_watermark(
+    result = measure_image_only_watermark(
         image=torch.zeros(1, 2, 8, 8),
         key_material="disabled_detector_carrier_key",
-        config=_image_only_detection_config(
+        config=_image_only_measurement_config(
             lf_weight=lf_weight,
             tail_robust_weight=tail_weight,
         ),
@@ -3208,7 +3267,7 @@ def test_disabled_detector_carrier_is_not_built_or_scored(
         assert record["tail_template_shape"] == []
         assert record["tail_template_element_count"] == 0
         assert record["tail_selected_element_count"] == 0
-    validate_image_only_detection_digest_record(record)
+    validate_image_only_measurement_digest_record(record)
 
 
 @pytest.mark.quick
@@ -3254,10 +3313,10 @@ def test_alignment_ablation_keeps_raw_qk_and_skips_affine_recovery(
             for layer_name, relation in zip(layer_names, relations)
         )
 
-    result = detect_image_only_watermark(
+    result = measure_image_only_watermark(
         image=torch.zeros(1, 2, 8, 8),
         key_material="alignment_ablation_key",
-        config=_image_only_detection_config(),
+        config=_image_only_measurement_config(),
         image_latent_encoder=lambda value: value,
         image_attention_extractor=extract,
         image_aligner=None,
@@ -3273,23 +3332,21 @@ def test_alignment_ablation_keeps_raw_qk_and_skips_affine_recovery(
     assert result.alignment is None
     assert result.metadata["image_alignment_enabled"] is False
     assert qk_roles == ("raw_detection_image",)
-    validate_image_only_detection_digest_record(result.to_record())
+    validate_image_only_measurement_digest_record(result.to_record())
 
 
 @pytest.mark.quick
-def test_detector_digest_binds_every_alignment_gate_parameter() -> None:
-    """内容主判路径的检测摘要也必须逐字段绑定注意力结构门禁."""
+def test_measurement_digest_binds_every_alignment_gate_parameter() -> None:
+    """原始测量摘要必须逐字段绑定注意力结构门禁."""
 
     image = torch.zeros(1, 2, 8, 8)
-    baseline_config = _image_only_detection_config(
+    baseline_config = _image_only_measurement_config(
         model_id="detector_gate_digest_model",
-        content_threshold=0.20,
-        geometry_score_threshold=0.0,
         attention_anchor_count=12,
         attention_residual_threshold=0.20,
         attention_minimum_inlier_ratio=0.50,
     )
-    baseline = detect_image_only_watermark(
+    baseline = measure_image_only_watermark(
         image=image,
         key_material="detector_gate_digest_key",
         config=baseline_config,
@@ -3304,16 +3361,16 @@ def test_detector_digest_binds_every_alignment_gate_parameter() -> None:
             baseline_config,
             **{field_name: value},
         )
-        changed = detect_image_only_watermark(
+        changed = measure_image_only_watermark(
             image=image,
             key_material="detector_gate_digest_key",
             config=changed_config,
             image_latent_encoder=lambda candidate: candidate,
         )
-        assert changed.detector_digest != baseline.detector_digest
+        assert changed.measurement_digest != baseline.measurement_digest
         assert (
-            changed.image_only_detector_config_digest
-            != baseline.image_only_detector_config_digest
+            changed.image_only_measurement_config_digest
+            != baseline.image_only_measurement_config_digest
         )
 
 
@@ -3340,29 +3397,20 @@ def test_detector_rejects_alignment_selected_from_unfrozen_layer() -> None:
     record["alignment"]["alignment_digest"] = build_stable_digest(
         recompute_attention_alignment_digest_payload(record["alignment"])
     )
-    record["detector_digest"] = build_stable_digest(
-        recompute_image_only_detection_digest_payload(record)
+    record["measurement_digest"] = build_stable_digest(
+        recompute_image_only_measurement_digest_payload(record)
     )
 
     with pytest.raises(ValueError, match="所选层不属于冻结"):
-        validate_image_only_detection_digest_record(record)
+        validate_image_only_measurement_digest_record(record)
 
 
 @pytest.mark.quick
-def test_identity_alignment_cannot_propagate_into_detector_rescue() -> None:
+def test_identity_alignment_cannot_propagate_into_calibrated_rescue() -> None:
     """identity 配准即使内容 margin 位于救回窗口也不得开放 rescue。"""
 
     metadata, alignment = _formal_detection_alignment_identity(
         registration_geometry_reliable=False,
-    )
-    metadata.update(
-        {
-            "content_threshold": 0.20,
-            "geometry_score_threshold": 0.50,
-            "registration_confidence_threshold": 0.50,
-            "attention_sync_score_threshold": 0.50,
-            "rescue_margin_low": -0.05,
-        }
     )
     record = bind_formal_detection_record(
         {
@@ -3377,7 +3425,6 @@ def test_identity_alignment_cannot_propagate_into_detector_rescue() -> None:
         }
     )
 
-    assert record["raw_content_margin"] == pytest.approx(-0.02)
     assert record["alignment"]["affine_transform"] == [
         [1.0, 0.0, 0.0],
         [0.0, 1.0, 0.0],
@@ -3387,11 +3434,19 @@ def test_identity_alignment_cannot_propagate_into_detector_rescue() -> None:
     )
     assert record["alignment"]["registration_objective_margin"] == 0.0
     assert record["alignment"]["geometry_reliable"] is False
-    assert record["geometry_reliable"] is False
-    assert record["rescue_eligible"] is False
-    assert record["rescue_applied"] is False
-    assert record["evidence_positive"] is False
-    validate_image_only_detection_digest_record(record)
+    validate_image_only_measurement_digest_record(record)
+    decision = complete_evidence_decision(
+        record,
+        content_threshold=0.20,
+        geometry_rescue_enabled=True,
+        rescue_margin_low=-0.05,
+        geometry_score_threshold=0.50,
+        registration_confidence_threshold=0.50,
+        attention_sync_score_threshold=0.50,
+    )
+    assert decision.calibrated_geometry_reliable is False
+    assert decision.rescue_applied is False
+    assert decision.evidence_positive is False
 
     forged = deepcopy(record)
     forged["alignment"]["geometry_reliable"] = True
@@ -3399,36 +3454,27 @@ def test_identity_alignment_cannot_propagate_into_detector_rescue() -> None:
     forged["alignment"]["alignment_digest"] = build_stable_digest(
         recompute_attention_alignment_digest_payload(forged["alignment"])
     )
-    forged.update(
-        {
-            "geometry_reliable": True,
-            "content_failure_reason": "geometry_suspected",
-            "rescue_eligible": True,
-            "rescue_applied": True,
-            "evidence_positive": True,
-        }
-    )
-    forged["detector_digest"] = build_stable_digest(
-        recompute_image_only_detection_digest_payload(forged)
+    forged["measurement_digest"] = build_stable_digest(
+        recompute_image_only_measurement_digest_payload(forged)
     )
     with pytest.raises(ValueError, match="注册可靠性与核心门禁不一致"):
-        validate_image_only_detection_digest_record(forged)
+        validate_image_only_measurement_digest_record(forged)
 
 
 @pytest.mark.quick
-def test_detector_digest_separates_zero_score_template_content_collisions() -> None:
+def test_measurement_digest_separates_zero_score_template_content_collisions() -> None:
     """相同零分数摘要不得掩盖不同 shape 对应的 LF 模板身份."""
 
-    config = _image_only_detection_config(
+    config = _image_only_measurement_config(
         model_id="detector_zero_score_collision_model"
     )
-    first = detect_image_only_watermark(
+    first = measure_image_only_watermark(
         image=torch.zeros(1, 1, 8, 8),
         key_material="detector_zero_score_collision_key",
         config=config,
         image_latent_encoder=lambda value: value,
     )
-    second = detect_image_only_watermark(
+    second = measure_image_only_watermark(
         image=torch.zeros(1, 2, 8, 8),
         key_material="detector_zero_score_collision_key",
         config=config,
@@ -3438,353 +3484,325 @@ def test_detector_digest_separates_zero_score_template_content_collisions() -> N
     assert first.content.content_score == second.content.content_score == 0.0
     assert first.content.score_digest == second.content.score_digest
     assert first.lf_template_content_sha256 != second.lf_template_content_sha256
-    assert first.detector_digest != second.detector_digest
+    assert first.measurement_digest != second.measurement_digest
+
+
+def _calibration_measurement(index: int) -> dict[str, object]:
+    """构造具有唯一 Prompt 身份的阈值无关 calibration negative。"""
+
+    metadata, alignment = _formal_detection_alignment_identity(
+        registration_geometry_reliable=index % 2 == 0,
+    )
+    record = bind_formal_detection_record(
+        {
+            **_formal_content_carrier_identity_fields(),
+            "content_score": index / 100.0,
+            "aligned_content_score": (index + 5) / 100.0,
+            "geometry_reliable": index % 2 == 0,
+            "attention_geometry_score": 0.5 + index / 1000.0,
+            "registration_confidence": 0.6 + index / 1000.0,
+            "attention_sync_score": 0.7 + index / 1000.0,
+            "metadata": metadata,
+            "alignment": alignment,
+        }
+    )
+    record.update(
+        {
+            "prompt_id": f"calibration_prompt_{index:04d}",
+            "split": "calibration",
+            "sample_role": "clean_negative",
+            "detection_key_role": "registered_watermark_key",
+        }
+    )
+    return record
 
 
 @pytest.mark.quick
-def test_complete_evidence_calibration_includes_geometry_rescue() -> None:
-    """阈值搜索必须直接约束加入同阈值 rescue 后的完整误报率。"""
+def test_nested_calibration_partition_is_order_invariant() -> None:
+    """33条 probe negatives 必须稳定拆为互斥的11条与22条。"""
 
-    calibration_records = []
-    for index in range(33):
-        metadata, alignment = _formal_detection_alignment_identity(
-            registration_geometry_reliable=index % 2 == 0,
-        )
-        calibration_records.append(
-            bind_formal_detection_record({
-                **_formal_content_carrier_identity_fields(),
-                "content_score": index / 100.0,
-                "aligned_content_score": (index + 5) / 100.0,
-                "geometry_reliable": index % 2 == 0,
-                "attention_geometry_score": 0.5 + index / 1000.0,
-                "registration_confidence": 0.6 + index / 1000.0,
-                "attention_sync_score": 0.7 + index / 1000.0,
-                "metadata": metadata,
-                "alignment": alignment,
-            })
-        )
-    protocol = calibrate_complete_evidence_protocol(
-        calibration_records,
-        target_fpr=0.1,
-        rescue_margin_low=-0.05,
+    records = tuple(_calibration_measurement(index) for index in range(33))
+    window_fit, threshold_freeze, digest = (
+        partition_calibration_clean_negatives(records)
     )
-    formal_records = apply_frozen_evidence_protocol(calibration_records, protocol)
+    reversed_fit, reversed_freeze, reversed_digest = (
+        partition_calibration_clean_negatives(reversed(records))
+    )
 
-    assert sum(record["formal_evidence_positive"] for record in formal_records) <= 2
-    assert protocol.calibration_false_positive_count <= 2
-    assert protocol.calibration_false_positive_rate <= 0.1
-    assert protocol.geometry_protocol_calibration_ready is True
-    assert protocol.geometry_calibration_negative_count == 33
-    assert protocol.registration_calibration_negative_count == 33
-    assert protocol.sync_calibration_negative_count == 33
+    assert len(window_fit) == len(reversed_fit) == 11
+    assert len(threshold_freeze) == len(reversed_freeze) == 22
+    assert tuple(row["prompt_id"] for row in window_fit) == tuple(
+        row["prompt_id"] for row in reversed_fit
+    )
+    assert tuple(row["prompt_id"] for row in threshold_freeze) == tuple(
+        row["prompt_id"] for row in reversed_freeze
+    )
+    assert digest == reversed_digest
+    assert not {
+        row["prompt_id"] for row in window_fit
+    }.intersection(row["prompt_id"] for row in threshold_freeze)
+
+
+@pytest.mark.quick
+def test_complete_evidence_calibration_derives_rescue_window() -> None:
+    """几何门、rescue 窗口和最终阈值必须由两个独立子集依次冻结。"""
+
+    records = tuple(_calibration_measurement(index) for index in range(33))
+    protocol = calibrate_complete_evidence_protocol(records, target_fpr=0.1)
+    reversed_protocol = calibrate_complete_evidence_protocol(
+        reversed(records), target_fpr=0.1
+    )
+    formal_records = apply_frozen_evidence_protocol(records, protocol)
+
+    assert protocol == reversed_protocol
+    assert protocol.calibration_source_negative_count == 33
+    assert protocol.rescue_window_fit_negative_count == 11
+    assert protocol.threshold_freeze_negative_count == 22
+    assert protocol.window_fit_allowed_false_positive_count == 0
+    assert protocol.threshold_freeze_allowed_false_positive_count == 1
+    assert protocol.rescue_margin_low < 0.0
+    assert protocol.rescue_window_candidate_count > 0
+    assert protocol.rescue_window_fit_false_positive_count == 0
+    assert protocol.calibration_false_positive_count <= 1
+    assert sum(
+        record["formal_evidence_positive"]
+        for record in formal_records
+        if record["prompt_id"]
+        in {
+            row["prompt_id"]
+            for row in partition_calibration_clean_negatives(records)[1]
+        }
+    ) == protocol.calibration_false_positive_count
+    assert all(
+        "positive_by_content" not in record
+        and "evidence_positive" not in record
+        and "rescue_applied" not in record
+        for record in records
+    )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    (
+        ("split", "test"),
+        ("sample_role", "positive_source"),
+        ("detection_key_role", "registered_wrong_key"),
+        ("attack_id", "jpeg_q50"),
+    ),
+)
+def test_complete_evidence_calibration_rejects_nonnegative_role(
+    field_name: str,
+    invalid_value: object,
+) -> None:
+    """test、positive、wrong-key 或攻击记录不得参与任何参数选择。"""
+
+    records = [_calibration_measurement(index) for index in range(33)]
+    records[0][field_name] = invalid_value
+    with pytest.raises(ValueError, match="只接受 calibration"):
+        calibrate_complete_evidence_protocol(records, target_fpr=0.1)
+
+
+@pytest.mark.quick
+def test_decision_equivalent_score_matches_complete_boolean_boundaries() -> None:
+    """等价分数必须覆盖窗口下界、raw 阈值和 aligned 阈值的闭区间语义。"""
+
+    base_record = {
+        "attention_geometry_score": 0.9,
+        "registration_confidence": 0.9,
+        "attention_sync_score": 0.9,
+        "alignment": {"geometry_reliable": True},
+        "metadata": {"stable_pair_weight_identity_ready": True},
+    }
+    delta = -0.1
+    for raw_score in (
+        math.nextafter(0.4, -math.inf),
+        0.4,
+        math.nextafter(0.4, math.inf),
+        math.nextafter(0.5, -math.inf),
+        0.5,
+    ):
+        for aligned_score in (
+            math.nextafter(0.5, -math.inf),
+            0.5,
+            math.nextafter(0.5, math.inf),
+        ):
+            record = {
+                **base_record,
+                "content_score": raw_score,
+                "aligned_content_score": aligned_score,
+            }
+            decision = complete_evidence_decision(
+                record,
+                content_threshold=0.5,
+                geometry_rescue_enabled=True,
+                rescue_margin_low=delta,
+                geometry_score_threshold=0.5,
+                registration_confidence_threshold=0.5,
+                attention_sync_score_threshold=0.5,
+            )
+            effective_score = decision_equivalent_score(
+                record,
+                geometry_rescue_enabled=True,
+                rescue_margin_low=delta,
+                geometry_score_threshold=0.5,
+                registration_confidence_threshold=0.5,
+                attention_sync_score_threshold=0.5,
+            )
+            assert decision.evidence_positive is (effective_score >= 0.5)
 
 
 @pytest.mark.quick
 def test_frozen_rescue_rejects_unbound_stable_pair_identity() -> None:
-    """冻结 rescue 不得绕过检测器的稳定 pair 权重身份门禁."""
+    """冻结 rescue 不得绕过检测器的稳定 pair 权重身份门禁。"""
 
-    decision = _decision(
+    decision = complete_evidence_decision(
         {
             "content_score": 0.10,
             "aligned_content_score": 0.20,
             "attention_geometry_score": 0.90,
             "registration_confidence": 0.90,
             "attention_sync_score": 0.90,
-            "alignment": {
-                "registration_geometry_reliable": True,
-                "geometry_reliable": True,
-            },
-            "metadata": {
-                "stable_pair_weight_identity_ready": False,
-            },
+            "alignment": {"geometry_reliable": True},
+            "metadata": {"stable_pair_weight_identity_ready": False},
         },
-        threshold=0.15,
+        content_threshold=0.15,
+        geometry_rescue_enabled=True,
         rescue_margin_low=-0.10,
         geometry_score_threshold=0.50,
         registration_confidence_threshold=0.50,
         attention_sync_score_threshold=0.50,
     )
 
-    assert decision == (False, False, False, "low_confidence")
+    assert decision.positive_by_content is False
+    assert decision.rescue_applied is False
+    assert decision.evidence_positive is False
+    assert decision.content_failure_reason == "low_confidence"
 
 
 @pytest.mark.quick
-def test_frozen_evidence_protocol_rejects_alignment_gate_drift() -> None:
-    """校准和应用环节都不得接受非预注册注意力结构门禁."""
+def test_frozen_protocol_application_rejects_protocol_drift() -> None:
+    """最终应用必须先复验 calibration 派生正文与阈值摘要。"""
 
-    metadata, alignment = _formal_detection_alignment_identity(
-        registration_geometry_reliable=True,
-    )
-    baseline_record = bind_formal_detection_record({
-        **_formal_content_carrier_identity_fields(),
-        "content_score": 0.1,
-        "aligned_content_score": 0.2,
-        "attention_geometry_score": 0.3,
-        "registration_confidence": 0.4,
-        "attention_sync_score": 0.5,
-        "metadata": metadata,
-        "alignment": alignment,
-    })
-    protocol = calibrate_complete_evidence_protocol(
-        (baseline_record,),
-        target_fpr=0.1,
-        rescue_margin_low=-0.05,
-    )
-    changed_record = deepcopy(baseline_record)
-    changed_value = 0.21
-    changed_record["metadata"][
-        "attention_residual_threshold"
-    ] = changed_value
-    changed_record["metadata"]["attention_alignment_gate"][
-        "attention_residual_threshold"
-    ] = changed_value
-    changed_record["alignment"][
-        "attention_residual_threshold"
-    ] = changed_value
-    changed_record["alignment"]["metadata"]["attention_alignment_gate"][
-        "attention_residual_threshold"
-    ] = changed_value
-
-    with pytest.raises(ValueError, match="预注册注意力结构门禁"):
-        calibrate_complete_evidence_protocol(
-            (changed_record,),
-            target_fpr=0.1,
-            rescue_margin_low=-0.05,
-        )
-    with pytest.raises(ValueError, match="预注册注意力结构门禁"):
-        apply_frozen_evidence_protocol((changed_record,), protocol)
-
-
-@pytest.mark.quick
-def test_frozen_evidence_protocol_rejects_low_frequency_protocol_drift() -> None:
-    """校准和应用均不得接受 LF 协议摘要或权重分叉."""
-
-    metadata, alignment = _formal_detection_alignment_identity(
-        registration_geometry_reliable=True,
-    )
-    baseline_record = bind_formal_detection_record({
-        **_formal_content_carrier_identity_fields(),
-        "content_score": 0.1,
-        "aligned_content_score": 0.2,
-        "attention_geometry_score": 0.3,
-        "registration_confidence": 0.4,
-        "attention_sync_score": 0.5,
-        "metadata": metadata,
-        "alignment": alignment,
-    })
-    protocol = calibrate_complete_evidence_protocol(
-        (baseline_record,),
-        target_fpr=0.1,
-        rescue_margin_low=-0.05,
-    )
-    for mutation in ("digest", "weight"):
-        changed_record = deepcopy(baseline_record)
-        if mutation == "digest":
-            changed_record["lf_carrier_protocol_digest"] = "0" * 64
-        else:
-            changed_record["lf_weight"] = 0.69
-            changed_record["tail_robust_weight"] = 0.31
-        changed_record["detector_digest"] = build_stable_digest(
-            recompute_image_only_detection_digest_payload(changed_record)
-        )
-
-        with pytest.raises(ValueError):
-            calibrate_complete_evidence_protocol(
-                (changed_record,),
-                target_fpr=0.1,
-                rescue_margin_low=-0.05,
-            )
-        with pytest.raises(ValueError):
-            apply_frozen_evidence_protocol((changed_record,), protocol)
-
-
-@pytest.mark.quick
-def test_threshold_digest_binds_every_alignment_gate_parameter() -> None:
-    """冻结阈值摘要必须逐字段绑定结构门禁而非只绑定分数阈值."""
-
-    metadata, alignment = _formal_detection_alignment_identity(
-        registration_geometry_reliable=True,
-    )
-    protocol = calibrate_complete_evidence_protocol(
-        (
-            bind_formal_detection_record({
-                **_formal_content_carrier_identity_fields(),
-                "content_score": 0.1,
-                "aligned_content_score": 0.2,
-                "attention_geometry_score": 0.3,
-                "registration_confidence": 0.4,
-                "attention_sync_score": 0.5,
-                "metadata": metadata,
-                "alignment": alignment,
-            }),
-        ),
-        target_fpr=0.1,
-        rescue_margin_low=-0.05,
-    )
-    digest_payload = {
-        field_name: value
-        for field_name, value in protocol.to_dict().items()
-        if field_name not in {
-            "calibration_false_positive_rate",
-            "threshold_digest",
-        }
-    }
-    digest_payload["decision_scope"] = (
-        "content_or_same_threshold_aligned_content_rescue"
-    )
-    assert build_stable_digest(digest_payload) == protocol.threshold_digest
-    for field_name, value in (
-        ("attention_anchor_count", 13),
-        ("attention_residual_threshold", 0.21),
-        ("attention_minimum_inlier_ratio", 0.51),
-        ("lf_carrier_protocol_digest", "0" * 64),
-        ("lf_weight", 0.69),
-        ("tail_robust_weight", 0.31),
-        ("tail_fraction", 1.0),
-        ("tail_carrier_protocol_digest", "0" * 64),
-    ):
-        changed_payload = dict(digest_payload)
-        changed_payload[field_name] = value
-        assert build_stable_digest(changed_payload) != protocol.threshold_digest
-
-
-@pytest.mark.quick
-def test_frozen_protocol_application_rejects_threshold_digest_drift() -> None:
-    """协议应用时必须先从全部冻结字段独立重建阈值摘要."""
-
-    metadata, alignment = _formal_detection_alignment_identity(
-        registration_geometry_reliable=True,
-    )
-    record = bind_formal_detection_record(
-        {
-            **_formal_content_carrier_identity_fields(),
-            "content_score": 0.1,
-            "aligned_content_score": 0.2,
-            "attention_geometry_score": 0.3,
-            "registration_confidence": 0.4,
-            "attention_sync_score": 0.5,
-            "metadata": metadata,
-            "alignment": alignment,
-        }
-    )
-    protocol = calibrate_complete_evidence_protocol(
-        (record,),
-        target_fpr=0.1,
-        rescue_margin_low=-0.05,
-    )
+    records = tuple(_calibration_measurement(index) for index in range(33))
+    protocol = calibrate_complete_evidence_protocol(records, target_fpr=0.1)
     for drifted in (
+        replace(protocol, rescue_margin_low=-0.9),
         replace(protocol, content_threshold=999.0),
         replace(protocol, threshold_digest="f" * 64),
         replace(protocol, calibration_false_positive_rate=0.999),
     ):
-        with pytest.raises(
-            ValueError,
-            match="阈值摘要不能由正文重建|假阳性率与计数不一致",
-        ):
-            apply_frozen_evidence_protocol((record,), drifted)
+        with pytest.raises(ValueError):
+            apply_frozen_evidence_protocol(records, drifted)
 
 
 @pytest.mark.quick
-def test_geometry_protocol_cannot_close_with_missing_calibration_scores() -> None:
-    """任一几何数值门禁缺失时不得把完整 rescue 协议标记为已校准。"""
+@pytest.mark.parametrize("partition_index", (0, 1))
+def test_complete_calibration_rejects_missing_geometry_atom(
+    partition_index: int,
+) -> None:
+    """任一 calibration 子集缺少正式几何原子都必须失败。"""
 
-    records = []
-    for index in range(33):
-        metadata, alignment = _formal_detection_alignment_identity(
-            registration_geometry_reliable=True,
-        )
-        records.append(
-            bind_formal_detection_record({
-                **_formal_content_carrier_identity_fields(),
-                "content_score": index / 100.0,
-                "aligned_content_score": (index + 1) / 100.0,
-                "attention_geometry_score": 0.1,
-                "registration_confidence": 0.2,
-                "attention_sync_score": None if index == 0 else 0.3,
-                "metadata": metadata,
-                "alignment": alignment,
-            })
-        )
-
-    protocol = calibrate_complete_evidence_protocol(
-        records,
-        target_fpr=0.1,
-        rescue_margin_low=-0.05,
+    records = [_calibration_measurement(index) for index in range(33)]
+    partitions = partition_calibration_clean_negatives(records)[:2]
+    missing_prompt_id = str(partitions[partition_index][0]["prompt_id"])
+    missing_record = next(
+        record for record in records if record["prompt_id"] == missing_prompt_id
+    )
+    missing_record["attention_sync_score"] = None
+    missing_record["measurement_digest"] = build_stable_digest(
+        recompute_image_only_measurement_digest_payload(missing_record)
     )
 
+    with pytest.raises(ValueError, match="完整测量注意力"):
+        calibrate_complete_evidence_protocol(records, target_fpr=0.1)
+
+
+def _raw_only_calibration_measurement(
+    index: int,
+    *,
+    attention_geometry_enabled: bool,
+) -> dict[str, object]:
+    """构造正式机制消融使用的 raw-content-only calibration 测量。"""
+
+    record = bind_formal_detection_record(
+        {
+            **_formal_content_carrier_identity_fields(),
+            "content_score": index / 100.0,
+            "raw_attention_geometry_score": (
+                0.5 + index / 1000.0
+                if attention_geometry_enabled
+                else None
+            ),
+            "metadata": {
+                "attention_geometry_enabled": attention_geometry_enabled,
+                "image_alignment_enabled": False,
+            },
+            "alignment": None,
+        }
+    )
+    record.update(
+        {
+            "prompt_id": f"raw_only_calibration_{index:04d}",
+            "split": "calibration",
+            "sample_role": "clean_negative",
+            "detection_key_role": "registered_watermark_key",
+        }
+    )
+    return record
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("attention_geometry_enabled", (False, True))
+def test_disabled_alignment_calibrates_raw_content_only_protocol(
+    attention_geometry_enabled: bool,
+) -> None:
+    """禁用几何 rescue 的消融必须真实冻结 raw-only fixed-FPR 协议。"""
+
+    records = tuple(
+        _raw_only_calibration_measurement(
+            index,
+            attention_geometry_enabled=attention_geometry_enabled,
+        )
+        for index in range(33)
+    )
+    protocol = calibrate_complete_evidence_protocol(records, target_fpr=0.1)
+    applied = apply_frozen_evidence_protocol(records, protocol)
+
+    assert protocol.attention_geometry_enabled is attention_geometry_enabled
+    assert protocol.image_alignment_enabled is False
+    assert protocol.geometry_rescue_enabled is False
     assert protocol.geometry_protocol_calibration_ready is False
-    assert protocol.sync_calibration_negative_count == 32
+    assert protocol.rescue_window_fit_content_threshold is None
+    assert protocol.rescue_margin_low is None
+    assert protocol.geometry_score_threshold is None
+    assert protocol.registration_confidence_threshold is None
+    assert protocol.attention_sync_score_threshold is None
+    assert protocol.rescue_window_candidate_count == 0
+    assert protocol.geometry_calibration_negative_count == 0
+    assert all(
+        record["formal_geometry_reliable"] is False
+        and record["formal_rescue_eligible"] is False
+        and record["formal_rescue_applied"] is False
+        and record["formal_evidence_positive"]
+        is (record["content_score"] >= protocol.content_threshold)
+        for record in applied
+    )
 
 
 @pytest.mark.quick
-def test_frozen_protocol_recomputes_threshold_dependent_failure_reason() -> None:
-    """冻结阈值改变后必须重算失败原因, 不能沿用预检测阈值的分类。"""
+def test_applied_record_cannot_reenter_calibration() -> None:
+    """Apply 物化后的判定记录不得再次冒充阈值无关 calibration 输入。"""
 
-    metadata, alignment = _formal_detection_alignment_identity(
-        registration_geometry_reliable=True,
-        geometry_reliable=True,
-    )
-    metadata["rescue_margin_low"] = -0.2
-    record = bind_formal_detection_record({
-        **_formal_content_carrier_identity_fields(),
-        "content_score": 0.4,
-        "aligned_content_score": 0.6,
-        "attention_geometry_score": 0.1,
-        "registration_confidence": 0.8,
-        "attention_sync_score": 0.8,
-        "geometry_reliable": False,
-        "metadata": metadata,
-        "alignment": alignment,
-        "content_failure_reason": "content_positive",
-    })
-    protocol = FrozenEvidenceProtocol(
-        content_threshold=0.5,
-        rescue_margin_low=-0.2,
-        geometry_score_threshold=0.0,
-        registration_confidence_threshold=0.0,
-        attention_sync_score_threshold=0.0,
-        attention_anchor_count=ATTENTION_ALIGNMENT_ANCHOR_COUNT,
-        attention_residual_threshold=ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
-        attention_minimum_inlier_ratio=(
-            ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO
-        ),
-        lf_carrier_protocol_digest=(
-            _FORMAL_LOW_FREQUENCY_CONFIG.protocol_digest
-        ),
-        lf_weight=_FORMAL_LF_WEIGHT,
-        tail_robust_weight=_FORMAL_TAIL_ROBUST_WEIGHT,
-        tail_fraction=_FORMAL_TAIL_FRACTION,
-        tail_carrier_protocol_digest=_FORMAL_TAIL_CARRIER_PROTOCOL[
-            "tail_carrier_protocol_digest"
-        ],
-        image_only_detector_config_digest=record[
-            "image_only_detector_config_digest"
-        ],
-        geometry_calibration_negative_count=10,
-        geometry_calibration_exceedance_count=0,
-        registration_calibration_negative_count=10,
-        registration_calibration_exceedance_count=0,
-        sync_calibration_negative_count=10,
-        sync_calibration_exceedance_count=0,
-        geometry_protocol_calibration_ready=True,
-        calibration_negative_count=10,
-        calibration_false_positive_count=0,
-        calibration_false_positive_rate=0.0,
-        target_fpr=0.1,
-        threshold_digest="fixture_threshold",
-    )
-    protocol = replace(
-        protocol,
-        threshold_digest=build_stable_digest(
-            frozen_evidence_protocol_digest_payload(protocol)
-        ),
-    )
-    resolved = apply_frozen_evidence_protocol((record,), protocol)[0]
+    records = tuple(_calibration_measurement(index) for index in range(33))
+    protocol = calibrate_complete_evidence_protocol(records, target_fpr=0.1)
+    applied = apply_frozen_evidence_protocol(records, protocol)
 
-    assert resolved["formal_content_failure_reason"] == "geometry_suspected"
-    assert resolved["formal_positive_by_content"] is False
-    assert resolved["formal_rescue_applied"] is True
-    assert resolved["formal_evidence_positive"] is True
+    validate_image_only_measurement_projection_record(applied[0])
+    with pytest.raises(ValueError, match="不得包含 calibration 决策字段"):
+        validate_image_only_measurement_digest_record(applied[0])
+    with pytest.raises(ValueError, match="不得包含 calibration 决策字段"):
+        calibrate_complete_evidence_protocol(applied, target_fpr=0.1)
 
 
 @pytest.mark.quick

@@ -19,7 +19,7 @@ from main.core.digest import (
     TENSOR_CONTENT_DIGEST_VERSION,
     build_stable_digest,
 )
-from main.methods.detection import validate_image_only_detection_digest_record
+from main.methods.detection import validate_image_only_measurement_digest_record
 from main.methods.geometry import (
     qk_atomic_evaluation_records_digest,
     qk_atomic_evaluation_records_ready,
@@ -35,7 +35,7 @@ from main.methods.update_composition import (
 
 
 SCIENTIFIC_CONTENT_BINDING_SCHEMA = (
-    "slm_wm_scientific_content_binding_v5"
+    "slm_wm_scientific_content_binding_v6"
 )
 IMAGE_RGB_UINT8_CONTENT_SCHEMA = "slm_wm_image_rgb_uint8_content_v1"
 
@@ -820,10 +820,10 @@ def _detection_content_identity(
         resolved.get("metadata"),
         field_name="detection.metadata",
     )
-    validate_image_only_detection_digest_record(resolved)
-    detector_config_digest = _sha256(
-        resolved.get("image_only_detector_config_digest"),
-        field_name="detection.image_only_detector_config_digest",
+    validate_image_only_measurement_digest_record(resolved)
+    measurement_config_digest = _sha256(
+        resolved.get("image_only_measurement_config_digest"),
+        field_name="detection.image_only_measurement_config_digest",
     )
     if (
         metadata.get("attention_geometry_enabled") is not expected_attention
@@ -1184,10 +1184,10 @@ def _detection_content_identity(
         "raw_attention_geometry_score": resolved.get(
             "raw_attention_geometry_score"
         ),
-        "image_only_detector_config_digest": detector_config_digest,
-        "detector_digest": _sha256(
-            resolved.get("detector_digest"),
-            field_name="detector_digest",
+        "image_only_measurement_config_digest": measurement_config_digest,
+        "measurement_digest": _sha256(
+            resolved.get("measurement_digest"),
+            field_name="measurement_digest",
         ),
         "evaluated_image_width": evaluated_width,
         "evaluated_image_height": evaluated_height,
@@ -1301,11 +1301,11 @@ def build_scientific_content_binding_record(
     ]
     if not detection_identities:
         raise ValueError("总科学内容绑定缺少仅图像检测记录")
-    detector_config_digests = {
-        identity["image_only_detector_config_digest"]
+    measurement_config_digests = {
+        identity["image_only_measurement_config_digest"]
         for identity in detection_identities
     }
-    if len(detector_config_digests) != 1:
+    if len(measurement_config_digests) != 1:
         raise ValueError("同一科学单元的检测记录混用了不同盲检配置")
     update_key_digests = {
         identity["watermark_key_material_digest_random"]
@@ -1712,8 +1712,8 @@ def build_scientific_content_binding_record(
             carrier_identities
         ),
         "detection_content_identities": detection_identities,
-        "image_only_detector_config_digest": next(
-            iter(detector_config_digests)
+        "image_only_measurement_config_digest": next(
+            iter(measurement_config_digests)
         ),
         "detection_content_bundle_digest": build_stable_digest(
             detection_identities

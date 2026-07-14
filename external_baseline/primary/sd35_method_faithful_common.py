@@ -14,6 +14,9 @@ from experiments.protocol.attacks import (
     attack_config_digest,
     resolve_formal_attack_config,
 )
+from experiments.protocol.image_only_evidence import (
+    partition_calibration_prompt_ids,
+)
 from experiments.runtime.model_sources import (
     get_model_source,
     require_registered_model_reference,
@@ -495,20 +498,30 @@ def score_image_latents(pipe: Any, image: Any, *, size: int, device: str, num_in
 
 def derive_threshold(
     observations: Iterable[dict[str, Any]],
-    explicit_threshold: float | None,
     target_fpr: float,
 ) -> tuple[float, str]:
     """仅从 calibration clean negative 分数冻结 fixed-FPR 阈值。"""
 
-    if explicit_threshold is not None:
-        return float(explicit_threshold), "pre_registered_threshold"
     if not 0.0 < target_fpr < 1.0:
         raise ValueError("target_fpr 必须位于 (0, 1)")
     rows = list(observations)
+    calibration_rows = [
+        row
+        for row in rows
+        if row.get("split") == "calibration"
+        and row.get("sample_role") == "clean_negative"
+        and row.get("attack_family") == "clean"
+        and not row.get("attack_id")
+        and row.get("attack_performed") is not True
+    ]
+    _, threshold_freeze_prompt_ids, _ = partition_calibration_prompt_ids(
+        str(row.get("prompt_id", "")) for row in calibration_rows
+    )
+    threshold_freeze_prompt_id_set = set(threshold_freeze_prompt_ids)
     negative_scores = [
         float(row["score"])
-        for row in rows
-        if row.get("split") == "calibration" and row.get("sample_role") == "clean_negative"
+        for row in calibration_rows
+        if str(row.get("prompt_id", "")) in threshold_freeze_prompt_id_set
     ]
     if not negative_scores:
         raise ValueError("fixed-FPR 阈值要求非空 calibration clean negative 分数")
@@ -518,7 +531,7 @@ def derive_threshold(
     )
     for threshold in sorted({math.nextafter(score, math.inf) for score in negative_scores}):
         if sum(score >= threshold for score in negative_scores) <= allowed_false_positives:
-            return threshold, "calibration_clean_negative_conformal"
+            return threshold, "nested_calibration_threshold_freeze_conformal_v1"
     raise RuntimeError("无法从 calibration clean negative 冻结 fixed-FPR 阈值")
 
 

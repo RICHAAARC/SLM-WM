@@ -937,11 +937,11 @@ def _write_package_fixture(
         prompt_set="probe_paper",
         prompt_file="configs/paper_main_probe_paper_prompts.txt",
         t2smark_run_name="t",
-        prompt_limit=2,
-        minimum_prompt_protocol_count=2,
+        prompt_limit=4,
+        minimum_prompt_protocol_count=4,
         target_fpr=0.1,
     )
-    paper_run = _paper_run(2)
+    paper_run = _paper_run(4)
     monkeypatch.setattr(
         t2smark_runtime,
         "validate_t2smark_formal_protocol_config",
@@ -970,7 +970,7 @@ def _write_package_fixture(
     )
     attack_names = configured_attack_names(config.formal_attack_families)
     source_report = _source_report()
-    prompt_report = _prompt_report(2)
+    prompt_report = _prompt_report(4)
     prompt_rows = [
         {
             "prompt_id": f"prompt_{index:06d}",
@@ -978,7 +978,7 @@ def _write_package_fixture(
             "prompt_set": "probe_paper",
             "split": split,
             "prompt_text": f"formal test prompt {index}",
-            "prompt_digest": str(7 + index) * 64,
+            "prompt_digest": f"{7 + index:x}" * 64,
             **_formal_random_identity(
                 index,
                 base_latent_content_digest_random=(
@@ -986,7 +986,9 @@ def _write_package_fixture(
                 ),
             ),
         }
-        for index, split in enumerate(("calibration", "test"))
+        for index, split in enumerate(
+            ("calibration", "calibration", "calibration", "test")
+        )
     ]
     runtime_environment = _unit_runtime_environment()
 
@@ -1232,10 +1234,17 @@ def _write_package_fixture(
     t2smark_runtime.write_json(paths["adapter_artifact_manifest"], adapter_manifest)
     t2smark_runtime.write_json(
         paths["pair_quality_summary"],
-        {"strict_pair_quality_ready": True, "measured_strict_pair_quality_count": 2},
+        {
+            "strict_pair_quality_ready": True,
+            "measured_strict_pair_quality_count": len(image_pairs),
+        },
     )
     paths["pair_quality_metrics"].write_text(
-        "image_id,ssim\nimage_000000,1.0\nimage_000001,1.0\n",
+        "image_id,ssim\n"
+        + "".join(
+            f"image_{index:06d},1.0\n"
+            for index in range(len(image_pairs))
+        ),
         encoding="utf-8",
     )
     for path_value in (
@@ -1263,7 +1272,7 @@ def _write_package_fixture(
         "t2smark_formal_reproduction_ready": True,
         "t2smark_formal_attack_ready": True,
         "t2smark_formal_unit_set_ready": True,
-        "t2smark_formal_unit_record_count": 2,
+        "t2smark_formal_unit_record_count": len(unit_records),
         "t2smark_formal_unit_records_digest": unit_aggregate[
             "formal_unit_records_digest"
         ],
@@ -1273,7 +1282,7 @@ def _write_package_fixture(
         "scientific_unit_provenance_ready": True,
         "t2smark_strict_pair_quality_ready": True,
         "formal_import_validation_ready": True,
-        "selected_prompt_count": 2,
+        "selected_prompt_count": len(prompt_rows),
         "formal_import_candidate_record_count": candidate_count,
         "official_protocol_binding_digest": expected_binding["protocol_binding_digest"],
         "metadata": {

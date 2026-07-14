@@ -242,7 +242,7 @@ Notebook 与 repository module 的跨边界数据
 | aligned_content_margin | method | none | true | false | false | 对齐后内容分数相对内容阈值的边界余量。 |
 | formal_detection_margin | method | none | true | false | false | 正式判定分数相对 fixed-FPR 阈值的边界余量。 |
 | fail_reason | method | none | true | false | false | 内容判定失败原因。 |
-| rescue_margin_low | protocol | none | true | false | false | rescue 边界失败窗口下界。 |
+| rescue_margin_low | protocol | none | true | false | false | 仅由 window-fit clean negatives 派生的同阈值 rescue 负 margin 下界。 |
 | positive_by_content | method | none | true | false | false | 原始内容分支是否正判。 |
 | formal_detection_decision | method | none | true | false | false | 按 threshold_score_field 与 fixed-FPR 阈值得到的正式检测判定。 |
 | rescue_eligible | method | none | true | false | false | 样本是否满足 rescue 条件。 |
@@ -601,8 +601,11 @@ Notebook 与 repository module 的跨边界数据
 | aligned_tail_robust_score | metric | none | false | true | false | 图像配准后重新编码 latent 的尾部鲁棒相关分数。 |
 | aligned_tail_threshold | metric | none | false | true | false | 对齐图像尾部模板入选集合的最小绝对幅值, 必须与原图冻结模板统计相同。 |
 | aligned_tail_retained_fraction | metric | none | false | true | false | 对齐图像尾部模板的实际保留比例, 必须与原图冻结模板统计相同。 |
-| image_only_detector_config_schema | protocol | none | true | true | false | 仅图像检测器完整配置身份正文采用的版本化 schema。 |
-| image_only_detector_config_digest | provenance | none | true | true | false | 由冻结检测器配置正文生成, 用于拒绝 calibration/test 配置错配的 SHA-256。 |
+| image_only_measurement_config_schema | protocol | none | true | true | false | 阈值无关仅图像连续测量配置身份采用的版本化 schema。 |
+| image_only_measurement_config_digest | provenance | none | true | true | false | 由阈值无关连续测量配置正文生成, 用于拒绝 calibration/test 测量算子错配的 SHA-256。 |
+| image_only_extraction_profile_schema | protocol | none | true | true | false | 仅图像检测从 RGB 输入到 latent 与 Q/K 测量的完整提取配置采用的版本化 schema。 |
+| image_preprocessing_protocol | protocol | none | true | true | false | 检测图像在 VAE 编码前执行 RGB 转换、尺寸核验和归一化的冻结协议。 |
+| vae_encoding_protocol | protocol | none | true | true | false | 仅图像检测以 VAE posterior mode、冻结缩放与 shift 生成测量 latent 的协议。 |
 | attention_alignment_layer_selection_rule | method | none | true | true | false | 两个冻结层候选按注册目标、观测关系分、注册置信度及冻结层顺序执行的唯一字典序裁决协议。 |
 | image_alignment_resampling_mode | method | none | true | true | false | aligned 图像恢复参考系使用的 bilinear 采样模式。 |
 | image_alignment_padding_mode | method | none | true | true | false | aligned 图像越界坐标使用的 border 边界复制模式。 |
@@ -618,6 +621,7 @@ Notebook 与 repository module 的跨边界数据
 | semantic_routing_enabled | method | none | true | false | false | 正式方法运行是否启用语义条件分支路由。 |
 | tail_robust_enabled | method | none | true | false | false | 正式方法运行是否启用高斯幅值尾部截断载体分支。 |
 | image_alignment_enabled | method | none | true | false | false | 仅图像检测是否启用冻结的图像配准与对齐路径。 |
+| geometry_rescue_enabled | method | none | true | true | false | 当前冻结判定是否同时启用注意力几何与图像对齐, 从而允许 calibration 派生的同阈值 rescue。 |
 | standard_attack_profiles | protocol | none | true | false | false | 当前完成单元需要执行的标准图像攻击 profile 有序集合。 |
 | diffusion_attacks_enabled | protocol | none | true | false | false | 当前 test 完成单元是否执行冻结的扩散攻击集合。 |
 | output_dir | artifact | none | true | false | false | 单个语义水印运行写入受治理输出的目录。 |
@@ -895,7 +899,7 @@ Notebook 与 repository module 的跨边界数据
 | calibrated_content_threshold | protocol | none | false | false | false | 由 calibration clean negative 冻结的内容阈值。 |
 | calibrated_detection_threshold | protocol | none | false | false | false | 由 calibration clean negative 在 threshold_score_field 指定分数空间中冻结的正式检测阈值。 |
 | formal_detection_claim_ready | governance | none | false | false | false | 正式判定分数是否同时满足校准 split fixed-FPR 边界和测试 clean negative 经验 FPR 诊断边界。 |
-| calibration_negative_count | metric | none | false | false | false | 用于阈值冻结的 calibration clean negative 样本数。 |
+| calibration_negative_count | metric | none | false | false | false | threshold-freeze 子集中用于最终完整 evidence 阈值冻结的 clean negative 样本数。 |
 | allowed_false_positive_count | metric | none | false | false | false | 目标 FPR 下允许的 false positive 数量。 |
 | nominal_allowed_false_positive_count | metric | none | false | false | false | 按 floor(target_fpr * negative_count) 得到的名义 false positive 预算。 |
 | confidence_controlled_false_positive_count | metric | none | false | false | false | 在 calibration FPR 置信上界不超过目标 FPR 时允许的保守 false positive 预算。 |
@@ -1815,7 +1819,7 @@ Notebook 与 repository module 的跨边界数据
 | attention_geometry_score | metric | none | true | true | false | 真实 Q/K 四分量关系完成逐行加权归一化后按当前冻结分量权重组合的一致性分数。 |
 | formal_evidence_positive | metric | none | true | true | false | 冻结完整 evidence 协议后的正式布尔判定。 |
 | frozen_content_threshold | protocol | none | true | true | false | calibration clean negative 冻结的内容阈值。 |
-| threshold_digest | protocol | none | true | true | false | calibration 分数集合、冻结统计阈值、rescue window、预注册注意力配准结构门禁和相关 evidence 配置的稳定摘要。 |
+| threshold_digest | protocol | none | true | true | false | 嵌套 calibration 分区、window 选择、measurement 与载体身份、结构门禁、最终阈值及计数的稳定摘要。 |
 | jacobian_candidate_count | method | none | true | false | false | 每个分支参与真实 JVP 的候选方向数量。 |
 | null_space_rank | method | none | true | false | false | 每个分支保留的小响应 latent 基底秩。 |
 | lf_relative_strength | method | none | true | false | false | LF 更新相对当前 latent 范数的强度。 |
@@ -2414,7 +2418,6 @@ Notebook 与 repository module 的跨边界数据
 | dependency_environment_ready | governance | none | true | false | false | 当前隔离科学依赖环境是否通过完整锁门禁。 |
 | dependency_profile_digest | provenance | none | true | false | false | 科学依赖 profile 规范内容的稳定 SHA-256 摘要。 |
 | dependency_profile_id | provenance | none | true | false | false | 当前科学执行使用的受治理依赖 profile 标识。 |
-| explicit_threshold | protocol | none | true | false | false | 外部 adapter 是否由调用方显式提供检测阈值; 正式默认值为空。 |
 | formal_attacks | protocol | none | true | false | false | T2SMark 单个 Prompt 按正式攻击名称组织的正负攻击结果映射。 |
 | formal_unit_contract | protocol | none | true | false | false | T2SMark runner 返回并持久化的完整原子单元契约。 |
 | gen_seed | protocol | none | true | false | false | 官方参考脚本用于生成逐 Prompt seed 的固定基值。 |
@@ -2668,10 +2671,10 @@ Notebook 与 repository module 的跨边界数据
 | attacked_false_positive_rate_ci_low | metric | none | true | true | false | attacked negative 假正率置信区间下界。 |
 | attacked_false_positive_rate_ci_high | metric | none | true | true | false | attacked negative 假正率置信区间上界。 |
 | geometry_score_threshold | protocol | none | true | false | false | 由 calibration negative 几何分数冻结的几何诊断阈值。 |
-| geometry_calibration_negative_count | metric | none | true | false | false | 参与几何诊断阈值校准的 negative 记录数量。 |
+| geometry_calibration_negative_count | metric | none | true | false | false | window-fit 子集中参与注意力几何阈值冻结的 clean negative 记录数量。 |
 | geometry_calibration_exceedance_count | metric | none | true | false | false | calibration negative 中超过几何诊断阈值的记录数量。 |
 | calibration_false_positive_count | metric | none | true | false | false | 冻结内容阈值下 calibration negative 的假正例数量。 |
-| calibration_false_positive_rate | metric | none | true | false | false | 冻结内容阈值下 calibration negative 的假正率。 |
+| calibration_false_positive_rate | metric | none | true | false | false | 最终冻结内容阈值在 threshold-freeze clean negatives 上的假正率。 |
 | positive_rate | metric | none | true | true | false | 指定样本角色在冻结阈值下的正判比例。 |
 | content_score_mean | metric | none | true | true | false | 指定样本角色的正式连续内容分数均值。 |
 | positive_rate_upper_95 | metric | none | true | true | false | 指定样本角色正判比例的单侧95%置信上界。 |
@@ -2871,9 +2874,9 @@ Notebook 与 repository module 的跨边界数据
 | attention_score_gain | metric | none | true | true | false | `attention_final_combined_score` 减去 `attention_score_before` 得到的实际写回 Q/K 增益。 |
 | scheduler_step_timestep | runtime | none | true | false | false | callback-on-step-end 当前刚完成采样步对应的 scheduler timestep。 |
 | post_step_schedule_index | protocol | none | true | false | false | post-step latent 在公开 scheduler 序列中用于方法前向与盲检复现的下一索引。 |
-| registration_calibration_negative_count | metric | none | true | true | false | 参与配准置信度门限冻结的 calibration clean negative 数量。 |
+| registration_calibration_negative_count | metric | none | true | true | false | window-fit 子集中参与配准置信度阈值冻结的 clean negative 数量。 |
 | registration_calibration_exceedance_count | metric | none | true | true | false | 在冻结配准置信度门限上达到或超过门限的 calibration clean negative 数量。 |
-| sync_calibration_negative_count | metric | none | true | true | false | 参与对齐后 Q/K 同步门限冻结的 calibration clean negative 数量。 |
+| sync_calibration_negative_count | metric | none | true | true | false | window-fit 子集中参与对齐后 Q/K 同步阈值冻结的 clean negative 数量。 |
 | sync_calibration_exceedance_count | metric | none | true | true | false | 在冻结同步门限上达到或超过门限的 calibration clean negative 数量。 |
 | geometry_protocol_calibration_ready | governance | none | true | true | false | 关系分、配准置信度与对齐后同步分均具有完整 calibration 证据的门禁结果。 |
 | frozen_geometry_score_threshold | protocol | none | true | true | false | 完整 evidence 协议在 calibration split 冻结的注册关系分门限。 |
@@ -3389,7 +3392,7 @@ Notebook 与 repository module 的跨边界数据
 | detection_index | provenance | none | true | true | false | 检测 JSONL 记录在单次方法运行中的冻结顺序索引。 |
 | detection_record_content_digest | provenance | none | true | true | false | 从磁盘重读的一条完整检测 JSONL 原子记录摘要。 |
 | alignment_digest | provenance | none | true | true | false | 对齐检测使用的完整 alignment 记录规范 SHA-256, 直接绑定12个锚点、0.20残差上界和0.50最小内点率；未执行对齐的检测必须为空字符串。 |
-| detector_digest | provenance | none | true | true | false | 仅图像检测输入、分数、决策、预注册注意力配准结构门禁与对齐身份的规范 SHA-256。 |
+| measurement_digest | provenance | none | true | true | false | 仅图像输入、连续 raw/aligned 内容分数、注意力原子、结构门禁与对齐身份的阈值无关规范 SHA-256。 |
 | detection_content_identities | provenance | none | true | true | false | 单次方法运行全部仅图像检测记录的有序科学内容身份。 |
 | detection_content_bundle_digest | provenance | none | true | true | false | 全部仅图像检测内容身份的有序联合摘要。 |
 | detection_qk_image_content_bindings | provenance | none | true | true | false | raw/aligned 检测图像像素、公开噪声评价索引与 Q/K 原子的逐角色绑定。 |
@@ -3411,3 +3414,33 @@ Notebook 与 repository module 的跨边界数据
 | final_image_preservation_record_digest | provenance | none | true | true | false | 完整方法最终图像特征保持记录的稳定摘要。 |
 | carrier_only_final_image_preservation_record_digest | provenance | none | true | true | false | carrier-only 最终图像特征保持记录的稳定摘要。 |
 | carrier_only_counterfactual_record_digest | provenance | none | true | true | false | attention 开关 carrier-only 反事实完整记录的稳定摘要。 |
+| frozen_evidence_protocol_schema | protocol | none | true | true | false | 嵌套 calibration 冻结 evidence 判定协议的版本化 schema。 |
+| calibration_partition_protocol | protocol | none | true | true | false | 按版本化 Prompt 散列确定 window-fit 与 threshold-freeze 子集的算法身份。 |
+| calibration_partition_digest | provenance | none | true | true | false | calibration 源数量、两个互斥子集数量及 Prompt 身份摘要的联合摘要。 |
+| calibration_source_negative_count | metric | none | true | false | false | 进入嵌套 calibration 分区前的 registered-key clean negative 总数。 |
+| rescue_window_fit_negative_count | metric | none | true | false | false | 仅用于冻结三类几何门、临时 raw 阈值与 rescue window 的样本数。 |
+| rescue_window_fit_prompt_id_digest | provenance | none | true | true | false | window-fit Prompt 身份按版本化散列顺序形成的摘要。 |
+| threshold_freeze_negative_count | metric | none | true | false | false | 所有方法共享、仅用于最终 fixed-FPR 阈值冻结的样本数。 |
+| threshold_freeze_prompt_id_digest | provenance | none | true | true | false | threshold-freeze Prompt 身份按版本化散列顺序形成的摘要。 |
+| window_fit_allowed_false_positive_count | metric | none | true | false | false | window-fit 样本数与目标 FPR 按冻结有限样本规则计算的假阳性预算。 |
+| threshold_freeze_allowed_false_positive_count | metric | none | true | false | false | threshold-freeze 样本数与目标 FPR 按冻结有限样本规则计算的假阳性预算。 |
+| rescue_window_fit_content_threshold | metric | none | true | false | false | 仅由 window-fit raw content scores 冻结并用于选择 rescue window 的临时阈值。 |
+| rescue_window_selection_protocol | protocol | none | true | true | false | 从有限负 margin 候选选择最宽可行 rescue window 的版本化算法身份。 |
+| rescue_window_candidate_count | metric | none | true | false | false | window-fit 负 margin 与边界 nextafter 规则生成的有限候选数量。 |
+| rescue_window_fit_false_positive_count | metric | none | true | false | false | 所选 rescue window 在 window-fit 子集上的完整 evidence 假阳性数量。 |
+| frozen_rescue_margin_low | metric | none | true | false | false | 样本正式判定引用的 calibration 派生 rescue 负 margin 下界。 |
+| frozen_image_only_measurement_config_digest | provenance | none | true | true | false | 样本正式判定引用的阈值无关 measurement 配置摘要。 |
+| frozen_attention_geometry_enabled | method | none | true | true | false | 样本正式判定引用的注意力几何机制开关。 |
+| frozen_image_alignment_enabled | method | none | true | true | false | 样本正式判定引用的图像配准机制开关。 |
+| frozen_geometry_rescue_enabled | method | none | true | true | false | 样本正式判定引用的联合几何 rescue 开关, 由前两个机制开关共同确定。 |
+| formal_raw_content_margin | metric | none | true | false | false | raw content score 相对唯一冻结内容阈值的差值。 |
+| formal_aligned_content_margin | metric | none | true | false | false | aligned content score 相对同一冻结内容阈值的差值；无 aligned 测量时为空。 |
+| formal_positive_by_content | metric | none | true | false | false | raw content margin 是否已达到唯一冻结阈值。 |
+| formal_geometry_reliable | metric | none | true | false | false | 结构门、stable-pair 身份与三类 calibration 几何门是否共同通过。 |
+| formal_rescue_eligible | metric | none | true | false | false | 记录是否同时处于派生窗口内、几何可靠且具有 aligned score。 |
+| formal_rescue_applied | metric | none | true | false | false | eligible 记录的 aligned score 是否达到与 raw 相同的内容阈值。 |
+| formal_metric_status | protocol | none | true | false | false | 样本正式判定由真实仅图像 measurement 与冻结协议物化的状态。 |
+| detector_guided_attack_threshold_protocol | protocol | none | true | true | false | test runtime 在 detector-guided attack 前绑定的完整 calibration 冻结协议；非 test 必须为空。 |
+| detector_guided_attack_threshold_digest | provenance | none | true | true | false | detector-guided attack 实际连续目标引用的冻结协议摘要。 |
+| allowed_threshold_freeze_false_positive_count | metric | none | true | false | false | method-repeat 在共同 threshold-freeze 子集上的最大允许假阳性数量。 |
+| proposed_measurement_digest | provenance | none | true | true | false | 配对优势记录引用的主方法攻击后阈值无关仅图像 measurement 摘要。 |

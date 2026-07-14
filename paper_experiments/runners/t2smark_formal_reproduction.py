@@ -1075,7 +1075,7 @@ def build_candidate_records_and_validation(
     threshold_audit = audit_fixed_fpr_observation_threshold(
         observations,
         target_fpr=config.target_fpr,
-        expected_calibration_negative_count=expected_calibration_count,
+        expected_calibration_source_negative_count=expected_calibration_count,
     )
     fixed_fpr_ready = threshold_audit.fixed_fpr_ready
     from experiments.protocol.attacks import default_attack_configs
@@ -1861,7 +1861,7 @@ def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Pat
     threshold_audit = audit_fixed_fpr_observation_threshold(
         observations,
         target_fpr=config.target_fpr,
-        expected_calibration_negative_count=expected_calibration_count,
+        expected_calibration_source_negative_count=expected_calibration_count,
     )
     if not threshold_audit.fixed_fpr_ready:
         raise RuntimeError("T2SMark 打包 observation 未通过 fixed-FPR 复验")

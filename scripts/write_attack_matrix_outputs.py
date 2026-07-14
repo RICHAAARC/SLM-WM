@@ -225,7 +225,7 @@ def build_measured_attack_records(
                 **record,
                 "attack_record_id": f"attack_{record_digest[:24]}",
                 "attack_record_digest": record_digest,
-                "source_record_id": source_record.get("detector_digest", ""),
+                "source_record_id": source_record.get("measurement_digest", ""),
                 "attack_strength": config.attack_strength,
                 "requires_gpu": config.requires_gpu,
                 "attack_config_digest": attack_config_digest(config),

@@ -17,7 +17,7 @@ from experiments.protocol.attacks import (
 from experiments.protocol.fixed_fpr_observation_audit import FORMAL_THRESHOLD_SOURCE
 from main.core.digest import build_stable_digest
 from main.methods.detection.image_only import (
-    validate_image_only_detection_digest_record,
+    validate_image_only_measurement_projection_record,
 )
 
 
@@ -49,6 +49,8 @@ THRESHOLD_AUDIT_TEXT_FIELDS = (
     "method_id",
     "threshold_source",
     "threshold_digest",
+    "calibration_partition_digest",
+    "threshold_freeze_prompt_id_digest",
     "observation_source_sha256",
 )
 THRESHOLD_AUDIT_FLOAT_FIELDS = (
@@ -57,6 +59,7 @@ THRESHOLD_AUDIT_FLOAT_FIELDS = (
 )
 THRESHOLD_AUDIT_INTEGER_FIELDS = (
     "calibration_clean_negative_count",
+    "threshold_freeze_negative_count",
     "test_clean_negative_count",
 )
 THRESHOLD_AUDIT_BOOLEAN_FIELDS = (
@@ -83,10 +86,13 @@ THRESHOLD_AUDIT_REPORT_FIELDS = (
     "audited_method_count",
     "method_observation_source_sha256_map",
     "method_threshold_digest_map",
+    "method_calibration_partition_digest_map",
+    "method_threshold_freeze_prompt_id_digest_map",
     "threshold_audit_rows_digest",
     "method_identity_ready",
     "all_method_thresholds_ready",
     "threshold_observation_binding_ready",
+    "shared_calibration_partition_ready",
     "fixed_fpr_threshold_audit_ready",
     "supports_paper_claim",
 )
@@ -379,6 +385,10 @@ def normalize_threshold_audit_row(row: Mapping[str, Any]) -> dict[str, Any]:
             payload["calibration_clean_negative_count"],
             "calibration_clean_negative_count",
         ),
+        "threshold_freeze_negative_count": _normalize_integer(
+            payload["threshold_freeze_negative_count"],
+            "threshold_freeze_negative_count",
+        ),
         "test_clean_negative_count": _normalize_integer(
             payload["test_clean_negative_count"],
             "test_clean_negative_count",
@@ -390,6 +400,14 @@ def normalize_threshold_audit_row(row: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "threshold_digest": _sha256_text(
             payload["threshold_digest"], "threshold_digest"
+        ),
+        "calibration_partition_digest": _sha256_text(
+            payload["calibration_partition_digest"],
+            "calibration_partition_digest",
+        ),
+        "threshold_freeze_prompt_id_digest": _sha256_text(
+            payload["threshold_freeze_prompt_id_digest"],
+            "threshold_freeze_prompt_id_digest",
         ),
         "observation_source_sha256": _sha256_text(
             payload["observation_source_sha256"], "observation_source_sha256"
@@ -984,7 +1002,9 @@ def build_paired_outcomes(
                     "攻击后配对观测未绑定真实图像或仅图像盲检协议"
                 )
             try:
-                validate_image_only_detection_digest_record(proposed_row)
+                validate_image_only_measurement_projection_record(
+                    proposed_row
+                )
             except (TypeError, ValueError) as exc:
                 raise PairedSuperiorityError(
                     "主方法攻击后盲检原子无法独立重建"
@@ -996,9 +1016,9 @@ def build_paired_outcomes(
             }
             outcome.update(
                 {
-                    "proposed_detector_digest": _sha256_text(
-                        proposed_row.get("detector_digest", ""),
-                        "detector_digest",
+                    "proposed_measurement_digest": _sha256_text(
+                        proposed_row.get("measurement_digest", ""),
+                        "measurement_digest",
                     ),
                     "proposed_attacked_image_digest": proposed_attacked_digest,
                     "baseline_attacked_image_digest": baseline_attacked_digest,

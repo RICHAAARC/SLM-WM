@@ -437,7 +437,7 @@ def test_paired_outcomes_require_real_attacked_image_only_evidence(
                 "attacked_image_path": f"outputs/attacked/proposed_{row_index}.png",
                 "attacked_image_digest": image_digest,
                 "evaluated_image_digest": image_digest,
-                "detector_digest": build_stable_digest({"detector": row_index}),
+                "measurement_digest": build_stable_digest({"detector": row_index}),
                 "metadata": {
                     "detector_input_access_mode": "image_key_public_model_only",
                     "blind_image_detector": True,
@@ -454,7 +454,7 @@ def test_paired_outcomes_require_real_attacked_image_only_evidence(
         )
     monkeypatch.setattr(
         paired_module,
-        "validate_image_only_detection_digest_record",
+        "validate_image_only_measurement_projection_record",
         lambda record: dict(record),
     )
 
@@ -472,7 +472,7 @@ def test_paired_outcomes_require_real_attacked_image_only_evidence(
     assert len(outcomes) == len(proposed)
     assert len(outcomes[0]["proposed_attacked_image_digest"]) == 64
     assert len(outcomes[0]["baseline_attacked_image_digest"]) == 64
-    assert len(outcomes[0]["proposed_detector_digest"]) == 64
+    assert len(outcomes[0]["proposed_measurement_digest"]) == 64
     proposed[0]["metadata"]["blind_image_detector"] = False
     with pytest.raises(PairedSuperiorityError, match="仅图像盲检协议"):
         build_paired_outcomes(
@@ -680,9 +680,12 @@ def test_protocol_digest_covers_canonical_threshold_rows_and_report() -> None:
         rows.append(
             {
                 "method_id": method_id,
-                "threshold_source": "calibration_clean_negative_conformal",
+                "threshold_source": "nested_calibration_threshold_freeze_conformal_v1",
                 "target_fpr": "0.1",
                 "calibration_clean_negative_count": "36",
+                "threshold_freeze_negative_count": "24",
+                "calibration_partition_digest": "b" * 64,
+                "threshold_freeze_prompt_id_digest": "c" * 64,
                 "test_clean_negative_count": "34",
                 "calibrated_detection_threshold": "0.5",
                 "threshold_digest": f"{index + 1:x}" * 64,
@@ -701,6 +704,7 @@ def test_protocol_digest_covers_canonical_threshold_rows_and_report() -> None:
         paper_run_name="probe_paper",
         target_fpr=0.1,
     )
+    assert report["shared_calibration_partition_ready"] is True
     first = build_paired_superiority_protocol_digest(report, rows, "f" * 64)
     second = build_paired_superiority_protocol_digest(
         {**report, "target_fpr": 0.2},

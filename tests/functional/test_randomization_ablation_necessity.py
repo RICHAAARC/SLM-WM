@@ -227,7 +227,7 @@ def _install_sources(
             "ablation_frozen_protocols_digest": "9" * 64,
             "ablation_rebuilt_runtime_aggregates_digest": "a" * 64,
             "ablation_expected_runtime_configs_digest": "b" * 64,
-            "ablation_image_only_detector_config_digests": {},
+            "ablation_image_only_measurement_config_digests": {},
             "ablation_runtime_aggregate_rebuild_ready": True,
         }
 

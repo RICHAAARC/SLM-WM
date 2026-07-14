@@ -8,6 +8,8 @@ import math
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from experiments.protocol.image_only_evidence import decision_equivalent_score
+
 
 POSITIVE_SAMPLE_ROLES = frozenset({"positive_source"})
 NEGATIVE_SAMPLE_ROLES = frozenset({"clean_negative", "wrong_key_negative"})
@@ -90,86 +92,6 @@ def _strict_boolean(value: Any, field_name: str) -> bool:
     if not isinstance(value, bool):
         raise ValueError(f"{field_name} 必须是布尔值")
     return value
-
-
-def decision_equivalent_score(
-    record: Mapping[str, Any],
-    *,
-    rescue_margin_low: float,
-    geometry_score_threshold: float,
-    registration_confidence_threshold: float,
-    attention_sync_score_threshold: float,
-) -> float:
-    """把内容主判与几何救回写成等价的连续检测分数.
-
-    对几何可靠记录, 救回只允许在 ``rescue_margin_low <= raw-threshold < 0``
-    的冻结带宽内使用 aligned score.因此能够保持阳性判定的最大阈值为
-    ``min(aligned_score, raw_score-rescue_margin_low)``.该值与 raw score 取最大值后,
-    对任意阈值执行 ``score >= threshold`` 与正式布尔协议完全等价.
-    """
-
-    raw_score = _finite_float(record.get("content_score"), "content_score")
-    resolved_rescue_margin = _finite_float(rescue_margin_low, "rescue_margin_low")
-    if resolved_rescue_margin >= 0.0:
-        raise ValueError("rescue_margin_low 必须小于0")
-    resolved_geometry_threshold = _finite_float(
-        geometry_score_threshold,
-        "geometry_score_threshold",
-    )
-    resolved_registration_threshold = _finite_float(
-        registration_confidence_threshold,
-        "registration_confidence_threshold",
-    )
-    resolved_sync_threshold = _finite_float(
-        attention_sync_score_threshold,
-        "attention_sync_score_threshold",
-    )
-    aligned_score_value = record.get("aligned_content_score")
-    if aligned_score_value is None:
-        return raw_score
-    aligned_score = _finite_float(aligned_score_value, "aligned_content_score")
-    alignment = record.get("alignment")
-    alignment_reliable = bool(
-        _strict_boolean(
-            alignment.get("geometry_reliable"),
-            "alignment.geometry_reliable",
-        )
-        if isinstance(alignment, Mapping)
-        else False
-    )
-
-    def finite_at_least(value: Any, threshold: float) -> bool:
-        """复现冻结布尔协议对可选几何数值的有限性门禁."""
-
-        return bool(
-            isinstance(value, (int, float))
-            and not isinstance(value, bool)
-            and math.isfinite(float(value))
-            and float(value) >= threshold
-        )
-
-    geometry_reliable = (
-        alignment_reliable
-        and finite_at_least(
-            record.get("attention_geometry_score"),
-            resolved_geometry_threshold,
-        )
-        and finite_at_least(
-            record.get("registration_confidence"),
-            resolved_registration_threshold,
-        )
-        and finite_at_least(
-            record.get("attention_sync_score"),
-            resolved_sync_threshold,
-        )
-    )
-    if not geometry_reliable:
-        return raw_score
-    rescue_upper_threshold = min(
-        aligned_score,
-        raw_score - resolved_rescue_margin,
-    )
-    return max(raw_score, rescue_upper_threshold)
 
 
 def _scope_key(record: Mapping[str, Any]) -> tuple[str, str, str, str]:
@@ -308,20 +230,46 @@ def build_detection_score_tables(
     point, 因而无法由单点指标伪造曲线.
     """
 
-    threshold = _finite_float(frozen_protocol.get("content_threshold"), "content_threshold")
-    rescue_margin_low = _finite_float(frozen_protocol.get("rescue_margin_low"), "rescue_margin_low")
-    geometry_score_threshold = _finite_float(
-        frozen_protocol.get("geometry_score_threshold"),
+    threshold = _finite_float(
+        frozen_protocol.get("content_threshold"),
+        "content_threshold",
+    )
+    attention_geometry_enabled = frozen_protocol.get(
+        "attention_geometry_enabled"
+    )
+    image_alignment_enabled = frozen_protocol.get("image_alignment_enabled")
+    geometry_rescue_enabled = frozen_protocol.get("geometry_rescue_enabled")
+    if (
+        type(attention_geometry_enabled) is not bool
+        or type(image_alignment_enabled) is not bool
+        or type(geometry_rescue_enabled) is not bool
+        or geometry_rescue_enabled
+        is not (attention_geometry_enabled and image_alignment_enabled)
+        or (image_alignment_enabled and not attention_geometry_enabled)
+    ):
+        raise ValueError("冻结协议的几何 rescue 机制开关不一致")
+    rescue_fields = (
+        "rescue_margin_low",
         "geometry_score_threshold",
-    )
-    registration_confidence_threshold = _finite_float(
-        frozen_protocol.get("registration_confidence_threshold"),
         "registration_confidence_threshold",
-    )
-    attention_sync_score_threshold = _finite_float(
-        frozen_protocol.get("attention_sync_score_threshold"),
         "attention_sync_score_threshold",
     )
+    if geometry_rescue_enabled:
+        resolved_rescue_parameters: dict[str, float | None] = {
+            field_name: _finite_float(
+                frozen_protocol.get(field_name),
+                field_name,
+            )
+            for field_name in rescue_fields
+        }
+        if float(resolved_rescue_parameters["rescue_margin_low"]) >= 0.0:
+            raise ValueError("rescue_margin_low 必须小于0")
+    else:
+        if any(frozen_protocol.get(field_name) is not None for field_name in rescue_fields):
+            raise ValueError("禁用几何 rescue 时不得保留窗口或几何门")
+        resolved_rescue_parameters = {
+            field_name: None for field_name in rescue_fields
+        }
     threshold_digest = str(frozen_protocol.get("threshold_digest", ""))
     if not threshold_digest:
         raise ValueError("frozen protocol 必须提供 threshold_digest")
@@ -333,13 +281,22 @@ def build_detection_score_tables(
         label = _binary_label(record.get("sample_role"))
         score = decision_equivalent_score(
             record,
-            rescue_margin_low=rescue_margin_low,
-            geometry_score_threshold=geometry_score_threshold,
+            geometry_rescue_enabled=geometry_rescue_enabled,
+            rescue_margin_low=resolved_rescue_parameters[
+                "rescue_margin_low"
+            ],
+            geometry_score_threshold=resolved_rescue_parameters[
+                "geometry_score_threshold"
+            ],
             registration_confidence_threshold=(
-                registration_confidence_threshold
+                resolved_rescue_parameters[
+                    "registration_confidence_threshold"
+                ]
             ),
             attention_sync_score_threshold=(
-                attention_sync_score_threshold
+                resolved_rescue_parameters[
+                    "attention_sync_score_threshold"
+                ]
             ),
         )
         formal_decision = record.get("formal_evidence_positive")
@@ -349,7 +306,7 @@ def build_detection_score_tables(
         ) != (score >= threshold):
             raise ValueError("连续检测分数与冻结协议正式判定不一致")
         aligned_value = record.get("aligned_content_score")
-        observation_id = str(record.get("detector_digest") or record.get("record_id") or "")
+        observation_id = str(record.get("measurement_digest") or record.get("record_id") or "")
         if not observation_id:
             observation_id = (
                 f"{record.get('run_id', '')}:{record.get('prompt_id', '')}:"

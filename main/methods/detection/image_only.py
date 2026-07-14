@@ -50,20 +50,34 @@ ImageLatentEncoder = Callable[[Any], Any]
 AttentionRecord = tuple[str, Any, tuple[int, ...]]
 ImageAttentionExtractor = Callable[[Any], tuple[AttentionRecord, ...]]
 ImageAligner = Callable[[Any, AttentionAlignmentResult], Any]
-IMAGE_ONLY_DETECTOR_CONFIG_SCHEMA = "slm_wm_image_only_detector_config_v3"
+IMAGE_ONLY_MEASUREMENT_CONFIG_SCHEMA = (
+    "slm_wm_image_only_measurement_config_v2"
+)
+IMAGE_ONLY_EXTRACTION_PROFILE_SCHEMA = (
+    "slm_wm_image_only_extraction_profile_v1"
+)
+IMAGE_ONLY_IMAGE_PREPROCESSING_PROTOCOL = (
+    "diffusers_sd3_image_processor_rgb_preprocess_v1"
+)
+IMAGE_ONLY_VAE_ENCODING_PROTOCOL = (
+    "sd3_vae_latent_dist_mode_shift_then_scale_v1"
+)
 ATTENTION_ALIGNMENT_LAYER_SELECTION_RULE = (
     "lexicographic_objective_observation_confidence_then_frozen_layer_order_v1"
 )
 
 
 @dataclass(frozen=True)
-class ImageOnlyDetectionConfig:
-    """定义仅图像检测允许使用的公开参数和冻结阈值。"""
+class ImageOnlyMeasurementConfig:
+    """定义仅图像盲检科学证据测量所需的公开参数。
+
+    该配置只控制图像到连续证据的测量过程, 不包含任何由 calibration
+    数据决定的阈值或 rescue 窗口。最终判定由实验协议层冻结并应用,
+    从类型边界上避免原始测量路径形成第二套临时检测器。
+    """
 
     model_id: str
     attention_module_names: tuple[str, ...]
-    content_threshold: float
-    geometry_score_threshold: float
     attention_anchor_count: int
     attention_residual_threshold: float
     attention_minimum_inlier_ratio: float
@@ -72,32 +86,82 @@ class ImageOnlyDetectionConfig:
     tail_robust_weight: float
     tail_fraction: float
     keyed_prg_version: str
-    registration_confidence_threshold: float
-    attention_sync_score_threshold: float
-    rescue_margin_low: float
     attention_stable_token_fraction: float
     attention_unstable_pair_weight: float
     attention_relation_component_weights: tuple[float, ...]
+    model_revision: str
+    vae_class_name: str
+    transformer_class_name: str
+    scheduler_class_name: str
+    vae_scaling_factor: float
+    vae_shift_factor: float
+    latent_torch_dtype: str
+    width: int
+    height: int
+    inference_steps: int
+    public_detection_schedule_index: int
+    public_detection_noise_prg_protocol: str
+    public_detection_noise_domain: str
+    public_detection_conditioning_protocol: str
+    public_detection_condition_text: str
+    max_attention_tokens: int
+    attention_coordinate_convention: str
+    attention_grid_align_corners: bool
 
     def __post_init__(self) -> None:
-        """集中校验冻结检测协议。"""
+        """集中校验阈值无关的测量协议。"""
 
         if type(self.model_id) is not str or not self.model_id:
             raise ValueError("model_id 必须为非空精确 str")
+        for field_name in (
+            "model_revision",
+            "vae_class_name",
+            "transformer_class_name",
+            "scheduler_class_name",
+            "latent_torch_dtype",
+            "public_detection_noise_prg_protocol",
+            "public_detection_noise_domain",
+            "public_detection_conditioning_protocol",
+            "attention_coordinate_convention",
+        ):
+            value = getattr(self, field_name)
+            if type(value) is not str or not value:
+                raise ValueError(f"{field_name} 必须为非空精确 str")
+        if type(self.public_detection_condition_text) is not str:
+            raise ValueError(
+                "public_detection_condition_text 必须为精确 str"
+            )
+        if (
+            type(self.vae_scaling_factor) is not float
+            or type(self.vae_shift_factor) is not float
+            or not math.isfinite(self.vae_scaling_factor)
+            or not math.isfinite(self.vae_shift_factor)
+            or self.vae_scaling_factor <= 0.0
+        ):
+            raise ValueError("VAE 缩放与平移参数必须为有效精确 float")
+        for field_name in (
+            "width",
+            "height",
+            "inference_steps",
+            "max_attention_tokens",
+        ):
+            value = getattr(self, field_name)
+            if type(value) is not int or value <= 0:
+                raise ValueError(f"{field_name} 必须为正整数")
+        if self.width % 8 != 0 or self.height % 8 != 0:
+            raise ValueError("盲检图像宽高必须能被8整除")
+        if (
+            type(self.public_detection_schedule_index) is not int
+            or not 0
+            <= self.public_detection_schedule_index
+            < self.inference_steps
+        ):
+            raise ValueError("公开检测 schedule 索引必须位于推理步范围内")
+        if type(self.attention_grid_align_corners) is not bool:
+            raise ValueError("attention_grid_align_corners 必须为精确 bool")
         if self.attention_module_names != FROZEN_SD35_ATTENTION_MODULE_NAMES:
             raise ValueError("attention_module_names 必须等于冻结 SD3.5 层顺序")
         for field_name, value in (
-            ("content_threshold", self.content_threshold),
-            ("geometry_score_threshold", self.geometry_score_threshold),
-            (
-                "registration_confidence_threshold",
-                self.registration_confidence_threshold,
-            ),
-            (
-                "attention_sync_score_threshold",
-                self.attention_sync_score_threshold,
-            ),
-            ("rescue_margin_low", self.rescue_margin_low),
             (
                 "attention_stable_token_fraction",
                 self.attention_stable_token_fraction,
@@ -144,16 +208,11 @@ class ImageOnlyDetectionConfig:
             self.attention_minimum_inlier_ratio,
         )
         require_supported_keyed_prg_version(self.keyed_prg_version)
-        if self.rescue_margin_low >= 0.0:
-            raise ValueError("rescue_margin_low 必须小于 0")
+        require_supported_keyed_prg_version(
+            self.public_detection_noise_prg_protocol
+        )
         if abs(self.lf_weight + self.tail_robust_weight - 1.0) > 1e-9:
             raise ValueError("内容分支权重之和必须为 1")
-        if not -1.0 <= self.geometry_score_threshold <= 1.0:
-            raise ValueError("geometry_score_threshold 必须位于 [-1, 1]")
-        if not 0.0 <= self.registration_confidence_threshold <= 1.0:
-            raise ValueError("registration_confidence_threshold 必须位于 [0, 1]")
-        if not -1.0 <= self.attention_sync_score_threshold <= 1.0:
-            raise ValueError("attention_sync_score_threshold 必须位于 [-1, 1]")
         if not 0.0 < self.attention_stable_token_fraction <= 1.0:
             raise ValueError(
                 "attention_stable_token_fraction 必须位于 (0, 1]"
@@ -202,16 +261,16 @@ def select_image_only_alignment_candidate(
     )[1]
 
 
-def image_only_detector_config_identity_record(
-    config: ImageOnlyDetectionConfig,
+def image_only_measurement_config_identity_record(
+    config: ImageOnlyMeasurementConfig,
     *,
     attention_geometry_enabled: bool,
     image_alignment_enabled: bool,
 ) -> dict[str, Any]:
-    """构造可由检测记录独立重建的完整检测器配置身份."""
+    """构造可由原始记录独立重建的阈值无关测量配置身份."""
 
-    if not isinstance(config, ImageOnlyDetectionConfig):
-        raise TypeError("config 必须为 ImageOnlyDetectionConfig")
+    if not isinstance(config, ImageOnlyMeasurementConfig):
+        raise TypeError("config 必须为 ImageOnlyMeasurementConfig")
     if (
         type(attention_geometry_enabled) is not bool
         or type(image_alignment_enabled) is not bool
@@ -226,10 +285,49 @@ def image_only_detector_config_identity_record(
         prg_version=config.keyed_prg_version,
     )
     payload = {
-        "image_only_detector_config_schema": (
-            IMAGE_ONLY_DETECTOR_CONFIG_SCHEMA
+        "image_only_measurement_config_schema": (
+            IMAGE_ONLY_MEASUREMENT_CONFIG_SCHEMA
         ),
         "model_id": config.model_id,
+        "model_revision": config.model_revision,
+        "image_only_extraction_profile_schema": (
+            IMAGE_ONLY_EXTRACTION_PROFILE_SCHEMA
+        ),
+        "image_preprocessing_protocol": (
+            IMAGE_ONLY_IMAGE_PREPROCESSING_PROTOCOL
+        ),
+        "vae_encoding_protocol": IMAGE_ONLY_VAE_ENCODING_PROTOCOL,
+        "vae_class_name": config.vae_class_name,
+        "transformer_class_name": config.transformer_class_name,
+        "scheduler_class_name": config.scheduler_class_name,
+        "vae_scaling_factor": config.vae_scaling_factor,
+        "vae_shift_factor": config.vae_shift_factor,
+        "latent_torch_dtype": config.latent_torch_dtype,
+        "width": config.width,
+        "height": config.height,
+        "inference_steps": config.inference_steps,
+        "public_detection_schedule_index": (
+            config.public_detection_schedule_index
+        ),
+        "public_detection_noise_prg_protocol": (
+            config.public_detection_noise_prg_protocol
+        ),
+        "public_detection_noise_domain": (
+            config.public_detection_noise_domain
+        ),
+        "public_detection_conditioning_protocol": (
+            config.public_detection_conditioning_protocol
+        ),
+        "public_detection_condition_text": (
+            config.public_detection_condition_text
+        ),
+        "max_attention_tokens": config.max_attention_tokens,
+        "attention_coordinate_convention": (
+            config.attention_coordinate_convention
+        ),
+        "attention_grid_align_corners": (
+            config.attention_grid_align_corners
+        ),
         "attention_module_names": list(config.attention_module_names),
         "attention_alignment_layer_selection_rule": (
             ATTENTION_ALIGNMENT_LAYER_SELECTION_RULE
@@ -252,15 +350,6 @@ def image_only_detector_config_identity_record(
         "keyed_prg_protocol_digest": prg_protocol[
             "keyed_prg_protocol_digest"
         ],
-        "content_threshold": config.content_threshold,
-        "geometry_score_threshold": config.geometry_score_threshold,
-        "registration_confidence_threshold": (
-            config.registration_confidence_threshold
-        ),
-        "attention_sync_score_threshold": (
-            config.attention_sync_score_threshold
-        ),
-        "rescue_margin_low": config.rescue_margin_low,
         "attention_alignment_gate": attention_alignment_gate_record(
             config.attention_anchor_count,
             config.attention_residual_threshold,
@@ -283,13 +372,13 @@ def image_only_detector_config_identity_record(
     }
     return {
         **payload,
-        "image_only_detector_config_digest": build_stable_digest(payload),
+        "image_only_measurement_config_digest": build_stable_digest(payload),
     }
 
 
 @dataclass(frozen=True)
-class ImageOnlyDetectionResult:
-    """保存内容主判、注意力几何救回和完整 evidence 判定。"""
+class ImageOnlyMeasurementResult:
+    """保存仅图像盲检产生的阈值无关连续证据。"""
 
     content: BlindContentScore
     lf_carrier_protocol_digest: str
@@ -302,24 +391,16 @@ class ImageOnlyDetectionResult:
     tail_selected_element_count: int
     tail_threshold: float
     tail_retained_fraction: float
-    raw_content_margin: float
     aligned_lf_score: float | None
     aligned_tail_robust_score: float | None
     aligned_content_score: float | None
-    aligned_content_margin: float | None
-    positive_by_content: bool
     attention_geometry_score: float | None
     raw_attention_geometry_score: float | None
     attention_sync_score: float | None
     registration_confidence: float | None
     alignment: AttentionAlignmentResult | None
-    geometry_reliable: bool
-    content_failure_reason: str
-    rescue_eligible: bool
-    rescue_applied: bool
-    evidence_positive: bool
-    image_only_detector_config_digest: str
-    detector_digest: str
+    image_only_measurement_config_digest: str
+    measurement_digest: str
     metadata: dict[str, Any]
 
     def to_record(self) -> dict[str, Any]:
@@ -355,37 +436,30 @@ class ImageOnlyDetectionResult:
             ),
             "tail_threshold": self.tail_threshold,
             "tail_retained_fraction": self.tail_retained_fraction,
-            "raw_content_margin": self.raw_content_margin,
             "aligned_lf_score": self.aligned_lf_score,
             "aligned_tail_robust_score": self.aligned_tail_robust_score,
             "aligned_content_score": self.aligned_content_score,
-            "aligned_content_margin": self.aligned_content_margin,
-            "positive_by_content": self.positive_by_content,
             "attention_geometry_score": self.attention_geometry_score,
             "raw_attention_geometry_score": self.raw_attention_geometry_score,
             "attention_sync_score": self.attention_sync_score,
             "registration_confidence": self.registration_confidence,
             "alignment": alignment_record,
-            "geometry_reliable": self.geometry_reliable,
-            "content_failure_reason": self.content_failure_reason,
-            "rescue_eligible": self.rescue_eligible,
-            "rescue_applied": self.rescue_applied,
-            "evidence_positive": self.evidence_positive,
-            "image_only_detector_config_digest": (
-                self.image_only_detector_config_digest
+            "image_only_measurement_config_digest": (
+                self.image_only_measurement_config_digest
             ),
-            "detector_digest": self.detector_digest,
+            "measurement_digest": self.measurement_digest,
             "metadata": self.metadata,
         }
 
 
-def recompute_image_only_detection_digest_payload(
+def recompute_image_only_measurement_digest_payload(
     record: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """从样本级决策字段重建紧凑检测记录摘要正文.
+    """从样本级连续证据重建紧凑测量记录摘要正文.
 
-    完整检测器配置只保存在顶层运行配置中. 样本记录通过配置摘要引用该配置,
-    此处只绑定会改变样本分数、配准救回或最终判定的字段.
+    完整测量配置只保存在顶层运行配置中. 样本记录通过配置摘要引用该配置,
+    此处只绑定会改变样本分数或配准证据的字段. calibration 派生参数和
+    最终判定不属于原始测量记录, 因而不得进入该摘要正文.
     """
 
     if not isinstance(record, Mapping):
@@ -395,8 +469,8 @@ def recompute_image_only_detection_digest_payload(
         raise ValueError("检测记录缺少 metadata")
     alignment = record.get("alignment")
     return {
-        "image_only_detector_config_digest": record.get(
-            "image_only_detector_config_digest"
+        "image_only_measurement_config_digest": record.get(
+            "image_only_measurement_config_digest"
         ),
         "lf_carrier_protocol_digest": record.get(
             "lf_carrier_protocol_digest"
@@ -425,24 +499,11 @@ def recompute_image_only_detection_digest_payload(
         "lf_weight": record.get("lf_weight"),
         "tail_robust_weight": record.get("tail_robust_weight"),
         "tail_fraction": record.get("tail_fraction"),
-        "raw_content_margin": record.get("raw_content_margin"),
         "aligned_lf_score": record.get("aligned_lf_score"),
         "aligned_tail_robust_score": record.get(
             "aligned_tail_robust_score"
         ),
         "aligned_content_score": record.get("aligned_content_score"),
-        "aligned_content_margin": record.get("aligned_content_margin"),
-        "content_threshold": metadata.get("content_threshold"),
-        "geometry_score_threshold": metadata.get(
-            "geometry_score_threshold"
-        ),
-        "registration_confidence_threshold": metadata.get(
-            "registration_confidence_threshold"
-        ),
-        "attention_sync_score_threshold": metadata.get(
-            "attention_sync_score_threshold"
-        ),
-        "rescue_margin_low": metadata.get("rescue_margin_low"),
         "attention_geometry_score": record.get("attention_geometry_score"),
         "raw_attention_geometry_score": record.get(
             "raw_attention_geometry_score"
@@ -469,12 +530,6 @@ def recompute_image_only_detection_digest_payload(
         "detection_qk_atomic_content_digest": metadata.get(
             "detection_qk_atomic_content_digest"
         ),
-        "content_failure_reason": record.get("content_failure_reason"),
-        "positive_by_content": record.get("positive_by_content"),
-        "geometry_reliable": record.get("geometry_reliable"),
-        "rescue_eligible": record.get("rescue_eligible"),
-        "rescue_applied": record.get("rescue_applied"),
-        "evidence_positive": record.get("evidence_positive"),
     }
 
 
@@ -498,16 +553,43 @@ def _sha256_text(value: Any) -> bool:
     )
 
 
-def validate_image_only_detection_digest_record(
+_DECISION_MATERIALIZATION_FIELDS = frozenset(
+    {
+        "frozen_content_threshold",
+        "frozen_rescue_margin_low",
+        "frozen_geometry_score_threshold",
+        "frozen_registration_confidence_threshold",
+        "frozen_attention_sync_score_threshold",
+        "frozen_threshold_digest",
+        "frozen_image_only_measurement_config_digest",
+        "frozen_attention_geometry_enabled",
+        "frozen_image_alignment_enabled",
+        "frozen_geometry_rescue_enabled",
+        "formal_raw_content_margin",
+        "formal_aligned_content_margin",
+        "formal_positive_by_content",
+        "formal_geometry_reliable",
+        "formal_content_failure_reason",
+        "formal_rescue_eligible",
+        "formal_rescue_applied",
+        "formal_evidence_positive",
+        "formal_metric_status",
+    }
+)
+
+
+def _validate_image_only_measurement_digest_record(
     record: Mapping[str, Any],
+    *,
+    require_threshold_free: bool,
 ) -> dict[str, Any]:
-    """复算样本分数、配准救回、最终判定和紧凑记录摘要."""
+    """复算连续证据；可选择强制原始记录尚未物化决策。"""
 
     metadata = record.get("metadata")
     if not isinstance(metadata, Mapping):
         raise ValueError("检测记录缺少 metadata")
     for field_name in (
-        "image_only_detector_config_digest",
+        "image_only_measurement_config_digest",
         "lf_carrier_protocol_digest",
         "tail_carrier_protocol_digest",
     ):
@@ -580,42 +662,13 @@ def validate_image_only_detection_digest_record(
     ):
         raise ValueError("检测记录的尾部比例、shape 或选择计数不能重建")
 
-    thresholds = tuple(
-        metadata.get(field_name)
-        for field_name in (
-            "content_threshold",
-            "geometry_score_threshold",
-            "registration_confidence_threshold",
-            "attention_sync_score_threshold",
-            "rescue_margin_low",
-        )
-    )
-    if not all(type(value) is float and math.isfinite(value) for value in thresholds):
-        raise ValueError("检测记录缺少显式冻结阈值")
-    (
-        content_threshold,
-        geometry_score_threshold,
-        registration_confidence_threshold,
-        attention_sync_score_threshold,
-        rescue_margin_low,
-    ) = thresholds
-    raw_margin = record.get("raw_content_margin")
-    if not _finite_number(raw_margin) or not math.isclose(
-        float(raw_margin),
-        float(raw_scores[2]) - content_threshold,
-        abs_tol=1e-7,
-    ):
-        raise ValueError("原图内容 margin 不能由分数和阈值重建")
-
     aligned_score = record.get("aligned_content_score")
-    aligned_margin = record.get("aligned_content_margin")
     if aligned_score is None:
         if any(
             record.get(field_name) is not None
             for field_name in (
                 "aligned_lf_score",
                 "aligned_tail_robust_score",
-                "aligned_content_margin",
             )
         ):
             raise ValueError("无 aligned 分数时不得保留部分分支分数")
@@ -625,7 +678,7 @@ def validate_image_only_detection_digest_record(
         if (
             not all(
                 _finite_number(value)
-                for value in (aligned_lf, aligned_tail, aligned_score, aligned_margin)
+                for value in (aligned_lf, aligned_tail, aligned_score)
             )
             or (lf_weight == 0.0 and float(aligned_lf) != 0.0)
             or (tail_weight == 0.0 and float(aligned_tail) != 0.0)
@@ -633,11 +686,6 @@ def validate_image_only_detection_digest_record(
                 float(aligned_score),
                 lf_weight * float(aligned_lf)
                 + tail_weight * float(aligned_tail),
-                abs_tol=1e-7,
-            )
-            or not math.isclose(
-                float(aligned_margin),
-                float(aligned_score) - content_threshold,
                 abs_tol=1e-7,
             )
         ):
@@ -651,7 +699,6 @@ def validate_image_only_detection_digest_record(
     stable_pair_ready = metadata.get("stable_pair_weight_identity_ready")
     if type(stable_pair_ready) is not bool:
         raise ValueError("stable pair 权重身份就绪字段必须为 bool")
-    registration_geometry_reliable = False
     if alignment is None:
         if (
             geometry_score is not None
@@ -673,7 +720,6 @@ def validate_image_only_detection_digest_record(
         validate_attention_alignment_record(alignment)
         if alignment.get("layer_name") not in FROZEN_SD35_ATTENTION_MODULE_NAMES:
             raise ValueError("alignment 所选层不属于冻结 SD3.5 注意力层")
-        registration_geometry_reliable = alignment.get("geometry_reliable") is True
         if (
             not _finite_number(geometry_score)
             or not _finite_number(raw_geometry_score)
@@ -691,80 +737,103 @@ def validate_image_only_detection_digest_record(
         ):
             raise ValueError("注意力分数或注册置信度与 alignment 不一致")
 
-    expected_geometry_reliable = bool(
-        alignment is not None
-        and registration_geometry_reliable
-        and stable_pair_ready
-        and _finite_number(geometry_score)
-        and float(geometry_score) >= geometry_score_threshold
-        and _finite_number(registration_confidence)
-        and float(registration_confidence) >= registration_confidence_threshold
-        and _finite_number(sync_score)
-        and float(sync_score) >= attention_sync_score_threshold
-    )
-    positive_by_content = float(raw_margin) >= 0.0
-    failure_reason = (
-        "content_positive"
-        if positive_by_content
-        else (
-            "geometry_suspected"
-            if rescue_margin_low <= float(raw_margin) < 0.0
-            and expected_geometry_reliable
-            else (
-                "low_confidence"
-                if rescue_margin_low <= float(raw_margin) < 0.0
-                else "content_evidence_absent"
-            )
-        )
-    )
-    rescue_eligible = bool(
-        rescue_margin_low <= float(raw_margin) < 0.0
-        and expected_geometry_reliable
-        and aligned_score is not None
-    )
-    rescue_applied = bool(
-        rescue_eligible
-        and aligned_margin is not None
-        and float(aligned_margin) >= 0.0
-    )
-    expected = {
-        "positive_by_content": positive_by_content,
-        "geometry_reliable": expected_geometry_reliable,
-        "content_failure_reason": failure_reason,
-        "rescue_eligible": rescue_eligible,
-        "rescue_applied": rescue_applied,
-        "evidence_positive": positive_by_content or rescue_applied,
+    forbidden_decision_fields = {
+        "raw_content_margin",
+        "aligned_content_margin",
+        "positive_by_content",
+        "geometry_reliable",
+        "content_failure_reason",
+        "rescue_eligible",
+        "rescue_applied",
+        "evidence_positive",
     }
-    if any(record.get(name) != value for name, value in expected.items()):
-        raise ValueError("检测记录的配准救回或最终判定不能重建")
+    if require_threshold_free and (
+        forbidden_decision_fields.intersection(record)
+        or _DECISION_MATERIALIZATION_FIELDS.intersection(record)
+    ):
+        raise ValueError("原始测量记录不得包含 calibration 决策字段")
+    forbidden_metadata_fields = {
+        "content_threshold",
+        "geometry_score_threshold",
+        "registration_confidence_threshold",
+        "attention_sync_score_threshold",
+        "rescue_margin_low",
+    }
+    if forbidden_metadata_fields.intersection(metadata):
+        raise ValueError("原始测量 metadata 不得包含 calibration 参数")
 
-    payload = recompute_image_only_detection_digest_payload(record)
-    if record.get("detector_digest") != build_stable_digest(payload):
-        raise ValueError("detector digest 不能由样本级决策字段独立重建")
+    payload = recompute_image_only_measurement_digest_payload(record)
+    if record.get("measurement_digest") != build_stable_digest(payload):
+        raise ValueError("measurement digest 不能由样本级连续证据独立重建")
     return payload
 
 
-def detect_image_only_watermark(
+def validate_image_only_measurement_digest_record(
+    record: Mapping[str, Any],
+) -> dict[str, Any]:
+    """严格复算尚未经过 calibration/Apply 的阈值无关测量记录。"""
+
+    return _validate_image_only_measurement_digest_record(
+        record,
+        require_threshold_free=True,
+    )
+
+
+def validate_image_only_measurement_projection_record(
+    record: Mapping[str, Any],
+) -> dict[str, Any]:
+    """从最终记录投影并复算原始连续测量原子。
+
+    该函数只验证 Measure 产生的原子是否仍可重建，不把最终判定记录重新
+    解释为 calibration 输入。Calibrate 与 Apply 必须调用严格版本。
+    """
+
+    return _validate_image_only_measurement_digest_record(
+        record,
+        require_threshold_free=False,
+    )
+
+
+def project_image_only_measurement_record(
+    record: Mapping[str, Any],
+) -> dict[str, Any]:
+    """从最终记录显式投影出可重新校准的阈值无关测量记录。
+
+    该函数先复验连续测量原子，再只移除由 Apply 物化的决策字段。调用方必须
+    显式执行此投影，Calibrate 本身仍拒绝最终记录，从而保持测量与判定边界清晰。
+    """
+
+    validate_image_only_measurement_projection_record(record)
+    projected = {
+        field_name: value
+        for field_name, value in record.items()
+        if field_name not in _DECISION_MATERIALIZATION_FIELDS
+    }
+    validate_image_only_measurement_digest_record(projected)
+    return projected
+
+
+def measure_image_only_watermark(
     image: Any,
     key_material: str,
-    config: ImageOnlyDetectionConfig,
+    config: ImageOnlyMeasurementConfig,
     image_latent_encoder: ImageLatentEncoder,
     image_attention_extractor: ImageAttentionExtractor | None = None,
     image_aligner: ImageAligner | None = None,
-) -> ImageOnlyDetectionResult:
-    """仅从待检图像、密钥和公开模型配置计算水印判定。
+) -> ImageOnlyMeasurementResult:
+    """仅从待检图像、密钥和公开模型配置测量水印连续证据。
 
     函数签名故意不接受原始 latent、生成轨迹、原始图像、prompt 或样本级安全
     基底, 从接口层阻止检测路径重新依赖生成端私有状态。
     """
 
-    detector_config_identity = image_only_detector_config_identity_record(
+    measurement_config_identity = image_only_measurement_config_identity_record(
         config,
         attention_geometry_enabled=image_attention_extractor is not None,
         image_alignment_enabled=image_aligner is not None,
     )
-    detector_config_digest = detector_config_identity[
-        "image_only_detector_config_digest"
+    measurement_config_digest = measurement_config_identity[
+        "image_only_measurement_config_digest"
     ]
     observed_latent = image_latent_encoder(image)
     alignment_gate = attention_alignment_gate_record(
@@ -843,15 +912,11 @@ def detect_image_only_watermark(
         config.lf_weight,
         config.tail_robust_weight,
     )
-    margin = content.content_score - config.content_threshold
-    positive_by_content = margin >= 0.0
-
     geometry_score: float | None = None
     raw_geometry_score: float | None = None
     sync_score: float | None = None
     registration_confidence: float | None = None
     alignment: AttentionAlignmentResult | None = None
-    geometry_reliable = False
     aligned_image: Any | None = None
     stable_token_selection_digest = ""
     stable_pair_weight_identity_digest = ""
@@ -1033,45 +1098,21 @@ def detect_image_only_watermark(
                 and alignment.canonical_pair_weight_realization_digest
                 == aligned_pair_weights.pair_weight_realization_digest
             )
-        geometry_reliable = bool(
-            alignment is not None
-            and alignment.geometry_reliable
-            and stable_pair_weight_identity_ready
-            and geometry_score is not None
-            and geometry_score >= config.geometry_score_threshold
-            and registration_confidence is not None
-            and registration_confidence >= config.registration_confidence_threshold
-            and sync_score is not None
-            and sync_score >= config.attention_sync_score_threshold
-        )
-    alignment_available = (
-        alignment is not None
-        and alignment.geometry_reliable
-        and aligned_image is not None
-    )
-    if positive_by_content:
-        content_failure_reason = "content_positive"
-    elif config.rescue_margin_low <= margin < 0.0 and geometry_reliable:
-        content_failure_reason = "geometry_suspected"
-    elif config.rescue_margin_low <= margin < 0.0:
-        content_failure_reason = "low_confidence"
-    else:
-        content_failure_reason = "content_evidence_absent"
-    rescue_eligible = (
-        config.rescue_margin_low <= margin < 0.0
-        and alignment_available
-        and geometry_reliable
-        and content_failure_reason in {"geometry_suspected", "low_confidence"}
+    alignment_measurement_available = (
+        alignment is not None and aligned_image is not None
     )
     aligned_lf_score: float | None = None
     aligned_tail_robust_score: float | None = None
     aligned_content_score: float | None = None
-    aligned_content_margin: float | None = None
     aligned_lf_template_content_sha256: str | None = None
     aligned_tail_template_content_sha256: str | None = None
     aligned_tail_threshold: float | None = None
     aligned_tail_retained_fraction: float | None = None
-    if alignment_available and alignment is not None and aligned_image is not None:
+    if (
+        alignment_measurement_available
+        and alignment is not None
+        and aligned_image is not None
+    ):
         aligned_latent = image_latent_encoder(aligned_image)
         if tuple(aligned_latent.shape) != tuple(observed_latent.shape):
             raise RuntimeError("配准前后的编码 latent 形状必须完全一致")
@@ -1134,13 +1175,6 @@ def detect_image_only_watermark(
         aligned_lf_score = aligned_content.lf_score
         aligned_tail_robust_score = aligned_content.tail_robust_score
         aligned_content_score = aligned_content.content_score
-        aligned_content_margin = aligned_content_score - config.content_threshold
-    rescue_applied = (
-        rescue_eligible
-        and aligned_content_margin is not None
-        and aligned_content_margin >= 0.0
-    )
-    evidence_positive = positive_by_content or rescue_applied
     qk_atomic_content_digest = (
         qk_atomic_evaluation_records_digest(
             qk_atomic_content_records,
@@ -1155,16 +1189,9 @@ def detect_image_only_watermark(
         "generation_latent_trace_required": False,
         "source_image_required": False,
         "prompt_required": False,
-        "image_only_detector_config_digest": detector_config_digest,
+        "image_only_measurement_config_digest": measurement_config_digest,
         "attention_geometry_enabled": image_attention_extractor is not None,
         "image_alignment_enabled": image_aligner is not None,
-        "content_threshold": config.content_threshold,
-        "rescue_margin_low": config.rescue_margin_low,
-        "geometry_score_threshold": config.geometry_score_threshold,
-        "registration_confidence_threshold": (
-            config.registration_confidence_threshold
-        ),
-        "attention_sync_score_threshold": config.attention_sync_score_threshold,
         "attention_alignment_gate": dict(alignment_gate),
         **alignment_gate,
         "attention_sync_source": "aligned_image_reextracted_real_qk",
@@ -1233,35 +1260,27 @@ def detect_image_only_watermark(
         "tail_selected_element_count": tail_selected_element_count,
         "tail_threshold": tail_threshold,
         "tail_retained_fraction": retained_fraction,
-        "raw_content_margin": margin,
         "aligned_lf_score": aligned_lf_score,
         "aligned_tail_robust_score": aligned_tail_robust_score,
         "aligned_content_score": aligned_content_score,
-        "aligned_content_margin": aligned_content_margin,
-        "positive_by_content": positive_by_content,
         "attention_geometry_score": geometry_score,
         "raw_attention_geometry_score": raw_geometry_score,
         "attention_sync_score": sync_score,
         "registration_confidence": registration_confidence,
         "alignment": alignment,
-        "geometry_reliable": geometry_reliable,
-        "content_failure_reason": content_failure_reason,
-        "rescue_eligible": rescue_eligible,
-        "rescue_applied": rescue_applied,
-        "evidence_positive": evidence_positive,
-        "image_only_detector_config_digest": detector_config_digest,
+        "image_only_measurement_config_digest": measurement_config_digest,
         "metadata": metadata,
     }
-    unsigned_result = ImageOnlyDetectionResult(
+    unsigned_result = ImageOnlyMeasurementResult(
         **result_kwargs,
-        detector_digest="",
+        measurement_digest="",
     )
-    detector_digest = build_stable_digest(
-        recompute_image_only_detection_digest_payload(
+    measurement_digest = build_stable_digest(
+        recompute_image_only_measurement_digest_payload(
             unsigned_result.to_record()
         )
     )
-    return ImageOnlyDetectionResult(
+    return ImageOnlyMeasurementResult(
         **result_kwargs,
-        detector_digest=detector_digest,
+        measurement_digest=measurement_digest,
     )

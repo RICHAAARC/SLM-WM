@@ -53,9 +53,11 @@ from experiments.protocol.attacks import (
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.splits import apply_split_assignments, group_prompt_ids_by_split
-from experiments.runners.image_only_dataset_runtime import (
+from experiments.protocol.image_only_evidence import (
     apply_frozen_evidence_protocol,
     calibrate_complete_evidence_protocol,
+)
+from experiments.runners.image_only_dataset_runtime import (
     validate_formal_dataset_randomization_identity,
 )
 from experiments.runners.semantic_watermark_runtime import (
@@ -364,6 +366,7 @@ def _formal_attack_coverage_ready(
     *,
     split: str,
     expected_generation_seed_random: int,
+    expected_threshold_digest: str,
 ) -> bool:
     """核验单个消融运行只在 test split 精确执行完整正式攻击集."""
 
@@ -413,6 +416,13 @@ def _formal_attack_coverage_ready(
                 record.get("attack_seed_random") == expected_attack_seed,
                 record.get("formal_attack_seed_protocol_digest")
                 == attack_seed_protocol_digest,
+                (
+                    config.attack_name != "adversarial_removal_attack"
+                    or record.get(
+                        "detector_guided_attack_threshold_digest"
+                    )
+                    == expected_threshold_digest
+                ),
             )
         ):
             return False
@@ -606,10 +616,49 @@ def run_runtime_rerun_ablations(
         )
         return progress
 
-    for base_config in resolved_base_configs:
+    calibration_base_configs = tuple(
+        config for config in resolved_base_configs if config.split == "calibration"
+    )
+    remaining_base_configs = tuple(
+        config for config in resolved_base_configs if config.split != "calibration"
+    )
+    execution_base_configs = calibration_base_configs + remaining_base_configs
+    protocols: dict[str, Any] = {}
+    for base_config in execution_base_configs:
+        if base_config.split != "calibration" and not protocols:
+            expected_calibration_run_count = (
+                len(calibration_base_configs) * len(resolved_specs)
+            )
+            completed_calibration_entries = tuple(
+                entry for entry in run_entries if entry["split"] == "calibration"
+            )
+            if len(completed_calibration_entries) != expected_calibration_run_count:
+                break
+            for calibration_spec in resolved_specs:
+                calibration_negatives = tuple(
+                    detection
+                    for entry in completed_calibration_entries
+                    if entry["ablation_id"] == calibration_spec.ablation_id
+                    for detection in entry["detections"]
+                    if detection.get("sample_role") == "clean_negative"
+                    and not detection.get("attack_id")
+                )
+                protocols[calibration_spec.ablation_id] = (
+                    calibrate_complete_evidence_protocol(
+                        calibration_negatives, target_fpr
+                    )
+                )
         prompt_index = canonical_prompt_index_by_id[base_config.prompt_id]
         for spec in resolved_specs:
             run_config = spec.apply(base_config, output_dir)
+            run_config = replace(
+                run_config,
+                detector_guided_attack_threshold_protocol=(
+                    protocols[spec.ablation_id].to_dict()
+                    if base_config.split == "test" and protocols
+                    else None
+                ),
+            )
             result = load_completed_semantic_watermark_runtime_result(run_config, root=root_path)
             generated_now = False
             if result is not None:
@@ -655,7 +704,6 @@ def run_runtime_rerun_ablations(
         paper_run_name=resolved_paper_run_name,
     )
 
-    protocols: dict[str, Any] = {}
     formal_records: list[dict[str, Any]] = []
     formal_detection_records: list[dict[str, Any]] = []
     for spec in resolved_specs:
@@ -667,15 +715,18 @@ def run_runtime_rerun_ablations(
             for detection in entry["detections"]
             if detection.get("sample_role") == "clean_negative" and not detection.get("attack_id")
         )
-        reference_config = next(
-            config for config in resolved_base_configs if config.split == "calibration"
+        rebuilt_protocol = calibrate_complete_evidence_protocol(
+            calibration_negatives, target_fpr=target_fpr
         )
-        protocol = calibrate_complete_evidence_protocol(
-            calibration_negatives,
-            target_fpr=target_fpr,
-            rescue_margin_low=reference_config.rescue_margin_low,
-        )
-        protocols[spec.ablation_id] = protocol
+        if (
+            spec.ablation_id in protocols
+            and rebuilt_protocol != protocols[spec.ablation_id]
+        ):
+            raise RuntimeError(
+                "消融 test 运行绑定的冻结协议不能由 calibration 重建"
+            )
+        protocol = rebuilt_protocol
+        protocols[spec.ablation_id] = rebuilt_protocol
         for entry in spec_entries:
             detections = apply_frozen_evidence_protocol(entry["detections"], protocol)
             formal_attack_coverage_ready = _formal_attack_coverage_ready(
@@ -686,6 +737,7 @@ def run_runtime_rerun_ablations(
                         "formal_randomization_reference"
                     ]["generation_seed_random"]
                 ),
+                expected_threshold_digest=protocol.threshold_digest,
             )
             formal_records.append(
                 {
@@ -869,7 +921,13 @@ def run_runtime_rerun_ablations(
         and scientific_unit_provenance["scientific_unit_provenance_record_count"]
         == expected_run_count
         and all(
-            protocol.calibration_negative_count == split_counts["calibration"]
+            protocol.calibration_source_negative_count
+            == split_counts["calibration"]
+            and protocol.rescue_window_fit_negative_count
+            == split_counts["calibration"] // 3
+            and protocol.threshold_freeze_negative_count
+            == split_counts["calibration"]
+            - split_counts["calibration"] // 3
             for protocol in protocols.values()
         )
         and all(

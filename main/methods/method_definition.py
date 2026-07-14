@@ -19,6 +19,10 @@ from main.methods.carrier.keyed_tensor import (
 )
 from main.methods.detection.image_only import (
     ATTENTION_ALIGNMENT_LAYER_SELECTION_RULE,
+    IMAGE_ONLY_EXTRACTION_PROFILE_SCHEMA,
+    IMAGE_ONLY_IMAGE_PREPROCESSING_PROTOCOL,
+    IMAGE_ONLY_MEASUREMENT_CONFIG_SCHEMA,
+    IMAGE_ONLY_VAE_ENCODING_PROTOCOL,
 )
 from main.methods.geometry.attention_alignment import (
     ATTENTION_ALIGNMENT_ANCHOR_COUNT,
@@ -35,7 +39,7 @@ from main.methods.geometry.differentiable_attention import (
 )
 
 
-METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_v10"
+METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_v12"
 
 
 def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
@@ -221,6 +225,82 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
                 "best_registration_objective_minus_identity_registration_objective"
             ),
             "registration_objective_margin_required_positive": True,
+        },
+        "image_only_measurement": {
+            "measurement_config_schema": (
+                IMAGE_ONLY_MEASUREMENT_CONFIG_SCHEMA
+            ),
+            "extraction_profile_schema": (
+                IMAGE_ONLY_EXTRACTION_PROFILE_SCHEMA
+            ),
+            "image_preprocessing_protocol": (
+                IMAGE_ONLY_IMAGE_PREPROCESSING_PROTOCOL
+            ),
+            "vae_encoding_protocol": IMAGE_ONLY_VAE_ENCODING_PROTOCOL,
+            "measurement_identity_scope": (
+                "complete_image_to_latent_qk_and_carrier_configuration"
+            ),
+            "threshold_or_decision_fields_allowed": False,
+        },
+        "image_only_evidence_calibration": {
+            "measurement_scope": (
+                "threshold_independent_continuous_evidence_only"
+            ),
+            "measurement_forbidden_content": (
+                "calibration_parameters_thresholds_and_decisions"
+            ),
+            "calibration_source_role": (
+                "registered_key_unattacked_clean_negative_only"
+            ),
+            "partition_sort_key": (
+                "sha256_partition_protocol_nul_prompt_id"
+            ),
+            "window_fit_count_rule": "floor_calibration_count_divided_by_3",
+            "threshold_freeze_count_rule": (
+                "calibration_count_minus_window_fit_count"
+            ),
+            "partition_subsets_disjoint": True,
+            "allowed_false_positive_count_rule": (
+                "max_0_floor_target_fpr_times_negative_count_plus_1_minus_1"
+            ),
+            "window_fit_parameter_scope": [
+                "three_attention_geometry_thresholds",
+                "provisional_raw_content_threshold",
+                "rescue_margin_low",
+            ],
+            "rescue_candidate_rule": (
+                "negative_raw_margins_exact_and_nextafter_toward_zero_"
+                "plus_nextafter_zero_toward_negative_infinity"
+            ),
+            "rescue_selection_rule": (
+                "numerically_smallest_widest_candidate_within_"
+                "window_fit_false_positive_budget"
+            ),
+            "geometry_ready_rule": (
+                "structural_alignment_and_stable_pair_and_three_frozen_gates"
+            ),
+            "decision_equivalent_score_rule": (
+                "geometry_ready_max_raw_min_aligned_raw_minus_rescue_"
+                "otherwise_raw"
+            ),
+            "final_threshold_source": (
+                "threshold_freeze_decision_equivalent_scores_only"
+            ),
+            "shared_baseline_threshold_freeze_prompt_ids": True,
+            "raw_aligned_use_single_content_threshold": True,
+            "geometry_rescue_enablement_rule": (
+                "attention_geometry_enabled_and_image_alignment_enabled"
+            ),
+            "geometry_rescue_disabled_score_rule": (
+                "raw_content_score_only"
+            ),
+            "geometry_rescue_disabled_parameter_rule": (
+                "rescue_and_geometry_thresholds_none_counts_zero_ready_false"
+            ),
+            "applied_record_recalibration_rule": (
+                "explicit_threshold_free_measurement_projection_required"
+            ),
+            "test_positive_attacked_tuning_allowed": False,
         },
         "write_validation": {
             "branch_amplitude_envelope_validation_rule": (

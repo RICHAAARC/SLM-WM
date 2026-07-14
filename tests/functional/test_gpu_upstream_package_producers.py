@@ -280,7 +280,7 @@ def _prepare_image_runtime(
             "lf_weight",
             "tail_robust_weight",
             "tail_fraction",
-            "image_only_detector_config_digest",
+            "image_only_measurement_config_digest",
         )
     }
     runtime_results = []

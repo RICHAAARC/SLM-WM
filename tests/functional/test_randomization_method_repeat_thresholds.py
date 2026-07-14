@@ -26,6 +26,9 @@ from experiments.protocol.formal_randomization import (
     formal_watermark_key_plan_record,
     resolve_formal_randomization_repeat,
 )
+from experiments.protocol.image_only_evidence import (
+    partition_calibration_prompt_ids,
+)
 from experiments.protocol.prompts import build_prompt_records
 from experiments.protocol.prompt_sources import (
     PROMPT_CONFIG_NAMES,
@@ -79,7 +82,6 @@ MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 MODEL_REVISION = "b940f670f0eda2d07fbb75229e779da1ad11eb80"
 CODE_VERSION = "a" * 40
 BASE_SEED = 1703
-RESCUE_MARGIN_LOW = -0.05
 AGGREGATE_PACKAGE_SHA256 = build_stable_digest({"aggregate_package": 1})
 AGGREGATE_DIGEST = build_stable_digest({"aggregate": 1})
 def _bind_attention_alignment_gate(
@@ -417,6 +419,35 @@ class _MemoryAggregateWorkspace:
         ]
         for repeat in formal_randomization_repeats():
             repeat_id = repeat.randomization_repeat_id
+            slm_score_offset = repeat.generation_seed_index * 0.1
+            slm_calibration_measurements = tuple(
+                _bind_attention_alignment_gate(
+                    {
+                        "prompt_id": prompt.prompt_id,
+                        "split": "calibration",
+                        "sample_role": "clean_negative",
+                        "detection_key_role": "registered_watermark_key",
+                        "attack_id": "",
+                        "content_score": (
+                            slm_score_offset + prompt.prompt_index / 1000.0
+                        ),
+                        "aligned_content_score": (
+                            slm_score_offset + prompt.prompt_index / 1000.0
+                        ),
+                        "attention_geometry_score": 0.0,
+                        "registration_confidence": 0.0,
+                        "attention_sync_score": 0.0,
+                        "alignment": {
+                            "registration_geometry_reliable": False,
+                        },
+                    }
+                )
+                for prompt in prompt_records
+                if prompt.split == "calibration"
+            )
+            slm_attack_protocol = calibrate_complete_evidence_protocol(
+                slm_calibration_measurements, TARGET_FPR
+            )
             manifest_role = "semantic_watermark_dataset_manifest"
             manifest_source = self._source(
                 repeat_id=repeat_id,
@@ -487,6 +518,11 @@ class _MemoryAggregateWorkspace:
                         ("full_main",) if prompt.split == "test" else ()
                     ),
                     diffusion_attacks_enabled=(prompt.split == "test"),
+                    detector_guided_attack_threshold_protocol=(
+                        slm_attack_protocol.to_dict()
+                        if prompt.split == "test"
+                        else None
+                    ),
                     output_dir=(
                         f"outputs/image_only_dataset_runtime/"
                         f"{PAPER_RUN_NAME}/runs"
@@ -685,6 +721,7 @@ class _MemoryAggregateWorkspace:
                         "prompt_id": prompt.prompt_id,
                         "split": prompt.split,
                         "sample_role": "clean_negative",
+                        "detection_key_role": "registered_watermark_key",
                         "attack_id": "",
                         "attack_family": (
                             "" if method_id == "slm_wm" else "clean"
@@ -751,7 +788,6 @@ class _MemoryAggregateWorkspace:
                     protocol = calibrate_complete_evidence_protocol(
                         calibration_rows,
                         TARGET_FPR,
-                        RESCUE_MARGIN_LOW,
                     )
                     observations = list(
                         apply_frozen_evidence_protocol(
@@ -763,8 +799,20 @@ class _MemoryAggregateWorkspace:
                     self._rows[observation_key] = tuple(observations)
                     continue
 
+                _, threshold_freeze_ids, _ = (
+                    partition_calibration_prompt_ids(
+                        str(row["prompt_id"])
+                        for row in calibration_rows
+                    )
+                )
+                threshold_freeze_id_set = set(threshold_freeze_ids)
                 threshold = conformal_threshold_from_clean_negative_scores(
-                    (float(row["score"]) for row in calibration_rows),
+                    (
+                        float(row["score"])
+                        for row in calibration_rows
+                        if str(row["prompt_id"])
+                        in threshold_freeze_id_set
+                    ),
                     TARGET_FPR,
                 )
                 observations = [
@@ -782,7 +830,7 @@ class _MemoryAggregateWorkspace:
                 threshold_audit = audit_fixed_fpr_observation_threshold(
                     observations,
                     target_fpr=TARGET_FPR,
-                    expected_calibration_negative_count=33,
+                    expected_calibration_source_negative_count=33,
                 )
                 threshold_digest = threshold_audit.threshold_digest
                 if method_id == "t2smark":
@@ -852,6 +900,13 @@ class _MemoryAggregateWorkspace:
         unit_records = manifest["config"][
             "scientific_unit_identity_records"
         ]
+        frozen_attack_protocol = next(
+            record["scientific_unit_config"][
+                "detector_guided_attack_threshold_protocol"
+            ]
+            for record in unit_records
+            if record["scientific_unit_config"]["split"] == "test"
+        )
         texts = [
             str(record["scientific_unit_config"]["prompt"])
             for record in unit_records
@@ -878,6 +933,11 @@ class _MemoryAggregateWorkspace:
                     ),
                     "diffusion_attacks_enabled": (
                         prompt.split == "test"
+                    ),
+                    "detector_guided_attack_threshold_protocol": (
+                        frozen_attack_protocol
+                        if prompt.split == "test"
+                        else None
                     ),
                 }
             )
@@ -1173,6 +1233,9 @@ def _install_memory_boundaries(
                 {
                     "method_id": source.method_id,
                     "randomization_repeat_id": source.randomization_repeat_id,
+                    "threshold_digest": source.declared_threshold_protocol[
+                        "threshold_digest"
+                    ],
                     "supports_paper_claim": False,
                 }
                 for source in materialized
@@ -1228,7 +1291,7 @@ def test_bridge_builds_exact_45_sources_and_digest_locked_reconstruction(
     assert len(result["threshold_records"]) == 45
     assert captured["kwargs"]["expected_model_id"] == MODEL_ID
     assert captured["kwargs"]["expected_model_revision"] == MODEL_REVISION
-    assert captured["kwargs"]["main_rescue_margin_low"] == RESCUE_MARGIN_LOW
+    assert "main_rescue_margin_low" not in captured["kwargs"]
     assert captured["kwargs"]["expected_base_seed"] == BASE_SEED
     transfer_source = next(
         source
@@ -1422,17 +1485,21 @@ def test_bridge_rejects_nine_runtime_records_with_alias_drift(
         recompute_randomization_method_repeat_fixed_fpr(provenance)
 
 
-def test_bridge_rejects_nine_runtime_records_with_rescue_margin_drift(
+def test_bridge_rejects_test_runtime_without_frozen_attack_protocol(
     bridge_context,
 ) -> None:
-    """rescue margin 必须等于冻结正式协议值, 不能只要求9份相同."""
+    """test runtime 不得退回到 calibration 前的临时检测器."""
 
     provenance, workspace, _captured = bridge_context
-    _replace_all_runtime_config_field(workspace, "rescue_margin_low", -0.1)
+    _replace_all_runtime_config_field(
+        workspace,
+        "detector_guided_attack_threshold_protocol",
+        None,
+    )
 
     with pytest.raises(
         RandomizationMethodRepeatThresholdError,
-        match="完整方法或检测配置",
+        match="test runtime 未绑定 calibration 冻结攻击协议",
     ):
         recompute_randomization_method_repeat_fixed_fpr(provenance)
 
@@ -1475,6 +1542,9 @@ def test_bridge_rejects_same_count_calibration_test_split_swap(
         for index, record in enumerate(unit_records)
         if record["scientific_unit_config"]["split"] == "test"
     )
+    frozen_attack_protocol = unit_records[test_index][
+        "scientific_unit_config"
+    ]["detector_guided_attack_threshold_protocol"]
     for index, replacement_split in (
         (calibration_index, "test"),
         (test_index, "calibration"),
@@ -1489,6 +1559,11 @@ def test_bridge_rejects_same_count_calibration_test_split_swap(
                     ["full_main"] if replacement_split == "test" else []
                 ),
                 "diffusion_attacks_enabled": replacement_split == "test",
+                "detector_guided_attack_threshold_protocol": (
+                    frozen_attack_protocol
+                    if replacement_split == "test"
+                    else None
+                ),
             },
         )
 

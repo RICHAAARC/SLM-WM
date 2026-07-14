@@ -14,6 +14,9 @@ from experiments.protocol.fixed_fpr_observation_audit import (
     conformal_threshold_from_clean_negative_scores,
 )
 from experiments.protocol.attacks import attack_config_digest, resolve_formal_attack_config
+from experiments.protocol.image_only_evidence import (
+    partition_calibration_prompt_ids,
+)
 from main.core.digest import build_stable_digest
 from paper_experiments.baselines import (
     build_primary_baseline_formal_evidence_collection_rows,
@@ -75,8 +78,25 @@ def build_formal_tree_ring_observations(
     calibration_count = int(parameters["calibration"])
     test_count = int(parameters["test"])
     target_fpr = float(parameters["target_fpr"])
-    calibration_scores = [index / calibration_count for index in range(calibration_count)]
-    threshold = conformal_threshold_from_clean_negative_scores(calibration_scores, target_fpr=target_fpr)
+    calibration_scores = [
+        index / calibration_count for index in range(calibration_count)
+    ]
+    calibration_prompt_ids = tuple(
+        f"calibration_{index:05d}" for index in range(calibration_count)
+    )
+    _, threshold_freeze_prompt_ids, _ = partition_calibration_prompt_ids(
+        calibration_prompt_ids
+    )
+    score_by_prompt_id = dict(
+        zip(calibration_prompt_ids, calibration_scores, strict=True)
+    )
+    threshold = conformal_threshold_from_clean_negative_scores(
+        (
+            score_by_prompt_id[prompt_id]
+            for prompt_id in threshold_freeze_prompt_ids
+        ),
+        target_fpr=target_fpr,
+    )
 
     def observation(
         *,

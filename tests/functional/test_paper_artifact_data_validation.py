@@ -27,11 +27,17 @@ from experiments.artifacts.image_only_detection_metrics import (
     build_image_only_test_metric_rows,
 )
 from experiments.protocol.attacks import attack_config_digest, default_attack_configs
+from experiments.protocol.detection_key_identity import (
+    REGISTERED_WRONG_KEY_ROLE,
+    REGISTERED_WATERMARK_KEY_ROLE,
+)
+from experiments.protocol.image_only_evidence import (
+    apply_frozen_evidence_protocol,
+    calibrate_complete_evidence_protocol,
+    frozen_evidence_protocol_digest_payload,
+)
 from experiments.protocol.dataset_quality import (
     FORMAL_DATASET_QUALITY_METRIC_NAMES,
-)
-from experiments.runners.image_only_dataset_runtime import (
-    formal_low_frequency_carrier_protocol_record,
 )
 from paper_experiments.analysis.paper_artifact_data_validation import (
     ABLATION_DELTA_FIELDS,
@@ -44,40 +50,25 @@ from paper_experiments.analysis.paper_artifact_data_validation import (
     validate_paper_artifact_source_data,
 )
 from main.core.digest import build_stable_digest
-from main.methods.carrier import (
-    KEYED_PRG_VERSION,
-    tail_robust_carrier_protocol_record,
-)
 from tests.helpers.formal_detection_record import bind_formal_detection_record
 
 
 TARGET_FPR = 0.1
-LF_CARRIER_PROTOCOL = formal_low_frequency_carrier_protocol_record()
-LF_CARRIER_PROTOCOL_DIGEST = str(
-    LF_CARRIER_PROTOCOL["lf_carrier_protocol_digest"]
-)
-LF_WEIGHT = 0.70
-TAIL_ROBUST_WEIGHT = 0.30
-TAIL_FRACTION = 0.20
-TAIL_CARRIER_PROTOCOL = tail_robust_carrier_protocol_record(
-    TAIL_FRACTION,
-    prg_version=KEYED_PRG_VERSION,
-)
-TAIL_CARRIER_PROTOCOL_DIGEST = str(
-    TAIL_CARRIER_PROTOCOL["tail_carrier_protocol_digest"]
-)
-_DETECTOR_CONFIG_RECORD = bind_formal_detection_record(
-    {
-        "content_score": 0.0,
-        "aligned_content_score": None,
-        "alignment": None,
-        "metadata": {"rescue_margin_low": -0.2},
-    }
-)
-DETECTOR_CONFIG_DIGEST = str(
-    _DETECTOR_CONFIG_RECORD["image_only_detector_config_digest"]
-)
 EXPECTED_FROZEN_PROTOCOL_FIELDS = {
+    "frozen_evidence_protocol_schema",
+    "calibration_partition_protocol",
+    "calibration_partition_digest",
+    "calibration_source_negative_count",
+    "rescue_window_fit_negative_count",
+    "rescue_window_fit_prompt_id_digest",
+    "threshold_freeze_negative_count",
+    "threshold_freeze_prompt_id_digest",
+    "window_fit_allowed_false_positive_count",
+    "threshold_freeze_allowed_false_positive_count",
+    "rescue_window_fit_content_threshold",
+    "rescue_window_selection_protocol",
+    "rescue_window_candidate_count",
+    "rescue_window_fit_false_positive_count",
     "content_threshold",
     "rescue_margin_low",
     "geometry_score_threshold",
@@ -91,7 +82,10 @@ EXPECTED_FROZEN_PROTOCOL_FIELDS = {
     "tail_robust_weight",
     "tail_fraction",
     "tail_carrier_protocol_digest",
-    "image_only_detector_config_digest",
+    "image_only_measurement_config_digest",
+    "attention_geometry_enabled",
+    "image_alignment_enabled",
+    "geometry_rescue_enabled",
     "geometry_calibration_negative_count",
     "geometry_calibration_exceedance_count",
     "registration_calibration_negative_count",
@@ -105,43 +99,57 @@ EXPECTED_FROZEN_PROTOCOL_FIELDS = {
     "target_fpr",
     "threshold_digest",
 }
-_FROZEN_PROTOCOL_DIGEST_PAYLOAD = {
-    "content_threshold": 0.5,
-    "rescue_margin_low": -0.2,
-    "geometry_score_threshold": 0.5,
-    "registration_confidence_threshold": 0.5,
-    "attention_sync_score_threshold": 0.5,
-    "attention_anchor_count": 12,
-    "attention_residual_threshold": 0.20,
-    "attention_minimum_inlier_ratio": 0.50,
-    "lf_carrier_protocol_digest": LF_CARRIER_PROTOCOL_DIGEST,
-    "lf_weight": LF_WEIGHT,
-    "tail_robust_weight": TAIL_ROBUST_WEIGHT,
-    "tail_fraction": TAIL_FRACTION,
-    "tail_carrier_protocol_digest": TAIL_CARRIER_PROTOCOL_DIGEST,
-    "image_only_detector_config_digest": DETECTOR_CONFIG_DIGEST,
-    "geometry_calibration_negative_count": 10,
-    "geometry_calibration_exceedance_count": 0,
-    "registration_calibration_negative_count": 10,
-    "registration_calibration_exceedance_count": 0,
-    "sync_calibration_negative_count": 10,
-    "sync_calibration_exceedance_count": 0,
-    "geometry_protocol_calibration_ready": True,
-    "calibration_negative_count": 10,
-    "calibration_false_positive_count": 1,
-    "target_fpr": TARGET_FPR,
-    "decision_scope": "content_or_same_threshold_aligned_content_rescue",
-}
-THRESHOLD_DIGEST = build_stable_digest(_FROZEN_PROTOCOL_DIGEST_PAYLOAD)
-FROZEN_PROTOCOL = {
-    **{
-        field_name: value
-        for field_name, value in _FROZEN_PROTOCOL_DIGEST_PAYLOAD.items()
-        if field_name != "decision_scope"
-    },
-    "calibration_false_positive_rate": 0.1,
-    "threshold_digest": THRESHOLD_DIGEST,
-}
+
+
+def _full_measurement_record(
+    *,
+    prompt_id: str,
+    split: str,
+    sample_role: str,
+    score: float,
+    detection_key_role: str = REGISTERED_WATERMARK_KEY_ROLE,
+) -> dict:
+    """构造启用完整几何测量、但尚未执行阈值判定的记录。"""
+
+    return bind_formal_detection_record(
+        {
+            "run_id": f"run_{prompt_id}",
+            "prompt_id": prompt_id,
+            "split": split,
+            "sample_role": sample_role,
+            "detection_key_role": detection_key_role,
+            "attack_family": "none",
+            "attack_name": "none",
+            "resource_profile": "clean",
+            "content_score": score,
+            "aligned_content_score": score,
+            "source_to_evaluated_ssim": 1.0,
+            "source_to_evaluated_psnr": 40.0,
+            "geometry_reliable": False,
+            "raw_attention_geometry_score": 0.0,
+            "attention_geometry_score": 0.0,
+            "registration_confidence": 0.0,
+            "attention_sync_score": 0.0,
+            "alignment": {"registration_geometry_reliable": False},
+        }
+    )
+
+
+_CALIBRATION_MEASUREMENTS = tuple(
+    _full_measurement_record(
+        prompt_id=f"calibration_{index}",
+        split="calibration",
+        sample_role="clean_negative",
+        score=score,
+    )
+    for index, score in enumerate((0.10, 0.20, 0.30))
+)
+FROZEN_PROTOCOL_OBJECT = calibrate_complete_evidence_protocol(
+    _CALIBRATION_MEASUREMENTS,
+    TARGET_FPR,
+)
+FROZEN_PROTOCOL = FROZEN_PROTOCOL_OBJECT.to_dict()
+THRESHOLD_DIGEST = FROZEN_PROTOCOL_OBJECT.threshold_digest
 FORMAL_ATTACK_CONFIGS = tuple(
     config
     for config in default_attack_configs()
@@ -170,28 +178,19 @@ def _read_csv(path: Path) -> tuple[tuple[str, ...], list[dict[str, str]]]:
 
 
 def _detection_record(prompt_id: str, sample_role: str, score: float) -> dict:
-    """构造与冻结协议一致的 test 连续检测记录."""
+    """构造与冻结协议一致、但尚未物化判定的 test 测量记录."""
 
-    return bind_formal_detection_record({
-        "run_id": f"run_{prompt_id}",
-        "prompt_id": prompt_id,
-        "split": "test",
-        "sample_role": sample_role,
-        "attack_family": "none",
-        "attack_name": "none",
-        "resource_profile": "clean",
-        "content_score": score,
-        "aligned_content_score": None,
-        "source_to_evaluated_ssim": 1.0,
-        "source_to_evaluated_psnr": 40.0,
-        "geometry_reliable": False,
-        "attention_geometry_score": 0.0,
-        "registration_confidence": 0.0,
-        "attention_sync_score": 0.0,
-        "alignment": None,
-        "metadata": {"rescue_margin_low": -0.2},
-        "formal_evidence_positive": score >= 0.5,
-    })
+    return _full_measurement_record(
+        prompt_id=prompt_id,
+        split="test",
+        sample_role=sample_role,
+        score=score,
+        detection_key_role=(
+            REGISTERED_WRONG_KEY_ROLE
+            if sample_role == "wrong_key_negative"
+            else REGISTERED_WATERMARK_KEY_ROLE
+        ),
+    )
 
 
 def _row(fields: set[str], **values: object) -> dict:
@@ -203,18 +202,9 @@ def _row(fields: set[str], **values: object) -> dict:
 def _recompute_protocol_digest(protocol: dict[str, object]) -> str:
     """按生产协议独立重建冻结阈值摘要."""
 
-    payload = {
-        field_name: value
-        for field_name, value in protocol.items()
-        if field_name not in {
-            "calibration_false_positive_rate",
-            "threshold_digest",
-        }
-    }
-    payload["decision_scope"] = (
-        "content_or_same_threshold_aligned_content_rescue"
+    return build_stable_digest(
+        frozen_evidence_protocol_digest_payload(protocol)
     )
-    return build_stable_digest(payload)
 
 
 def _prepare_valid_sources(root: Path) -> dict[str, Path]:
@@ -231,11 +221,14 @@ def _prepare_valid_sources(root: Path) -> dict[str, Path]:
         json.dumps(protocol, ensure_ascii=False),
         encoding="utf-8",
     )
-    detection_records = (
-        _detection_record("p0", "positive_source", 0.9),
-        _detection_record("p1", "positive_source", 0.7),
-        _detection_record("p2", "clean_negative", 0.3),
-        _detection_record("p3", "wrong_key_negative", 0.1),
+    detection_records = apply_frozen_evidence_protocol(
+        (
+            _detection_record("p0", "positive_source", 0.9),
+            _detection_record("p1", "positive_source", 0.7),
+            _detection_record("p2", "clean_negative", 0.3),
+            _detection_record("p3", "wrong_key_negative", 0.1),
+        ),
+        FROZEN_PROTOCOL_OBJECT,
     )
     test_rows = build_image_only_test_metric_rows(
         detection_records,

@@ -798,7 +798,7 @@ registration\_geometry\_reliable=
 \land(e_{\mathrm{affine}}\le0.20).
 $$
 
-`attention_anchor_count=12`、`attention_residual_threshold=0.20` 与 `attention_minimum_inlier_ratio=0.50` 是预注册结构常量, 不是 calibration 或 test 选择的统计阈值。完整检测器配置只保存在顶层运行 manifest；alignment 和样本记录保存决策所需字段及检测器配置摘要, calibration/test 必须绑定同一摘要。决策字段缺失、数值漂移或配置摘要不一致均使当前闭合失败。
+`attention_anchor_count=12`、`attention_residual_threshold=0.20` 与 `attention_minimum_inlier_ratio=0.50` 是预注册结构常量, 不是 calibration 或 test 选择的统计阈值。完整阈值无关 measurement 配置只保存在顶层运行 manifest；alignment 和样本记录保存连续测量原子及 measurement 配置摘要, calibration/test 必须绑定同一摘要。measurement 中出现阈值、窗口或判定, 或测量原子缺失、数值漂移、配置摘要不一致, 均使当前闭合失败。
 
 使用 $\hat T$ 重采样待检图像时, 输入先解码为 RGB uint8 Tensor 并归一化到 $[0,1]$；仿射网格和采样固定采用 bilinear、`padding_mode=border` 与 `align_corners=true`。连续结果按 $\operatorname{floor}(255\cdot\operatorname{clip}(x,0,1))$ 转回 RGB uint8。检测端随后必须重新运行同一个仅图像 Q/K 提取器, 并使用 $a_{\mathrm{can},\hat T}$ 对全部冻结层计算恢复后同步分数 $s_{\mathrm{sync}}$。恢复后不得重新选择稳定 token, 且观测、注册和同步记录的 pair 权重身份必须一致。最终几何可靠性定义为：
 
@@ -815,7 +815,7 @@ geometry\_reliable=
 (s_{\mathrm{sync}}\ge\tau_{\mathrm{sync}}).
 $$
 
-calibration split 的未删失 clean negatives 只冻结内容分数阈值、几何关系分阈值、注册置信度阈值、恢复后同步分阈值和 rescue window。失败原因由冻结余量与几何可靠性规则确定, 不能作为额外调参入口。任何统计阈值缺失或不满足时, 几何路径都不得执行内容救回。
+registered-key、未攻击的 calibration clean negatives 按版本化 Prompt 散列确定性拆成互斥 `window_fit` 与 `threshold_freeze`。前者只冻结三个几何阈值、临时 raw 内容阈值与 rescue window；后者只基于判定等价分数冻结最终内容阈值。失败原因由最终冻结余量与几何可靠性规则确定, 不能作为额外调参入口。任何测量原子、分区身份或冻结参数缺失时, 几何路径都不得执行内容救回。
 
 ---
 
@@ -823,13 +823,17 @@ calibration split 的未删失 clean negatives 只冻结内容分数阈值、几
 
 ### （零）仅图像检测输入边界
 
-正式检测函数只允许输入待检图像 $x'$, 密钥 $K$ 和公开模型配置 $M$：
+正式盲检先执行阈值无关 measurement, 再应用独立冻结协议：
 
 $$
-\hat y=\operatorname{Detect}(x',K,M).
+E=\operatorname{Measure}(x',K,M),
+\quad
+P=\operatorname{Calibrate}(D_{cal}^{-},\alpha),
+\quad
+\hat y=\operatorname{Apply}(P,E).
 $$
 
-不得输入原始生成 latent、采样轨迹、原始图像、原始 prompt、生成 seed、生成端 Q/K 原子或样本级安全基底。检测端使用冻结 VAE posterior mode 重建
+`Measure` 不得接收或保存阈值、rescue window、失败原因与布尔判定。它也不得输入原始生成 latent、采样轨迹、原始图像、原始 prompt、生成 seed、生成端 Q/K 原子或样本级安全基底。检测端使用冻结 VAE posterior mode 重建
 
 $$
 \hat z=(\operatorname{mode}(q_{\mathrm{VAE}}(x'))-\texttt{vae\_shift\_factor})\cdot\texttt{vae\_scaling\_factor},
@@ -837,7 +841,7 @@ $$
 
 并通过密钥、精确模型标识和公开 latent 形状重建 LF 与尾部截断模板。内容分数固定为 $0.70s_{\mathrm{LF}}+0.30s_{\mathrm{tail}}$, 不执行分支投票。
 
-完整注入、carrier-only 反事实与全部检测记录必须对每个活动内容分支共享唯一模板内容摘要及协议摘要。calibration 冻结协议同时绑定 LF/tail 协议摘要、0.70/0.30权重和尾部比例；应用协议前从全部冻结字段重算 `threshold_digest`, 并从假阳性计数重算派生比率。
+完整注入、carrier-only 反事实与全部 measurement 记录必须对每个活动内容分支共享唯一模板内容摘要及协议摘要。LF/tail 协议、0.70/0.30权重和尾部比例先进入 `image_only_measurement_config_digest`；冻结协议再引用该摘要并绑定分区、派生窗口与最终阈值。应用协议前分别重算 measurement 摘要和 `threshold_digest`, 并从 threshold-freeze 假阳性计数重算派生比率。
 
 检测密钥计划包含注册水印密钥与 SHA-256 domain-separated wrong-key 两个角色。注入密钥摘要必须等于计划中的注册密钥摘要；注册密钥检测模板与嵌入模板相同, wrong-key 模板必须唯一且不同。完整计划正文只在顶层运行身份中保存一次；样本级检测记录只保存角色、实际材料摘要和计划摘要引用, 总科学内容证据通过该计划摘要绑定顶层计划。
 
@@ -845,11 +849,31 @@ $$
 
 ### （一）Neyman-Pearson 判定
 
-给定 clean negative 分布 $\mathcal{D}_0$ 和目标误报率 $\alpha$，内容阈值由 calibration split 决定：
+给定 registered-key、未攻击的 clean negative 集合 $D_{cal}^{-}$ 和目标误报率 $\alpha$，先按
 
 $$
-\tau_c=Q_{1-\alpha}(s_c\mid\mathcal{D}_0).
+h_i=\operatorname{SHA256}(\texttt{partition\_protocol}\Vert\texttt{NUL}\Vert\texttt{prompt\_id}_i)
 $$
+
+确定性排序。前 $\lfloor n/3\rfloor$ 个 Prompt 为 `window_fit`, 其余为 `threshold_freeze`；二者互斥。33/330/3300个 calibration negatives 分别得到11+22、110+220、1100+2200。任一含 $m$ 个 negatives 的子集允许假阳性数量为
+
+$$
+K(m,\alpha)=\max(0,\lfloor\alpha(m+1)\rfloor-1).
+$$
+
+`window_fit` 冻结三类几何上尾阈值和临时 raw 内容阈值 $\widetilde\tau_c$。rescue 候选由负 raw margins、每个 margin 朝0方向的 `nextafter` 边界以及 $\operatorname{nextafter}(0,-\infty)$ 构成；按数值升序选择第一个满足 $K(n_w,\alpha)$ 的候选 $\delta_{low}$, 即最宽可行窗口。
+
+冻结几何门与窗口后, `threshold_freeze` 只计算
+
+$$
+e=
+\begin{cases}
+\max(s_c^{raw},\min(s_c^{align},s_c^{raw}-\delta_{low})),&geometry\_ready,\\
+s_c^{raw},&\text{其他情况},
+\end{cases}
+$$
+
+最终 $\tau_c$ 只由该子集的 $e$ 按 $K(n_t,\alpha)$ 冻结。四个 baseline 使用完全相同的 `threshold_freeze` Prompt 身份冻结各自阈值。
 
 ### （二）内容主判
 
@@ -873,7 +897,7 @@ $$
 rescue\_eligible
 =(\delta_{\mathrm{low}}\le m_c^{\mathrm{raw}}<0)
 \land geometry\_reliable
-\land fail\_reason\in\{geometry\_suspected,low\_confidence\}.
+\land \operatorname{finite}(s_c^{align}).
 $$
 
 恢复后内容边界余量为
@@ -894,17 +918,13 @@ $$
 y_{\mathrm{evidence}}=positive\_by\_content\lor rescue\_applied.
 $$
 
+该布尔式与 $\mathbb I[e\ge\tau_c]$ 严格等价。`fail_reason` 只由最终冻结阈值下的 margin 和几何状态派生, 不参与参数选择。
+
 ### （四）fixed-FPR 与 rescue 的统计边界
 
-同阈值 rescue 不等价于无条件保持目标 FPR。正式 fixed-FPR 口径必须约束完整 evidence-level 判定协议，而不仅是内容阈值 $\tau_c$。因此，以下规则属于本原语的统计边界：
+正式 fixed-FPR 口径约束完整 evidence-level 判定协议, 不是只约束 raw 内容阈值。`window_fit` 与 `threshold_freeze` 不得重叠；test、positive、wrong-key、攻击记录不得参与分区或参数选择；rescue window 不得硬编码或由声明值回灌；raw/aligned 不得使用不同阈值；几何分数不得直接投票为 positive。test runtime 和 detector-guided attack 必须绑定由同一 calibration 原始 measurement 独立重建的 `threshold_digest`。报告同时给出 raw content FPR、完整 evidence clean-negative FPR 和攻击后 FPR。
 
-1. $\tau_c$ 只能由 calibration split 中的 clean negative 分布冻结；
-2. 几何关系分阈值、注册置信度阈值、恢复后同步分阈值和 rescue window 必须由 calibration clean negatives 冻结；
-3. 锚点数量12、归一化 xy 欧氏残差上界0.20和相对有效覆盖锚点的最小内点比例0.50必须由方法配置预注册, calibration 与 test 均不得调节；
-4. test split 不得用于调阈值、调 rescue window、调失败原因规则或调几何可靠性条件；
-5. rescue 只能作用于 $\delta_{\mathrm{low}}\le m_c^{\mathrm{raw}}<0$ 的边界失败样本，不能对远离阈值的 negative 样本开放；
-6. 报告 fixed-FPR 时必须同时报告 raw content FPR、rescue 后 clean negative FPR 和 rescue 后 attacked negative FPR；
-7. 若 rescue 后整体 evidence-level FPR 超过目标 operating point，则论文不得声称完整系统仍满足该 fixed-FPR 目标，除非重新在 calibration split 中冻结包含 rescue 的完整决策协议。
+当注意力几何或图像对齐任一机制关闭时, 冻结协议必须令 `geometry_rescue_enabled=false`, 最终判定只使用 raw 内容分数；全部 rescue 与几何参数取 `None`, 对应计数为0, 不得用零值或合成原子替代被关闭的机制。
 
 ### 正式随机化与基础 latent 公平控制
 
@@ -980,7 +1000,7 @@ $$
 | 700 | 30 | 330 | 340 | 0.1 |
 | 7000 | 300 | 3300 | 3400 | 0.1 |
 
-阈值搜索必须直接调用 `content OR same-threshold rescue` 的最终布尔判定。`fail_reason` 是内容阈值的函数, 因此应用冻结阈值时必须重新计算, 不能沿用数据生成时临时阈值得到的分类。test split 只报告冻结协议结果及二项分布置信上界, 不参与任何阈值或 rescue 参数选择。
+`window_fit` 对有限 rescue 候选直接调用 `content OR same-threshold rescue` 的最终布尔判定；`threshold_freeze` 使用与该布尔式严格等价的连续分数冻结最终阈值。`fail_reason` 是最终内容阈值的函数, 因此应用冻结协议时必须重新计算。test split 只报告冻结协议结果及二项分布置信上界, 不参与任何阈值、窗口或几何门选择。
 
 正式 FID/KID 使用 torch-fidelity 0.4.0 的 `inception-v3-compat` 2048 维特征。三个运行层级必须分别覆盖 70/700/7000 对 clean/watermarked 图像, 不允许以小规模像素直方图或前100对样本替代完整运行层级质量统计。
 

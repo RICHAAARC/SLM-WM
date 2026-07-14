@@ -357,7 +357,7 @@ domain_fields = {
 
 `public_detection_noise_prg_protocol` 必须等于 `sha256_counter_normal_icdf_table20_float32_v2`。上述 `key_material`、`domain_fields` 和 `shape` 进入本节定义的完整 stable JSON domain payload, 经 SHA-256、从0开始的16字节大端计数器、MSB-first 连续20位索引提取和冻结 Q20 表查询得到 CPU float32 Tensor；实际 latent dtype 转换在 CPU 完成, 随后才搬运到执行设备。该公开 domain 不含水印密钥、Prompt、生成 seed 或生成轨迹。
 
-CPU/CUDA 设备 RNG 不参与方法身份。PRG 算法摘要固定为 `a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b`, 核心方法定义摘要固定为 `8875c24ad29344b2ea8a6fc6ae62d8bccaafd0fa426e8072e2380bb1abca7d43`, 正式随机化协议摘要固定为 `d09928b763c17d2c68fa2bc3921b59b76c3df2fc264fb364ae33bcc8bdeba0d5`。`tools/harness/verify_normal_quantile_reference.py` 以 `normal_quantile_reference_verification_protocol=mpfr_192bit_erf_midpoint_bracket_and_newton_v2` 使用192位 MPFR, 对正半轴全部524288个表项验证相邻 binary32 中点的 CDF 严格夹逼, 并以 Newton 根作为独立交叉检查；报告同时登记最小中点概率余量。该复验是外层参考证据, 不进入 PRG 算法摘要或采样身份。固定 test vector 必须分别覆盖20位索引跨 SHA-256 块边界、Q20 值、uniform 值、relation signs、公开检测噪声和正式 shape 基础 latent。当前固定向量只在 Windows CPU 实测；Linux/Colab 的逐字节 KAT 仍是 GPU 运行前阻断门禁, 不得表述为已经完成跨平台实测。
+CPU/CUDA 设备 RNG 不参与方法身份。PRG 算法摘要固定为 `a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b`, 核心方法定义摘要固定为 `1a7c52b29fe68bdc578f8e52029fdfc6dcccc669e0f2796d63e6eb2b9e91b9af`, 正式随机化协议摘要固定为 `d09928b763c17d2c68fa2bc3921b59b76c3df2fc264fb364ae33bcc8bdeba0d5`。`tools/harness/verify_normal_quantile_reference.py` 以 `normal_quantile_reference_verification_protocol=mpfr_192bit_erf_midpoint_bracket_and_newton_v2` 使用192位 MPFR, 对正半轴全部524288个表项验证相邻 binary32 中点的 CDF 严格夹逼, 并以 Newton 根作为独立交叉检查；报告同时登记最小中点概率余量。该复验是外层参考证据, 不进入 PRG 算法摘要或采样身份。固定 test vector 必须分别覆盖20位索引跨 SHA-256 块边界、Q20 值、uniform 值、relation signs、公开检测噪声和正式 shape 基础 latent。当前固定向量只在 Windows CPU 实测；Linux/Colab 的逐字节 KAT 仍是 GPU 运行前阻断门禁, 不得表述为已经完成跨平台实测。
 
 ## `spatial_low_pass_and_amplitude_tail_carriers`
 
@@ -613,11 +613,17 @@ $x_0\leftrightarrow x_C$、$x_0\leftrightarrow x_F$ 和 $x_C\leftrightarrow x_F$
 
 ## `image_only_detection_boundary`
 
-正式接口只允许
+正式盲检由三个互不混淆的接口组成：
 
 $$
-\operatorname{Detect}(x',K,M).
+E=\operatorname{Measure}(x',K,M),
+\qquad
+P=\operatorname{Calibrate}(D_{cal}^{-},\alpha),
+\qquad
+\operatorname{Detect}(x',K,M;P)=\operatorname{Apply}(P,E).
 $$
+
+$\operatorname{Measure}$ 只产生阈值无关的 raw/aligned 内容分数、注意力关系分、注册置信度、同步分和 alignment 原子。measurement 配置采用 `slm_wm_image_only_measurement_config_v2`, 完整图像提取身份采用 `slm_wm_image_only_extraction_profile_v1`；公开图像预处理协议固定为 `diffusers_sd3_image_processor_rgb_preprocess_v1`, VAE 编码协议固定为 `sd3_vae_latent_dist_mode_shift_then_scale_v1`。模型 revision、VAE/Transformer/scheduler 类名、VAE scaling/shift、latent dtype、图像尺寸、推理步数、公开 schedule 索引、公开噪声与条件协议、Q/K token 上限、坐标约定、`align_corners`、冻结层、载体协议与权重以及机制开关全部进入 `image_only_measurement_config_digest`。measurement 配置及 `measurement_digest` 不得包含内容阈值、几何阈值、rescue window、失败原因或最终判定。$\operatorname{Calibrate}$ 是唯一允许派生判定参数的接口, $\operatorname{Apply}$ 是唯一允许物化正式布尔判定的接口；已 Apply 的记录不得直接重新进入 Calibrate, 独立重建必须先显式投影出阈值无关 measurement 原子。
 
 检测图像经公开预处理后使用冻结 VAE posterior mode 编码：
 
@@ -632,7 +638,7 @@ s_c=0.70\operatorname{Corr}(\hat z,\nu_{\mathrm{LF}})
 +0.30\operatorname{Corr}(\hat z,\widetilde\nu_{\mathrm{tail}}).
 $$
 
-完整方法的0.70/0.30权重、LF 协议摘要、尾部协议摘要和 `tail_fraction` 随 calibration clean negatives 一起进入唯一 `threshold_digest`。应用冻结阈值前必须从全部协议字段重新计算该摘要, 并由计数重算 calibration 假阳性率；test、攻击和消融记录不得替换任一载体协议或权重。
+完整方法的0.70/0.30权重、LF 协议摘要、尾部协议摘要和 `tail_fraction` 进入阈值无关 `image_only_measurement_config_digest`, 再由冻结协议引用该摘要。`threshold_digest` 额外绑定嵌套 calibration 分区、派生窗口、几何门和最终阈值。应用冻结协议前必须分别重算两个摘要；test、攻击和消融记录不得替换测量配置、载体协议或权重。
 
 仅图像检测密钥计划固定包含 `registered_watermark_key` 与 `registered_wrong_key_negative` 两个角色。wrong-key 由 `registered_key_and_sha256_domain_separated_wrong_key_v1` 从当前注册水印密钥确定性派生；记录只保存两个材料摘要、版本化计划正文和计划摘要, 不保存密钥原文。完整注入与 carrier-only 更新中的 `watermark_key_material_digest_random` 必须等于计划中的注册密钥摘要；注册密钥检测模板必须与嵌入模板相同, wrong-key 模板必须在每个分支内部唯一且与注册密钥模板不同。只修改 `sample_role` 不能建立 wrong-key 证据。
 
@@ -729,7 +735,7 @@ r_{\mathrm{inlier}}
 r_{\mathrm{inlier}}\ge0.50.
 $$
 
-无有效覆盖锚点时 $r_{\mathrm{inlier}}=0$；无内点时平均内点残差为非有限失败值。`attention_anchor_count=12`、`attention_residual_threshold=0.20` 和 `attention_minimum_inlier_ratio=0.50` 是正式方法的预注册结构常量。完整检测器配置只保存在顶层运行 manifest；alignment 和样本记录保存决策所需字段及检测器配置摘要, calibration/test 必须绑定同一摘要。calibration 或 test 数据不得选择、放宽或替换这三项常量；任一决策字段缺失、数值漂移或配置摘要不一致都使证据闭合失败。
+无有效覆盖锚点时 $r_{\mathrm{inlier}}=0$；无内点时平均内点残差为非有限失败值。`attention_anchor_count=12`、`attention_residual_threshold=0.20` 和 `attention_minimum_inlier_ratio=0.50` 是正式方法的预注册结构常量。完整 measurement 配置只保存在顶层运行 manifest；alignment 和样本记录保存连续测量原子及 measurement 配置摘要, calibration/test 必须绑定同一摘要。calibration 或 test 数据不得选择、放宽或替换这三项常量；任一测量原子缺失、数值漂移或配置摘要不一致都使证据闭合失败。
 
 令内点平均残差为 $e_{\mathrm{affine}}$, 则跨层裁决与 calibration 共同使用的注册置信度精确定义为
 
@@ -743,29 +749,50 @@ $$
 
 使用 $\widehat T$ 恢复待检图像时, 输入先解码为 RGB uint8 Tensor 并归一化到 $[0,1]$。仿射网格和图像采样固定采用 bilinear、`padding_mode=border` 与 `align_corners=true`。连续结果执行 $\operatorname{floor}(255\cdot\operatorname{clip}(x,0,1))$, 转回 RGB uint8 后才进入 aligned VAE 编码和 Q/K 重提取。
 
-calibration clean negatives 只冻结内容阈值 $\tau_c$、几何关系分阈值、注册置信度阈值、恢复后同步分阈值和 rescue window。失败原因由冻结内容余量与几何可靠性布尔规则确定, 不作为可从 calibration 或 test 调参的独立机制。原图主判为
+calibration 输入精确限定为 registered-key、未攻击的 clean negatives。令其数量为 $n$。按
 
 $$
-positive_{content}=\mathbf1[s_c^{raw}-\tau_c\ge0].
+h_i=\operatorname{SHA256}(\texttt{partition\_protocol}\Vert\texttt{NUL}\Vert\texttt{prompt\_id}_i)
 $$
 
-只有
+排序, 前 $n_w=\lfloor n/3\rfloor$ 个 Prompt 构成 `window_fit`, 其余 $n_t=n-n_w$ 个 Prompt 构成 `threshold_freeze`。两个集合必须互斥且与输入容器顺序无关。probe、pilot、full 的33/330/3300个 calibration negatives 因而分别固定拆为11+22、110+220、1100+2200。有限样本允许假阳性数量统一为
 
 $$
-\delta_{low}\le s_c^{raw}-\tau_c<0,
+K(m,\alpha)=\max\left(0,\left\lfloor\alpha(m+1)\right\rfloor-1\right).
 $$
 
-失败原因为 `geometry_suspected` 或 `low_confidence`, 且双向注册、覆盖、唯一采样、inlier、残差、pair 身份和恢复后真实 Q/K sync 全部通过时才允许对齐。恢复图像不得重新选择稳定 token, 并必须复用同一个 $\tau_c$：
+`geometry_rescue_enabled` 精确等于 `attention_geometry_enabled and image_alignment_enabled`。完整方法启用两项机制时, `window_fit` 先独立冻结注意力关系分、注册置信度和恢复后同步分三个上尾阈值, 再仅由 raw content scores 冻结临时阈值 $\widetilde\tau_c$。rescue 下界的有限候选集合由所有负 raw margins、其朝0方向的 `nextafter` 边界以及 $\operatorname{nextafter}(0,-\infty)$ 构成。按数值从小到大检查候选, 选择满足 $K(n_w,\alpha)$ 的第一个值 $\delta_{low}<0$；这等价于选择最宽且满足 window-fit 假阳性预算的窗口。不得硬编码该值, 也不得把声明值回传给 calibrator。正式消融禁用任一机制时必须使用 raw content score 冻结最终阈值, 三个几何阈值、临时阈值和 rescue 下界均为空, 候选与几何计数均为0, `geometry_protocol_calibration_ready=false`；不得以零阈值或伪造几何原子替代被关闭机制。
+
+冻结上述参数后, `threshold_freeze` 中每条记录计算判定等价分数
 
 $$
-rescue=eligible\land\mathbf1[s_c^{aligned}-\tau_c\ge0],
+e_i=
+\begin{cases}
+\max\left(s_i^{raw},\min\left(s_i^{aligned},s_i^{raw}-\delta_{low}\right)\right),
+& g_i=1\ \text{且 aligned 分数有限},\\
+s_i^{raw},&\text{其他情况},
+\end{cases}
+$$
+
+其中 $g_i$ 要求结构 alignment、stable-pair 身份和三个冻结几何门同时通过。最终内容阈值 $\tau_c$ 只由 $\{e_i:i\in\texttt{threshold\_freeze}\}$ 按 $K(n_t,\alpha)$ 冻结。四个 baseline 必须使用完全相同的 `threshold_freeze` Prompt 身份冻结各自分数阈值；主方法额外使用 `window_fit` 拟合几何门和 rescue window。
+
+正式布尔判定为
+
+$$
+positive_{content}=\mathbf1[s_c^{raw}\ge\tau_c],
 $$
 
 $$
-y_{evidence}=positive_{content}\lor rescue.
+rescue=g\land\mathbf1[\delta_{low}\le s_c^{raw}-\tau_c<0]
+\land\mathbf1[s_c^{aligned}\ge\tau_c],
 $$
 
-几何分数不能独立产生 positive。test split 应用冻结阈值时必须重新计算 threshold-dependent `fail_reason`, 不得沿用生成记录中的临时分类。
+$$
+y_{evidence}=positive_{content}\lor rescue
+=\mathbf1[e\ge\tau_c].
+$$
+
+raw 与 aligned 必须复用同一个 $\tau_c$；几何分数不能独立产生 positive。test、positive、wrong-key 和攻击记录不得参与任何参数选择。test 运行及 detector-guided attack 必须绑定同一 `threshold_digest`, 并在应用冻结协议时重新计算 threshold-dependent `fail_reason`, 不得沿用 measurement 中不存在的临时分类。
 
 ## `scientific_content_binding`
 
