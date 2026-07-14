@@ -1422,6 +1422,21 @@ def _validated_dataset_quality_image_records(
     return materialized
 
 
+def validate_dataset_quality_image_records(
+    image_records: Iterable[Mapping[str, Any]],
+    *,
+    expected_pair_count: int,
+    expected_prompt_id_digest: str,
+) -> tuple[dict[str, Any], ...]:
+    """公开复用正式质量图像记录的自摘要与 Prompt 精确集合校验."""
+
+    return _validated_dataset_quality_image_records(
+        image_records,
+        expected_pair_count=expected_pair_count,
+        expected_prompt_id_digest=expected_prompt_id_digest,
+    )
+
+
 def rebuild_and_validate_dataset_quality_feature_identity(
     image_records: Iterable[Mapping[str, Any]],
     image_resolution_records: Iterable[Mapping[str, Any]],
@@ -1750,6 +1765,31 @@ def _normalized_dataset_metric_row(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def rebuild_formal_fid_kid_metric_rows_from_feature_records(
+    feature_records: Iterable[Mapping[str, Any]],
+    *,
+    expected_pair_count: int,
+) -> tuple[dict[str, Any], ...]:
+    """从原始正式 feature records 重建规范 FID/KID 三行指标.
+
+    该公共入口集中复用 feature 身份, 角色, 后端, 维度和有限值校验. 调用方
+    只需要提供原始记录与精确样本对数量, 不需要先构造或信任任何派生指标表.
+    """
+
+    source_features, comparison_features, _ = _formal_feature_arrays(
+        feature_records,
+        expected_pair_count=expected_pair_count,
+    )
+    rebuilt_rows = rebuild_formal_fid_kid_metric_rows(
+        source_features,
+        comparison_features,
+        sample_pair_count=expected_pair_count,
+    )
+    return tuple(
+        _normalized_dataset_metric_row(row) for row in rebuilt_rows
+    )
+
+
 def rebuild_and_validate_formal_fid_kid_metrics(
     feature_records: Iterable[Mapping[str, Any]],
     reported_rows: Iterable[Mapping[str, Any]],
@@ -1758,19 +1798,12 @@ def rebuild_and_validate_formal_fid_kid_metrics(
 ) -> dict[str, Any]:
     """从正式 feature records 重算 FID/KID 并逐字段核对指标表."""
 
-    source_features, comparison_features, materialized_records = (
-        _formal_feature_arrays(
-            feature_records,
+    materialized_records = tuple(dict(record) for record in feature_records)
+    normalized_rebuilt = (
+        rebuild_formal_fid_kid_metric_rows_from_feature_records(
+            materialized_records,
             expected_pair_count=expected_pair_count,
         )
-    )
-    rebuilt_rows = rebuild_formal_fid_kid_metric_rows(
-        source_features,
-        comparison_features,
-        sample_pair_count=expected_pair_count,
-    )
-    normalized_rebuilt = tuple(
-        _normalized_dataset_metric_row(row) for row in rebuilt_rows
     )
     normalized_reported = tuple(
         _normalized_dataset_metric_row(row) for row in reported_rows

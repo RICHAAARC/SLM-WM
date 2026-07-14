@@ -2942,6 +2942,29 @@ Notebook 与 repository module 的跨边界数据
 | kid_subset_std_is_standard_error | protocol | none | true | true | false | KID std 是否是均值标准误, 正式协议固定为 false。 |
 | kid_output_scale | protocol | none | true | false | false | KID 输出缩放系数, 当前固定为1并保留原始尺度。 |
 | kid_full_sample_subset_std | protocol | none | true | true | false | 子集覆盖完整集合时显式记录的 KID 总体标准差, 当前固定为0。 |
+| prompt_count_per_repeat | metric | none | true | true | false | 精确9重复数据集质量统计中每个 repeat 必须覆盖的完整 Prompt 数量, 对 probe、pilot、full 分别为70、700、7000。 |
+| aggregate_quality_pair_count | metric | none | true | true | false | 精确9重复 FID/KID 联合计算实际使用的 source/comparison 图像对数量, 等于9乘当前层级完整 Prompt 数量。 |
+| aggregate_feature_record_count | metric | none | true | true | false | 精确9重复 FID/KID 联合计算实际使用的原始 Inception feature record 数量, 等于质量图像对数量的2倍。 |
+| prompt_id_set_digest | provenance | none | true | true | false | 精确9重复质量成员共同使用的完整 Prompt ID 集合摘要。 |
+| quality_feature_membership_digest | provenance | none | true | true | false | repeat、Prompt、质量记录和 source/comparison 图像摘要组成的规范成员关系集合摘要。 |
+| quality_feature_records_digest | provenance | none | true | true | false | 按 repeat、Prompt 和 source/comparison 角色规范排序的原始 Inception feature records 集合摘要。 |
+| fid_kid_metric_rows_digest | provenance | none | true | true | false | 从精确9重复原始 Inception 特征联合重建的 FID、KID mean 与 KID std 三行摘要。 |
+| registered_repeat_count | metric | none | true | false | false | 精确9重复 FID/KID 数值协议中冻结的注册 repeat 数量, 当前为9。 |
+| feature_population_rule | protocol | none | true | false | false | 精确9重复 FID/KID 以全部注册 repeat 的原始 Inception feature rows 构造联合分布, 不平均单 repeat 派生指标。 |
+| prompt_weighting_rule | protocol | none | true | false | false | 每个 Prompt 通过精确 repeat 笛卡尔积获得相同的9次分布样本权重。 |
+| aggregate_sample_pair_count_by_paper_run | protocol | none | true | false | false | probe、pilot、full 的精确9重复联合质量样本对数量映射, 分别为630、6300、63000。 |
+| randomization_kid_effective_subset_size_by_paper_run | protocol | none | true | false | false | 精确9重复联合 KID 的实际子集大小映射, probe、pilot、full 分别为630、1000、1000。 |
+| base_formal_metric_protocol_digest | provenance | none | true | false | false | 精确9重复质量协议所复用的单分布 FID/KID 算子协议摘要。 |
+| randomization_dataset_quality_metric_protocol_digest | provenance | none | true | true | false | 注册 repeat 联合特征总体、Prompt 等权规则、样本数量和 KID 子集大小协议摘要。 |
+| quality_metric_names | protocol | none | true | true | false | 精确9重复数据集质量表要求的指标名称有序集合, 固定为 fid、kid_mean、kid_std。 |
+| quality_metric_status | governance | none | true | true | false | 精确9重复 FID/KID 三行是否完成真实数值测量, 正式可重建结果固定为 measured。 |
+| randomization_dataset_quality_statistics_ready | governance | none | true | true | false | 9个注册 repeat、完整 Prompt 成员、两类特征角色和 FID/KID 数值是否全部可从原始特征重建；不表示质量效果主张自动获支持。 |
+| randomization_dataset_quality_summary_digest | provenance | none | true | true | false | 精确9重复 FID/KID 重建摘要在加入自身摘要前的稳定摘要。 |
+| repeat_source_records | provenance | none | true | false | false | 9个注册 repeat 各自使用的质量图像记录成员与原始 Inception 特征成员来源表。 |
+| quality_image_source | provenance | none | true | false | false | 单个 repeat 的正式质量图像记录成员、文件摘要和上游 leaf 身份。 |
+| quality_feature_source | provenance | none | true | false | false | 单个 repeat 的正式 Inception feature records 成员、文件摘要和上游 leaf 身份。 |
+| repeat_source_records_digest | provenance | none | true | true | false | 9个 repeat 最小质量来源表的稳定摘要。 |
+| randomization_dataset_quality_report_digest | provenance | none | true | true | false | 精确9重复数据集质量来源报告在加入自身摘要前的稳定摘要。 |
 | branch_risk_mode | method | none | true | false | false | 载体路由使用分支特定风险场或共享全局风险对照的真实机制模式。 |
 | local_contrast_risk_weight | method | none | true | false | false | 灰度相对反射填充5x5局部均值绝对偏离在分支风险中的非负权重。 |
 | adjacent_step_instability_weight | method | none | true | false | false | 当前与紧邻上一 scheduler 步解码 RGB 不稳定度在分支风险中的非负权重。 |
