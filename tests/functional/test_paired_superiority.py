@@ -15,6 +15,7 @@ from experiments.protocol.attacks import (
     formal_attack_seed_protocol_record,
     formal_attack_seed_random,
 )
+from experiments.protocol.fixed_fpr_observation_audit import FORMAL_THRESHOLD_SOURCE
 from experiments.protocol.pilot_paper_fixed_fpr import (
     build_pilot_paper_attack_matrix_rows,
 )
@@ -34,6 +35,7 @@ from paper_experiments.analysis.paired_superiority import (
     THRESHOLD_AUDIT_FIELDS,
     THRESHOLD_AUDIT_METHOD_IDS,
     PairedSuperiorityError,
+    build_quality_matching_records,
     build_quality_matched_superiority_rows,
     build_paired_outcome_set_digest,
     build_paired_outcomes,
@@ -48,6 +50,7 @@ from paper_experiments.analysis.paired_superiority import (
 pytestmark = pytest.mark.quick
 
 PROPOSED_THRESHOLD_DIGEST = "a" * 64
+BASELINE_THRESHOLD_VALUE = 0.5
 BASELINE_THRESHOLD_DIGESTS = {
     baseline_id: f"{index + 1:x}" * 64
     for index, baseline_id in enumerate(PRIMARY_BASELINE_IDS)
@@ -91,6 +94,60 @@ def paired_randomization_identity(prompt_index: int) -> dict[str, object]:
 PAIRED_RANDOMIZATION_FIELDS = tuple(paired_randomization_identity(0))
 
 
+def quality_source_rows(
+    *,
+    baseline_id: str = "",
+    proposed_quality: float = -0.8,
+    baseline_quality: float = 0.4,
+) -> list[dict[str, object]]:
+    """构造同一 repeat 的真实未攻击 clean-watermarked 质量记录."""
+
+    rows: list[dict[str, object]] = []
+    for prompt_index in range(2):
+        prompt_id = f"quality_prompt_{prompt_index}"
+        identity = paired_randomization_identity(prompt_index)
+        for sample_role in ("clean_negative", "positive_source"):
+            payload: dict[str, object] = {
+                "prompt_id": prompt_id,
+                **identity,
+                "split": "test",
+                "sample_role": sample_role,
+                "attack_id": "",
+                "attack_family": "clean",
+            }
+            if baseline_id:
+                payload.update(
+                    {
+                        "baseline_id": baseline_id,
+                        "image_path": f"{baseline_id}/{prompt_id}/{sample_role}.png",
+                        "image_digest": build_stable_digest(
+                            {
+                                "baseline_id": baseline_id,
+                                "prompt_id": prompt_id,
+                                "sample_role": sample_role,
+                            }
+                        ),
+                        "quality_score": baseline_quality,
+                    }
+                )
+            else:
+                payload.update(
+                    {
+                        "source_image_path": f"slm_wm/{prompt_id}/{sample_role}.png",
+                        "source_image_digest": build_stable_digest(
+                            {
+                                "method_id": "slm_wm",
+                                "prompt_id": prompt_id,
+                                "sample_role": sample_role,
+                            }
+                        ),
+                        "embedding_pair_ssim": proposed_quality,
+                    }
+                )
+            rows.append(payload)
+    return rows
+
+
 def observation_rows(
     *,
     baseline_id: str = "",
@@ -132,9 +189,9 @@ def observation_rows(
                 row.update(
                     {
                         "baseline_id": baseline_id,
-                        "threshold_digest": BASELINE_THRESHOLD_DIGESTS[
-                            baseline_id
-                        ],
+                        "score": 0.9 if decision else 0.1,
+                        "threshold": BASELINE_THRESHOLD_VALUE,
+                        "threshold_source": FORMAL_THRESHOLD_SOURCE,
                         "detection_decision": decision,
                     }
                 )
@@ -169,9 +226,8 @@ def paired_outcomes(
             ),
             baseline_id=baseline_id,
             proposed_method_threshold_digest=PROPOSED_THRESHOLD_DIGEST,
-            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS[
-                baseline_id
-            ],
+            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS[baseline_id],
+            baseline_calibrated_detection_threshold=BASELINE_THRESHOLD_VALUE,
             attack_registry_rows=UNIT_ATTACK_REGISTRY,
         )
     )
@@ -211,9 +267,7 @@ def quality_matched_paired_outcomes(
                 "sample_role": "positive_source",
                 "attack_family": "clean",
                 "baseline_id": baseline_id,
-                "quality_score": (
-                    0.80 if prompt_index == baseline_index else 0.95
-                ),
+                "quality_score": (0.80 if prompt_index == baseline_index else 0.95),
             }
             for prompt_index in range(prompt_count)
         )
@@ -226,6 +280,7 @@ def quality_matched_paired_outcomes(
                 baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS[
                     baseline_id
                 ],
+                baseline_calibrated_detection_threshold=BASELINE_THRESHOLD_VALUE,
                 attack_registry_rows=UNIT_ATTACK_REGISTRY,
                 include_quality_matching=True,
             )
@@ -254,9 +309,8 @@ def test_paired_outcomes_require_exact_prompt_attack_set() -> None:
             baseline,
             baseline_id="tree_ring",
             proposed_method_threshold_digest=PROPOSED_THRESHOLD_DIGEST,
-            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS[
-                "tree_ring"
-            ],
+            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS["tree_ring"],
+            baseline_calibrated_detection_threshold=BASELINE_THRESHOLD_VALUE,
             attack_registry_rows=UNIT_ATTACK_REGISTRY,
         )
 
@@ -273,9 +327,8 @@ def test_paired_outcomes_only_accept_audited_decision_fields() -> None:
             baseline,
             baseline_id="tree_ring",
             proposed_method_threshold_digest=PROPOSED_THRESHOLD_DIGEST,
-            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS[
-                "tree_ring"
-            ],
+            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS["tree_ring"],
+            baseline_calibrated_detection_threshold=BASELINE_THRESHOLD_VALUE,
             attack_registry_rows=UNIT_ATTACK_REGISTRY,
         )
 
@@ -288,9 +341,8 @@ def test_paired_outcomes_only_accept_audited_decision_fields() -> None:
             baseline,
             baseline_id="tree_ring",
             proposed_method_threshold_digest=PROPOSED_THRESHOLD_DIGEST,
-            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS[
-                "tree_ring"
-            ],
+            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS["tree_ring"],
+            baseline_calibrated_detection_threshold=BASELINE_THRESHOLD_VALUE,
             attack_registry_rows=UNIT_ATTACK_REGISTRY,
         )
 
@@ -302,22 +354,24 @@ def test_paired_outcomes_only_accept_audited_decision_fields() -> None:
             baseline,
             baseline_id="tree_ring",
             proposed_method_threshold_digest=PROPOSED_THRESHOLD_DIGEST,
-            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS[
-                "tree_ring"
-            ],
+            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS["tree_ring"],
+            baseline_calibrated_detection_threshold=BASELINE_THRESHOLD_VALUE,
             attack_registry_rows=UNIT_ATTACK_REGISTRY,
         )
 
 
 def test_paired_outcomes_bind_thresholds_and_formal_attack_registry() -> None:
-    """每条 outcome 必须绑定两方法阈值与正式攻击配置身份."""
+    """每条 outcome 必须由顶层阈值记录和样本分数重建正式判定."""
 
+    baseline_rows = observation_rows(baseline_id="tree_ring")
+    assert all("threshold_digest" not in row for row in baseline_rows)
     outcomes = build_paired_outcomes(
         observation_rows(),
-        observation_rows(baseline_id="tree_ring"),
+        baseline_rows,
         baseline_id="tree_ring",
         proposed_method_threshold_digest=PROPOSED_THRESHOLD_DIGEST,
         baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS["tree_ring"],
+        baseline_calibrated_detection_threshold=BASELINE_THRESHOLD_VALUE,
         attack_registry_rows=UNIT_ATTACK_REGISTRY,
     )
     first = outcomes[0]
@@ -327,12 +381,45 @@ def test_paired_outcomes_bind_thresholds_and_formal_attack_registry() -> None:
         == BASELINE_THRESHOLD_DIGESTS["tree_ring"]
     )
     registry_by_id = {row["attack_id"]: row for row in UNIT_ATTACK_REGISTRY}
-    assert first["resource_profile"] == registry_by_id[first["attack_id"]][
-        "resource_profile"
-    ]
-    assert first["attack_config_digest"] == registry_by_id[first["attack_id"]][
-        "attack_config_digest"
-    ]
+    assert (
+        first["resource_profile"]
+        == registry_by_id[first["attack_id"]]["resource_profile"]
+    )
+    assert (
+        first["attack_config_digest"]
+        == registry_by_id[first["attack_id"]]["attack_config_digest"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "field_value", "error_pattern"),
+    (
+        ("threshold", 0.6, "未使用审计冻结阈值"),
+        ("threshold_source", "manual", "正式 calibration 阈值来源"),
+        ("detection_decision", True, "无法由正式分数和阈值重算"),
+    ),
+)
+def test_paired_outcomes_reject_unreconstructable_baseline_decision(
+    field_name: str,
+    field_value: object,
+    error_pattern: str,
+) -> None:
+    """baseline 阈值来源、数值或判定漂移时必须阻断论文配对统计."""
+
+    baseline_rows = observation_rows(baseline_id="tree_ring")
+    baseline_rows[0][field_name] = field_value
+    with pytest.raises(PairedSuperiorityError, match=error_pattern):
+        build_paired_outcomes(
+            observation_rows(),
+            baseline_rows,
+            baseline_id="tree_ring",
+            proposed_method_threshold_digest=PROPOSED_THRESHOLD_DIGEST,
+            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS[
+                "tree_ring"
+            ],
+            baseline_calibrated_detection_threshold=BASELINE_THRESHOLD_VALUE,
+            attack_registry_rows=UNIT_ATTACK_REGISTRY,
+        )
 
 
 def test_paired_outcomes_require_real_attacked_image_only_evidence(
@@ -350,9 +437,7 @@ def test_paired_outcomes_require_real_attacked_image_only_evidence(
                 "attacked_image_path": f"outputs/attacked/proposed_{row_index}.png",
                 "attacked_image_digest": image_digest,
                 "evaluated_image_digest": image_digest,
-                "detector_digest": build_stable_digest(
-                    {"detector": row_index}
-                ),
+                "detector_digest": build_stable_digest({"detector": row_index}),
                 "metadata": {
                     "detector_input_access_mode": "image_key_public_model_only",
                     "blind_image_detector": True,
@@ -364,9 +449,7 @@ def test_paired_outcomes_require_real_attacked_image_only_evidence(
         row.update(
             {
                 "image_path": f"outputs/attacked/baseline_{row_index}.png",
-                "image_digest": build_stable_digest(
-                    {"baseline_image": row_index}
-                ),
+                "image_digest": build_stable_digest({"baseline_image": row_index}),
             }
         )
     monkeypatch.setattr(
@@ -381,6 +464,7 @@ def test_paired_outcomes_require_real_attacked_image_only_evidence(
         baseline_id="tree_ring",
         proposed_method_threshold_digest=PROPOSED_THRESHOLD_DIGEST,
         baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS["tree_ring"],
+        baseline_calibrated_detection_threshold=BASELINE_THRESHOLD_VALUE,
         attack_registry_rows=UNIT_ATTACK_REGISTRY,
         require_image_only_evidence=True,
     )
@@ -396,9 +480,8 @@ def test_paired_outcomes_require_real_attacked_image_only_evidence(
             baseline,
             baseline_id="tree_ring",
             proposed_method_threshold_digest=PROPOSED_THRESHOLD_DIGEST,
-            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS[
-                "tree_ring"
-            ],
+            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS["tree_ring"],
+            baseline_calibrated_detection_threshold=BASELINE_THRESHOLD_VALUE,
             attack_registry_rows=UNIT_ATTACK_REGISTRY,
             require_image_only_evidence=True,
         )
@@ -420,9 +503,8 @@ def test_paired_outcomes_reject_different_base_latent_identity() -> None:
             baseline,
             baseline_id="tree_ring",
             proposed_method_threshold_digest=PROPOSED_THRESHOLD_DIGEST,
-            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS[
-                "tree_ring"
-            ],
+            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS["tree_ring"],
+            baseline_calibrated_detection_threshold=BASELINE_THRESHOLD_VALUE,
             attack_registry_rows=UNIT_ATTACK_REGISTRY,
         )
 
@@ -432,9 +514,7 @@ def test_paired_outcomes_reject_attack_seed_drift() -> None:
 
     proposed = observation_rows()
     baseline = observation_rows(baseline_id="tree_ring")
-    baseline[0]["attack_seed_random"] = int(
-        baseline[0]["attack_seed_random"]
-    ) + 1
+    baseline[0]["attack_seed_random"] = int(baseline[0]["attack_seed_random"]) + 1
 
     with pytest.raises(PairedSuperiorityError, match="attack_seed_random"):
         build_paired_outcomes(
@@ -442,9 +522,8 @@ def test_paired_outcomes_reject_attack_seed_drift() -> None:
             baseline,
             baseline_id="tree_ring",
             proposed_method_threshold_digest=PROPOSED_THRESHOLD_DIGEST,
-            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS[
-                "tree_ring"
-            ],
+            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS["tree_ring"],
+            baseline_calibrated_detection_threshold=BASELINE_THRESHOLD_VALUE,
             attack_registry_rows=UNIT_ATTACK_REGISTRY,
         )
 
@@ -459,10 +538,7 @@ def test_clustered_superiority_discloses_non_superior_result() -> None:
         outcomes,
         protocol_digest="d" * 64,
     )
-    assert all(
-        row["one_sided_bounded_hoeffding_mean_p_value"] == 1.0
-        for row in rows
-    )
+    assert all(row["one_sided_bounded_hoeffding_mean_p_value"] == 1.0 for row in rows)
     assert all(row["paired_superiority_ready"] is False for row in rows)
     summary = build_paired_superiority_summary(rows, paired_outcomes=outcomes)
     assert summary["overall_paired_superiority_ready"] is False
@@ -482,10 +558,7 @@ def test_bounded_mean_claim_and_exact_sharp_null_diagnostic() -> None:
     )
     assert first == second
     assert all(row["mean_paired_difference_ci_low"] == 1.0 for row in first)
-    assert all(
-        row["claim_p_value_method"] == CLAIM_P_VALUE_METHOD
-        for row in first
-    )
+    assert all(row["claim_p_value_method"] == CLAIM_P_VALUE_METHOD for row in first)
     assert all(
         row["sharp_null_diagnostic_method"] == SHARP_NULL_DIAGNOSTIC_METHOD
         for row in first
@@ -507,14 +580,19 @@ def test_bounded_mean_claim_and_exact_sharp_null_diagnostic() -> None:
         row["bootstrap_resample_count"] == DEFAULT_BOOTSTRAP_RESAMPLE_COUNT
         for row in first
     )
-    assert all(row["bootstrap_analysis_schema"] == BOOTSTRAP_ANALYSIS_SCHEMA for row in first)
-    assert all(row["bootstrap_bit_generator"] == BOOTSTRAP_BIT_GENERATOR for row in first)
-    assert all(row["bootstrap_quantile_method"] == BOOTSTRAP_QUANTILE_METHOD for row in first)
+    assert all(
+        row["bootstrap_analysis_schema"] == BOOTSTRAP_ANALYSIS_SCHEMA for row in first
+    )
+    assert all(
+        row["bootstrap_bit_generator"] == BOOTSTRAP_BIT_GENERATOR for row in first
+    )
+    assert all(
+        row["bootstrap_quantile_method"] == BOOTSTRAP_QUANTILE_METHOD for row in first
+    )
     assert all("permutation_resample_count" not in row for row in first)
     assert all("permutation_seed_digest_random" not in row for row in first)
     assert all(
-        row["holm_adjusted_p_value"]
-        >= row["one_sided_bounded_hoeffding_mean_p_value"]
+        row["holm_adjusted_p_value"] >= row["one_sided_bounded_hoeffding_mean_p_value"]
         for row in first
     )
     assert all(row["paired_superiority_ready"] is False for row in first)
@@ -557,9 +635,7 @@ def test_bounded_mean_claim_and_exact_sharp_null_diagnostic() -> None:
         row["protocol_digest"] for row in first
     ]
 
-    changed_outcomes = paired_outcomes(
-        baseline_positive_prompt_ids={"prompt_0"}
-    )
+    changed_outcomes = paired_outcomes(baseline_positive_prompt_ids={"prompt_0"})
     changed_data = build_paired_superiority_rows(
         changed_outcomes,
         protocol_digest="e" * 64,
@@ -665,9 +741,7 @@ def test_quality_matching_supports_baseline_specific_prompt_subsets() -> None:
             row["quality_match_coverage_ready"],
         )
         for row in quality_rows
-    } == {
-        baseline_id: (4, 1, True) for baseline_id in PRIMARY_BASELINE_IDS
-    }
+    } == {baseline_id: (4, 1, True) for baseline_id in PRIMARY_BASELINE_IDS}
     unmatched_by_baseline = {
         baseline_id: {
             prompt_id
@@ -679,3 +753,82 @@ def test_quality_matching_supports_baseline_specific_prompt_subsets() -> None:
         for baseline_id in PRIMARY_BASELINE_IDS
     }
     assert len({next(iter(value)) for value in unmatched_by_baseline.values()}) == 4
+
+
+def test_quality_record_builder_accepts_negative_ssim_and_gap_above_one() -> None:
+    """标准 SSIM 域为 [-1, 1], 两方法差值绝对值可以超过1."""
+
+    records = build_quality_matching_records(
+        quality_source_rows(proposed_quality=-0.8),
+        quality_source_rows(
+            baseline_id="tree_ring",
+            baseline_quality=0.4,
+        ),
+        baseline_id="tree_ring",
+    )
+
+    assert len(records) == 2
+    assert all(
+        record["embedding_pair_ssim_gap"] == pytest.approx(-1.2)
+        and record["absolute_embedding_pair_ssim_gap"] == pytest.approx(1.2)
+        and record["quality_matched"] is False
+        for record in records
+    )
+
+
+def test_quality_record_builder_selection_does_not_read_detector_labels() -> None:
+    """翻转检测判定不得改变只由未攻击 SSIM 构造的质量记录."""
+
+    proposed = quality_source_rows(proposed_quality=0.95)
+    baseline = quality_source_rows(
+        baseline_id="tree_ring",
+        baseline_quality=0.94,
+    )
+    first = build_quality_matching_records(
+        proposed,
+        baseline,
+        baseline_id="tree_ring",
+    )
+    for row in proposed:
+        row["formal_evidence_positive"] = False
+    for row in baseline:
+        row["detection_decision"] = True
+    second = build_quality_matching_records(
+        proposed,
+        baseline,
+        baseline_id="tree_ring",
+    )
+
+    assert second == first
+
+
+def test_quality_record_builder_rejects_missing_image_or_random_identity_drift() -> (
+    None
+):
+    """质量值必须同时绑定真实图像摘要和相同 seed、key、基础 latent."""
+
+    proposed = quality_source_rows(proposed_quality=0.95)
+    baseline = quality_source_rows(
+        baseline_id="tree_ring",
+        baseline_quality=0.94,
+    )
+    proposed[0]["source_image_digest"] = ""
+    with pytest.raises(PairedSuperiorityError, match="小写 SHA-256"):
+        build_quality_matching_records(
+            proposed,
+            baseline,
+            baseline_id="tree_ring",
+        )
+
+    proposed = quality_source_rows(proposed_quality=0.95)
+    baseline = quality_source_rows(
+        baseline_id="tree_ring",
+        baseline_quality=0.94,
+    )
+    baseline[1]["generation_seed_random"] = 9999
+    with pytest.raises(PairedSuperiorityError, match="随机身份不一致"):
+        build_quality_matching_records(
+            proposed,
+            baseline,
+            baseline_id="tree_ring",
+        )

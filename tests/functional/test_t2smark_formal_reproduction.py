@@ -1196,6 +1196,8 @@ def _write_package_fixture(
     observations, adapter_manifest = t2smark_runtime.build_t2smark_observations(
         image_pairs=image_pairs,
         t2smark_results=rebuilt_results,
+        model_id=config.model_id,
+        model_revision=config.model_revision,
         target_fpr=config.target_fpr,
         evidence_root=root_path,
     )

@@ -1694,6 +1694,10 @@ def _paired_superiority_ready(bundle: ResultClosureGateInput) -> bool:
     canonical_threshold_rows, threshold_map, observation_sha256_map = (
         threshold_bindings
     )
+    threshold_value_map = {
+        str(row["method_id"]): float(row["calibrated_detection_threshold"])
+        for row in canonical_threshold_rows
+    }
     expected_baseline_ids = set(PRIMARY_BASELINE_IDS)
     expected_attack_by_id = {row["attack_id"]: row for row in attack_registry}
     expected_attack_count = len(attack_registry)
@@ -1738,6 +1742,9 @@ def _paired_superiority_ready(bundle: ResultClosureGateInput) -> bool:
                 baseline_id=baseline_id,
                 proposed_method_threshold_digest=threshold_map["slm_wm"],
                 baseline_method_threshold_digest=threshold_map[baseline_id],
+                baseline_calibrated_detection_threshold=threshold_value_map[
+                    baseline_id
+                ],
                 attack_registry_rows=attack_registry,
                 include_quality_matching=True,
             )

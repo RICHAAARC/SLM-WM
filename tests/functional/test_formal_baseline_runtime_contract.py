@@ -38,6 +38,9 @@ from external_baseline.primary.tree_ring.adapter.method_faithful_sd35 import (
 from paper_experiments.baselines.command_plan_builder import build_parser, build_plan
 
 
+T2SMARK_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
+
+
 @pytest.mark.quick
 def test_method_faithful_threshold_uses_calibration_negatives_only() -> None:
     """改变阳性分数不得改变 fixed-FPR 阈值。"""
@@ -232,6 +235,8 @@ def test_t2smark_adapter_rejects_incomplete_calibration_before_threshold() -> No
         build_t2smark_observations(
             image_pairs=pairs,
             t2smark_results=incomplete_results,
+            model_id=T2SMARK_MODEL_ID,
+            model_revision=DEFAULT_SD35_MODEL_REVISION,
             target_fpr=0.1,
         )
 
@@ -341,10 +346,17 @@ def test_t2smark_formal_attacks_use_distinct_clean_and_watermarked_images(
     observations, _ = build_t2smark_observations(
         image_pairs=rows,
         t2smark_results=results,
+        model_id=T2SMARK_MODEL_ID,
+        model_revision=DEFAULT_SD35_MODEL_REVISION,
         threshold=0.5,
         target_fpr=0.1,
     )
 
+    assert all(
+        row["generation_model_id"] == T2SMARK_MODEL_ID
+        and row["generation_model_revision"] == DEFAULT_SD35_MODEL_REVISION
+        for row in observations
+    )
     attacked_rows = [row for row in observations if str(row["sample_role"]).startswith("attacked_")]
     assert len(attacked_rows) == 2
     by_role = {row["sample_role"]: row for row in attacked_rows}
@@ -360,6 +372,8 @@ def test_t2smark_formal_attacks_use_distinct_clean_and_watermarked_images(
         build_t2smark_observations(
             image_pairs=rows,
             t2smark_results=results,
+            model_id=T2SMARK_MODEL_ID,
+            model_revision=DEFAULT_SD35_MODEL_REVISION,
             threshold=0.5,
             target_fpr=0.1,
         )

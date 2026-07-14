@@ -29,12 +29,14 @@ from main.core.digest import build_stable_digest
 from paper_experiments.analysis.paired_superiority import (
     PRIMARY_BASELINE_IDS,
     build_paired_outcomes,
+    build_quality_matching_protocol_digest,
+    build_quality_matching_records,
     canonical_attack_registry_rows,
 )
 from paper_experiments.analysis.randomization_paired_superiority import (
     RANDOMIZATION_PAIRED_BOOTSTRAP_RESAMPLE_COUNT,
-    RANDOMIZATION_PAIRED_SUPERIORITY_FIELDNAMES,
-    build_randomization_aggregate_paired_superiority_statistics,
+    RANDOMIZATION_PAIRED_MAIN_TABLE_FIELDNAMES,
+    build_randomization_quality_matched_main_table_statistics,
 )
 from paper_experiments.runners.randomization_aggregate_provenance import (
     RandomizationAggregateProvenance,
@@ -60,10 +62,13 @@ class RandomizationPairedSuperiorityRunnerError(ValueError):
 
 @dataclass(frozen=True)
 class RandomizationPairedSuperiorityResult:
-    """保存45阈值、配对 outcome、统计行、摘要与来源报告."""
+    """保存45阈值、原始配对、质量记录、主表与来源报告."""
 
     threshold_records: tuple[Mapping[str, Any], ...]
     paired_outcomes: tuple[Mapping[str, Any], ...]
+    quality_matching_records: tuple[Mapping[str, Any], ...]
+    all_sample_rows: tuple[Mapping[str, Any], ...]
+    quality_matched_rows: tuple[Mapping[str, Any], ...]
     superiority_rows: tuple[Mapping[str, Any], ...]
     summary: Mapping[str, Any]
     report: Mapping[str, Any]
@@ -73,9 +78,7 @@ def _require_provenance(source: RandomizationAggregateProvenance) -> None:
     """拒绝路径、字典或失去 validator 冻结身份的聚合来源."""
 
     if not isinstance(source, RandomizationAggregateProvenance):
-        raise TypeError(
-            "跨重复配对重建只接受 RandomizationAggregateProvenance"
-        )
+        raise TypeError("跨重复配对重建只接受 RandomizationAggregateProvenance")
     payload = source.payload
     if not all(
         (
@@ -83,8 +86,7 @@ def _require_provenance(source: RandomizationAggregateProvenance) -> None:
             payload.get("supports_paper_claim") is False,
             str(payload.get("randomization_aggregate_digest", ""))
             == source.randomization_aggregate_digest,
-            str(payload.get("common_code_version", ""))
-            == source.common_code_version,
+            str(payload.get("common_code_version", "")) == source.common_code_version,
             tuple(payload.get("randomization_repeat_ids", ()))
             == formal_randomization_repeat_ids(),
         )
@@ -106,8 +108,7 @@ def _formal_attack_registry() -> tuple[dict[str, str], ...]:
             "attack_config_digest": attack_config_digest(config),
         }
         for config in default_attack_configs()
-        if config.enabled
-        and config.resource_profile in {"full_main", "full_extra"}
+        if config.enabled and config.resource_profile in {"full_main", "full_extra"}
     )
 
 
@@ -198,7 +199,7 @@ def _rebuild_randomization_paired_superiority(
     source_by_key, threshold_by_key = _validate_threshold_source_binding(rebuilt)
     attack_registry = _formal_attack_registry()
     protocol_payload = {
-        "protocol_schema": "randomization_method_repeat_paired_superiority_v1",
+        "protocol_schema": "randomization_quality_matched_main_table_v1",
         "method_repeat_fixed_fpr_report_digest": rebuilt.report[
             "method_repeat_fixed_fpr_report_digest"
         ],
@@ -210,10 +211,13 @@ def _rebuild_randomization_paired_superiority(
         ],
         "formal_attack_registry": list(attack_registry),
         "randomization_repeat_ids": list(formal_randomization_repeat_ids()),
+        "quality_matching_protocol_digest": (build_quality_matching_protocol_digest()),
+        "quality_matching_uses_detection_labels": False,
     }
     protocol_digest = build_stable_digest(protocol_payload)
 
     paired_outcomes: list[dict[str, Any]] = []
+    quality_matching_records: list[dict[str, Any]] = []
     for repeat_id in formal_randomization_repeat_ids():
         proposed_source = source_by_key[(repeat_id, "slm_wm")]
         proposed_threshold = threshold_by_key[(repeat_id, "slm_wm")]
@@ -231,22 +235,39 @@ def _rebuild_randomization_paired_superiority(
                     baseline_method_threshold_digest=str(
                         baseline_threshold["threshold_digest"]
                     ),
+                    baseline_calibrated_detection_threshold=float(
+                        baseline_threshold["calibrated_detection_threshold"]
+                    ),
                     attack_registry_rows=attack_registry,
                     require_image_only_evidence=True,
                 )
             )
+            quality_matching_records.extend(
+                build_quality_matching_records(
+                    proposed_source.observation_rows,
+                    baseline_source.observation_rows,
+                    baseline_id=baseline_id,
+                )
+            )
 
-    superiority_rows, summary = (
-        build_randomization_aggregate_paired_superiority_statistics(
-            paired_outcomes,
-            paper_run_name=paper_run_name,
-            target_fpr=target_fpr,
-            protocol_digest=protocol_digest,
-            attack_registry_rows=attack_registry,
-        )
+    (
+        superiority_rows,
+        summary,
+        all_sample_rows,
+        quality_matched_rows,
+    ) = build_randomization_quality_matched_main_table_statistics(
+        paired_outcomes,
+        quality_matching_records,
+        paper_run_name=paper_run_name,
+        target_fpr=target_fpr,
+        protocol_digest=protocol_digest,
+        attack_registry_rows=attack_registry,
     )
     threshold_records = tuple(dict(row) for row in rebuilt.threshold_records)
     paired_outcome_records = tuple(dict(row) for row in paired_outcomes)
+    quality_matching_record_rows = tuple(dict(row) for row in quality_matching_records)
+    all_sample_records = tuple(dict(row) for row in all_sample_rows)
+    quality_matched_records = tuple(dict(row) for row in quality_matched_rows)
     superiority_records = tuple(dict(row) for row in superiority_rows)
     report = {
         "report_schema": RANDOMIZATION_PAIRED_SUPERIORITY_REPORT_SCHEMA,
@@ -271,24 +292,38 @@ def _rebuild_randomization_paired_superiority(
         "formal_attack_registry_digest": build_stable_digest(list(attack_registry)),
         "paired_outcome_count": len(paired_outcome_records),
         "paired_outcome_set_digest": summary["paired_outcome_set_digest"],
-        "paired_superiority_rows_digest": summary[
-            "paired_superiority_rows_digest"
+        "quality_matching_record_count": len(quality_matching_record_rows),
+        "quality_matching_record_set_digest": summary[
+            "quality_matching_record_set_digest"
         ],
+        "all_sample_paired_superiority_rows_digest": summary[
+            "all_sample_paired_superiority_rows_digest"
+        ],
+        "quality_matched_rows_digest": summary["quality_matched_rows_digest"],
+        "paired_superiority_rows_digest": summary["paired_superiority_rows_digest"],
         "randomization_paired_superiority_summary_digest": summary[
             "randomization_paired_superiority_summary_digest"
         ],
         "protocol_digest": protocol_digest,
         "bootstrap_resample_count": RANDOMIZATION_PAIRED_BOOTSTRAP_RESAMPLE_COUNT,
         "randomization_paired_statistics_ready": True,
+        "quality_matched_statistics_ready": True,
+        "overall_paired_superiority_ready": summary["overall_paired_superiority_ready"],
+        "overall_quality_matched_superiority_ready": summary[
+            "overall_quality_matched_superiority_ready"
+        ],
         "conclusion_decision": summary["conclusion_decision"],
         "supports_paper_claim": summary["supports_paper_claim"],
     }
-    report["randomization_paired_superiority_report_digest"] = (
-        build_stable_digest(report)
+    report["randomization_paired_superiority_report_digest"] = build_stable_digest(
+        report
     )
     return RandomizationPairedSuperiorityResult(
         threshold_records=threshold_records,
         paired_outcomes=paired_outcome_records,
+        quality_matching_records=quality_matching_record_rows,
+        all_sample_rows=all_sample_records,
+        quality_matched_rows=quality_matched_records,
         superiority_rows=superiority_records,
         summary=summary,
         report=report,
@@ -388,6 +423,7 @@ def write_randomization_paired_superiority_outputs(
     try:
         thresholds_path = temporary_directory / "method_repeat_threshold_records.jsonl"
         outcomes_path = temporary_directory / "paired_outcomes.jsonl"
+        quality_path = temporary_directory / "quality_matching_records.jsonl"
         table_path = temporary_directory / "paired_superiority_table.csv"
         summary_path = temporary_directory / "paired_superiority_summary.json"
         report_path = (
@@ -397,10 +433,11 @@ def write_randomization_paired_superiority_outputs(
 
         _write_jsonl(thresholds_path, result.threshold_records)
         _write_jsonl(outcomes_path, result.paired_outcomes)
+        _write_jsonl(quality_path, result.quality_matching_records)
         with table_path.open("w", encoding="utf-8", newline="") as stream:
             writer = csv.DictWriter(
                 stream,
-                fieldnames=RANDOMIZATION_PAIRED_SUPERIORITY_FIELDNAMES,
+                fieldnames=RANDOMIZATION_PAIRED_MAIN_TABLE_FIELDNAMES,
             )
             writer.writeheader()
             writer.writerows(result.superiority_rows)
@@ -427,6 +464,7 @@ def write_randomization_paired_superiority_outputs(
         data_paths = (
             thresholds_path,
             outcomes_path,
+            quality_path,
             table_path,
             summary_path,
             report_path,
@@ -451,22 +489,27 @@ def write_randomization_paired_superiority_outputs(
                     source.randomization_aggregate_digest
                 ),
                 "common_code_version": source.common_code_version,
-                "randomization_repeat_ids": list(
-                    formal_randomization_repeat_ids()
-                ),
+                "randomization_repeat_ids": list(formal_randomization_repeat_ids()),
                 "method_repeat_threshold_records_digest": result.report[
                     "method_repeat_threshold_records_digest"
                 ],
                 "paired_outcome_set_digest": result.summary[
                     "paired_outcome_set_digest"
                 ],
+                "quality_matching_record_set_digest": result.summary[
+                    "quality_matching_record_set_digest"
+                ],
+                "all_sample_paired_superiority_rows_digest": result.summary[
+                    "all_sample_paired_superiority_rows_digest"
+                ],
+                "quality_matched_rows_digest": result.summary[
+                    "quality_matched_rows_digest"
+                ],
                 "paired_superiority_rows_digest": result.summary[
                     "paired_superiority_rows_digest"
                 ],
                 "randomization_paired_superiority_summary_digest": (
-                    result.summary[
-                        "randomization_paired_superiority_summary_digest"
-                    ]
+                    result.summary["randomization_paired_superiority_summary_digest"]
                 ),
                 "randomization_paired_superiority_report_digest": result.report[
                     "randomization_paired_superiority_report_digest"
@@ -491,8 +534,7 @@ def write_randomization_paired_superiority_outputs(
             },
         ).to_dict()
         manifest_path.write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True)
-            + "\n",
+            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         temporary_directory.rename(destination)

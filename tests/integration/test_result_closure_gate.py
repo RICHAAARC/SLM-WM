@@ -27,6 +27,7 @@ from experiments.protocol.attacks import (
     formal_attack_seed_protocol_record,
     formal_attack_seed_random,
 )
+from experiments.protocol.fixed_fpr_observation_audit import FORMAL_THRESHOLD_SOURCE
 from experiments.ablations.necessity_statistics import (
     ABLATION_NECESSITY_FIELDNAMES,
     build_ablation_necessity_statistics,
@@ -665,9 +666,9 @@ METHOD_OBSERVATION_RECORDS_BY_METHOD = {
                         "attack_family": "clean",
                         "attack_name": "clean_none",
                         "quality_score": 1.0,
-                        "threshold_digest": METHOD_THRESHOLD_DIGEST_MAP[
-                            baseline_id
-                        ],
+                        "score": 0.1,
+                        "threshold": 0.5,
+                        "threshold_source": FORMAL_THRESHOLD_SOURCE,
                         "detection_decision": False,
                     }
                     for prompt_id in CALIBRATION_PROMPT_IDS
@@ -682,9 +683,9 @@ METHOD_OBSERVATION_RECORDS_BY_METHOD = {
                         "attack_family": "clean",
                         "attack_name": "clean_none",
                         "quality_score": 1.0,
-                        "threshold_digest": METHOD_THRESHOLD_DIGEST_MAP[
-                            baseline_id
-                        ],
+                        "score": 0.1,
+                        "threshold": 0.5,
+                        "threshold_source": FORMAL_THRESHOLD_SOURCE,
                         "detection_decision": False,
                     }
                     for prompt_id in TEST_PROMPT_IDS
@@ -699,9 +700,9 @@ METHOD_OBSERVATION_RECORDS_BY_METHOD = {
                         "attack_family": "clean",
                         "attack_name": "clean_none",
                         "quality_score": 0.9,
-                        "threshold_digest": METHOD_THRESHOLD_DIGEST_MAP[
-                            baseline_id
-                        ],
+                        "score": 0.9,
+                        "threshold": 0.5,
+                        "threshold_source": FORMAL_THRESHOLD_SOURCE,
                         "detection_decision": True,
                         "final_decision": True,
                     }
@@ -720,9 +721,14 @@ METHOD_OBSERVATION_RECORDS_BY_METHOD = {
                             str(attack["attack_id"]),
                         ),
                         "quality_score": 0.9,
-                        "threshold_digest": METHOD_THRESHOLD_DIGEST_MAP[
-                            baseline_id
-                        ],
+                        "score": (
+                            0.9
+                            if sample_role == "attacked_positive"
+                            and prompt_index < 5
+                            else 0.1
+                        ),
+                        "threshold": 0.5,
+                        "threshold_source": FORMAL_THRESHOLD_SOURCE,
                         "detection_decision": (
                             prompt_index < 5
                             if sample_role == "attacked_positive"
@@ -1151,6 +1157,7 @@ def paired_superiority_evidence(
             baseline_method_threshold_digest=METHOD_THRESHOLD_DIGEST_MAP[
                 baseline_id
             ],
+            baseline_calibrated_detection_threshold=0.5,
             attack_registry_rows=ATTACK_REGISTRY,
             include_quality_matching=True,
         )

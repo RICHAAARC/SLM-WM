@@ -284,6 +284,8 @@ def _observation(
     result_index: int,
     threshold_source: str,
     robustness: dict[str, Any],
+    generation_model_id: str,
+    generation_model_revision: str,
     image_path: str = "",
     image_digest: str = "",
     quality_score: float,
@@ -353,6 +355,8 @@ def _observation(
         "key_accuracy": robustness.get("acc_key"),
         "producer_id": "t2smark_slm_observation_adapter",
         "producer_role": "external_baseline_result_adapter",
+        "generation_model_id": generation_model_id,
+        "generation_model_revision": generation_model_revision,
         "formal_result_claim": False,
         "supports_paper_claim": False,
         "quality_score": float(quality_score),
@@ -376,6 +380,8 @@ def build_t2smark_observations(
     *,
     image_pairs: list[dict[str, Any]],
     t2smark_results: dict[str, Any],
+    model_id: str,
+    model_revision: str,
     attacked_image_manifest: dict[str, Any] | None = None,
     threshold: float | None = None,
     target_fpr: float = 0.1,
@@ -384,6 +390,16 @@ def build_t2smark_observations(
     evidence_root: str | Path | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """把 T2SMark results.json 映射为 baseline observations。"""
+
+    generation_model_id = str(model_id).strip()
+    generation_model_revision = str(model_revision).strip()
+    if not generation_model_id:
+        raise ValueError("T2SMark observation 必须绑定生成模型 ID")
+    if len(generation_model_revision) != 40 or any(
+        character not in "0123456789abcdef"
+        for character in generation_model_revision
+    ):
+        raise ValueError("T2SMark observation 必须绑定40位小写模型 revision")
 
     results_by_index = _result_items(t2smark_results)
     _require_complete_result_set(results_by_index, image_pairs)
@@ -440,6 +456,8 @@ def build_t2smark_observations(
                 result_index=index,
                 threshold_source=threshold_source,
                 robustness=robustness,
+                generation_model_id=generation_model_id,
+                generation_model_revision=generation_model_revision,
                 image_path=clean_path,
                 image_digest=str(row.get("clean_image_digest") or ""),
                 quality_score=1.0,
@@ -458,6 +476,8 @@ def build_t2smark_observations(
                 result_index=index,
                 threshold_source=threshold_source,
                 robustness=robustness,
+                generation_model_id=generation_model_id,
+                generation_model_revision=generation_model_revision,
                 image_path=watermarked_path,
                 image_digest=str(
                     row.get("watermarked_image_digest") or row.get("generated_image_digest") or ""
@@ -538,6 +558,8 @@ def build_t2smark_observations(
                             result_index=index,
                             threshold_source=threshold_source,
                             robustness=role_payload,
+                            generation_model_id=generation_model_id,
+                            generation_model_revision=generation_model_revision,
                             image_path=attacked_image_path,
                             image_digest=attacked_image_digest,
                             quality_score=_measured_pair_quality(
@@ -628,6 +650,8 @@ def build_t2smark_observations(
                     result_index=result_index,
                     threshold_source=threshold_source,
                     robustness=robustness,
+                    generation_model_id=generation_model_id,
+                    generation_model_revision=generation_model_revision,
                     image_path=attacked_path,
                     image_digest=str(record.get("attacked_image_digest") or ""),
                     quality_score=_measured_pair_quality(
@@ -669,6 +693,8 @@ def build_t2smark_observations(
         "baseline_id": BASELINE_ID,
         "adapter_status": "sd35_native_result_adapter_ready",
         "model_alignment_status": "sd35_medium_native_entrypoint",
+        "generation_model_id": generation_model_id,
+        "generation_model_revision": generation_model_revision,
         "image_pair_count": len(image_pairs),
         "t2smark_result_count": len(results_by_index),
         "observation_count": len(observations),
@@ -733,6 +759,8 @@ def main() -> None:
     observations, manifest = build_t2smark_observations(
         image_pairs=image_pairs,
         t2smark_results=t2smark_results,
+        model_id=args.model_id,
+        model_revision=args.model_revision,
         attacked_image_manifest=attacked_manifest,
         threshold=args.threshold,
         target_fpr=args.target_fpr,

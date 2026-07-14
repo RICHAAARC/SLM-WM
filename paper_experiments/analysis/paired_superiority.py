@@ -14,6 +14,7 @@ from experiments.protocol.attacks import (
     formal_attack_seed_protocol_record,
     formal_attack_seed_random,
 )
+from experiments.protocol.fixed_fpr_observation_audit import FORMAL_THRESHOLD_SOURCE
 from main.core.digest import build_stable_digest
 from main.methods.detection.image_only import (
     validate_image_only_detection_digest_record,
@@ -36,7 +37,9 @@ BOOTSTRAP_BIT_GENERATOR = "PCG64"
 BOOTSTRAP_QUANTILE_METHOD = "linear"
 CLAIM_P_VALUE_METHOD = "bounded_hoeffding_prompt_cluster_mean"
 SHARP_NULL_DIAGNOSTIC_METHOD = "exact_prompt_cluster_sign_flip_dp"
-QUALITY_MATCHING_PROTOCOL_SCHEMA = "paired_prompt_embedding_ssim_caliper_v1"
+QUALITY_MATCHING_PROTOCOL_SCHEMA = (
+    "paired_prompt_registered_repeat_all_embedding_ssim_caliper_v1"
+)
 QUALITY_MATCHING_METRIC_NAME = "embedding_pair_ssim"
 QUALITY_MATCHING_CALIPER = 0.02
 QUALITY_MATCHING_MINIMUM_FRACTION = 0.80
@@ -215,10 +218,38 @@ def _verified_decision(
     if "final_decision" in row:
         final_decision = _strict_boolean(row["final_decision"], "final_decision")
         if final_decision != decision:
-            raise PairedSuperiorityError(
-                f"final_decision 与 {required_field} 不一致"
-            )
+            raise PairedSuperiorityError(f"final_decision 与 {required_field} 不一致")
     return decision
+
+
+def _verified_baseline_decision(
+    row: Mapping[str, Any],
+    *,
+    calibrated_detection_threshold: float,
+) -> bool:
+    """由正式分数和审计阈值重算 baseline 判定, 并核对观测声明."""
+
+    observed_threshold = _normalize_float(row.get("threshold"), "threshold")
+    if observed_threshold is None or not math.isclose(
+        observed_threshold,
+        calibrated_detection_threshold,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise PairedSuperiorityError("baseline observation 未使用审计冻结阈值")
+    if str(row.get("threshold_source", "")).strip() != FORMAL_THRESHOLD_SOURCE:
+        raise PairedSuperiorityError("baseline observation 未使用正式 calibration 阈值来源")
+    score = _normalize_float(row.get("score"), "score")
+    if score is None:
+        raise PairedSuperiorityError("baseline observation 缺少正式检测分数")
+    recomputed_decision = bool(score >= calibrated_detection_threshold)
+    declared_decision = _verified_decision(
+        row,
+        required_field="detection_decision",
+    )
+    if declared_decision != recomputed_decision:
+        raise PairedSuperiorityError("baseline detection_decision 无法由正式分数和阈值重算")
+    return recomputed_decision
 
 
 def _attack_name(row: Mapping[str, Any]) -> str:
@@ -325,9 +356,7 @@ def _bounded_float(
     if resolved is None:
         raise PairedSuperiorityError(f"{field_name} 不得为空")
     if not minimum <= resolved <= maximum:
-        raise PairedSuperiorityError(
-            f"{field_name} 必须位于 [{minimum}, {maximum}]"
-        )
+        raise PairedSuperiorityError(f"{field_name} 必须位于 [{minimum}, {maximum}]")
     return resolved
 
 
@@ -398,8 +427,7 @@ def build_threshold_audit_binding_maps(
 
     canonical = canonical_threshold_audit_rows(rows)
     threshold_map = {
-        str(row["method_id"]): str(row["threshold_digest"])
-        for row in canonical
+        str(row["method_id"]): str(row["threshold_digest"]) for row in canonical
     }
     observation_map = {
         str(row["method_id"]): str(row["observation_source_sha256"])
@@ -568,11 +596,14 @@ def build_quality_matching_protocol_digest() -> str:
             "quality_matching_protocol_schema": QUALITY_MATCHING_PROTOCOL_SCHEMA,
             "quality_metric_name": QUALITY_MATCHING_METRIC_NAME,
             "quality_match_caliper": QUALITY_MATCHING_CALIPER,
-            "minimum_matched_prompt_fraction": (
-                QUALITY_MATCHING_MINIMUM_FRACTION
-            ),
+            "minimum_matched_prompt_fraction": (QUALITY_MATCHING_MINIMUM_FRACTION),
             "selection_uses_detection_labels": False,
             "matching_unit": "same_prompt_seed_key_base_latent",
+            "registered_repeat_membership_rule": (
+                "all_registered_repeats_within_caliper"
+            ),
+            "selected_detection_block": "complete_registered_repeat_attack_block",
+            "inference_unit": "prompt_cluster",
         }
     )
 
@@ -594,11 +625,13 @@ def _embedding_quality_by_prompt(
             or str(row.get("attack_family", "")) not in {"", "clean"}
         ):
             continue
+        if method_id != "slm_wm" and str(row.get("baseline_id", "")) != method_id:
+            continue
         prompt_id = _text(row, "prompt_id")
         quality = _bounded_float(
             row.get(value_field),
             f"{method_id}.{value_field}",
-            minimum=0.0,
+            minimum=-1.0,
             maximum=1.0,
         )
         randomization = _paired_randomization_identity(row)
@@ -620,6 +653,153 @@ def _embedding_quality_by_prompt(
     return records
 
 
+def _unattacked_image_pair_by_prompt(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    method_id: str,
+) -> dict[str, dict[str, Any]]:
+    """读取质量匹配所依据的真实 clean-watermarked 图像身份."""
+
+    path_field = "source_image_path" if method_id == "slm_wm" else "image_path"
+    digest_field = "source_image_digest" if method_id == "slm_wm" else "image_digest"
+    roles_by_prompt: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
+    for row in rows:
+        sample_role = str(row.get("sample_role", ""))
+        if (
+            str(row.get("split", "")) != "test"
+            or sample_role not in {"clean_negative", "positive_source"}
+            or bool(str(row.get("attack_id", "")).strip())
+            or str(row.get("attack_family", "")) not in {"", "clean"}
+        ):
+            continue
+        if method_id != "slm_wm" and str(row.get("baseline_id", "")) != method_id:
+            continue
+        prompt_id = _text(row, "prompt_id")
+        image_path = _text(row, path_field)
+        image_digest = _sha256_text(row.get(digest_field, ""), digest_field)
+        payload = {
+            "randomization_identity": _paired_randomization_identity(row),
+            "image_path": image_path,
+            "image_digest": image_digest,
+        }
+        if sample_role in roles_by_prompt[prompt_id]:
+            raise PairedSuperiorityError(
+                f"{method_id} 存在重复未攻击图像角色: {prompt_id}:{sample_role}"
+            )
+        roles_by_prompt[prompt_id][sample_role] = payload
+    if not roles_by_prompt:
+        raise PairedSuperiorityError(f"{method_id} 缺少未攻击图像质量证据")
+
+    pairs: dict[str, dict[str, Any]] = {}
+    for prompt_id, roles in roles_by_prompt.items():
+        if set(roles) != {"clean_negative", "positive_source"}:
+            raise PairedSuperiorityError(
+                f"{method_id} 的 {prompt_id} 未同时绑定 clean 与 watermarked 图像"
+            )
+        clean = roles["clean_negative"]
+        watermarked = roles["positive_source"]
+        if clean["randomization_identity"] != watermarked["randomization_identity"]:
+            raise PairedSuperiorityError(
+                f"{method_id} 的 clean-watermarked 图像随机身份不一致"
+            )
+        pairs[prompt_id] = {
+            "randomization_identity": clean["randomization_identity"],
+            "clean_image_digest": clean["image_digest"],
+            "watermarked_image_digest": watermarked["image_digest"],
+        }
+    return pairs
+
+
+def build_quality_matching_records(
+    proposed_rows: Iterable[Mapping[str, Any]],
+    baseline_rows: Iterable[Mapping[str, Any]],
+    *,
+    baseline_id: str,
+) -> tuple[dict[str, Any], ...]:
+    """从同一 repeat 的真实未攻击图像记录构造逐 Prompt SSIM 配对."""
+
+    if baseline_id not in PRIMARY_BASELINE_IDS:
+        raise PairedSuperiorityError(f"未登记的主表 baseline: {baseline_id}")
+    proposed_input = tuple(dict(row) for row in proposed_rows)
+    baseline_input = tuple(dict(row) for row in baseline_rows)
+    proposed_quality = _embedding_quality_by_prompt(
+        proposed_input,
+        method_id="slm_wm",
+        value_field="embedding_pair_ssim",
+    )
+    baseline_quality = _embedding_quality_by_prompt(
+        baseline_input,
+        method_id=baseline_id,
+        value_field="quality_score",
+    )
+    proposed_images = _unattacked_image_pair_by_prompt(
+        proposed_input,
+        method_id="slm_wm",
+    )
+    baseline_images = _unattacked_image_pair_by_prompt(
+        baseline_input,
+        method_id=baseline_id,
+    )
+    prompt_sets = {
+        frozenset(proposed_quality),
+        frozenset(baseline_quality),
+        frozenset(proposed_images),
+        frozenset(baseline_images),
+    }
+    if len(prompt_sets) != 1:
+        raise PairedSuperiorityError(
+            f"{baseline_id} 的质量值与图像证据未覆盖同一 Prompt 集合"
+        )
+
+    records: list[dict[str, Any]] = []
+    for prompt_id in sorted(proposed_quality):
+        proposed_record = proposed_quality[prompt_id]
+        baseline_record = baseline_quality[prompt_id]
+        proposed_image_record = proposed_images[prompt_id]
+        baseline_image_record = baseline_images[prompt_id]
+        identities = (
+            _paired_randomization_identity(proposed_record),
+            _paired_randomization_identity(baseline_record),
+            dict(proposed_image_record["randomization_identity"]),
+            dict(baseline_image_record["randomization_identity"]),
+        )
+        if any(identity != identities[0] for identity in identities[1:]):
+            raise PairedSuperiorityError(
+                f"{baseline_id} 的质量记录未共享同一 seed、key 和基础 latent"
+            )
+        proposed_value = float(proposed_record["embedding_pair_ssim"])
+        baseline_value = float(baseline_record["embedding_pair_ssim"])
+        gap = proposed_value - baseline_value
+        payload = {
+            "baseline_id": baseline_id,
+            "prompt_id": prompt_id,
+            **identities[0],
+            "quality_metric_name": QUALITY_MATCHING_METRIC_NAME,
+            "proposed_embedding_pair_ssim": proposed_value,
+            "baseline_embedding_pair_ssim": baseline_value,
+            "embedding_pair_ssim_gap": gap,
+            "absolute_embedding_pair_ssim_gap": abs(gap),
+            "quality_match_caliper": QUALITY_MATCHING_CALIPER,
+            "quality_matched": abs(gap) <= QUALITY_MATCHING_CALIPER,
+            "quality_matching_protocol_digest": (
+                build_quality_matching_protocol_digest()
+            ),
+            "proposed_quality_record_digest": proposed_record["quality_record_digest"],
+            "baseline_quality_record_digest": baseline_record["quality_record_digest"],
+            "proposed_clean_image_digest": proposed_image_record["clean_image_digest"],
+            "proposed_watermarked_image_digest": proposed_image_record[
+                "watermarked_image_digest"
+            ],
+            "baseline_clean_image_digest": baseline_image_record["clean_image_digest"],
+            "baseline_watermarked_image_digest": baseline_image_record[
+                "watermarked_image_digest"
+            ],
+        }
+        payload["quality_matching_record_digest"] = build_stable_digest(payload)
+        records.append(payload)
+    return tuple(records)
+
+
 def build_paired_outcomes(
     proposed_rows: Iterable[Mapping[str, Any]],
     baseline_rows: Iterable[Mapping[str, Any]],
@@ -627,6 +807,7 @@ def build_paired_outcomes(
     baseline_id: str,
     proposed_method_threshold_digest: str,
     baseline_method_threshold_digest: str,
+    baseline_calibrated_detection_threshold: float,
     attack_registry_rows: Iterable[Mapping[str, Any]],
     include_quality_matching: bool = False,
     require_image_only_evidence: bool = False,
@@ -663,10 +844,15 @@ def build_paired_outcomes(
         baseline_method_threshold_digest,
         "baseline_method_threshold_digest",
     )
+    baseline_threshold = _normalize_float(
+        baseline_calibrated_detection_threshold,
+        "baseline_calibrated_detection_threshold",
+    )
+    if baseline_threshold is None:
+        raise PairedSuperiorityError("baseline 审计冻结阈值不得为空")
     attack_registry = canonical_attack_registry_rows(attack_registry_rows)
     registry_by_key = {
-        (row["attack_family"], row["attack_name"]): row
-        for row in attack_registry
+        (row["attack_family"], row["attack_name"]): row for row in attack_registry
     }
     proposed = _formal_attacked_positive_rows(
         proposed_input,
@@ -711,9 +897,7 @@ def build_paired_outcomes(
         for _prompt_id, attack_family, attack_name in proposed_by_key
     }
     if observed_attack_keys != set(registry_by_key):
-        raise PairedSuperiorityError(
-            f"{baseline_id} 未精确覆盖正式攻击 registry"
-        )
+        raise PairedSuperiorityError(f"{baseline_id} 未精确覆盖正式攻击 registry")
 
     outcomes = []
     for prompt_id, attack_family, attack_name in sorted(proposed_by_key):
@@ -748,12 +932,6 @@ def build_paired_outcomes(
             != proposed_threshold_digest
         ):
             raise PairedSuperiorityError("主方法 observation 未使用审计冻结阈值")
-        declared_baseline_digest = _sha256_text(
-            baseline_row.get("threshold_digest", ""),
-            "threshold_digest",
-        )
-        if declared_baseline_digest != baseline_threshold_digest:
-            raise PairedSuperiorityError("baseline observation 未使用审计冻结阈值")
         outcome = PairedOutcome(
             baseline_id=baseline_id,
             prompt_id=prompt_id,
@@ -771,9 +949,9 @@ def build_paired_outcomes(
                 proposed_row,
                 required_field="formal_evidence_positive",
             ),
-            baseline_decision=_verified_decision(
+            baseline_decision=_verified_baseline_decision(
                 baseline_row,
-                required_field="detection_decision",
+                calibrated_detection_threshold=baseline_threshold,
             ),
         ).to_dict()
         if require_image_only_evidence:
@@ -842,12 +1020,8 @@ def build_paired_outcomes(
                 raise PairedSuperiorityError(
                     f"{baseline_id} 嵌入质量记录未绑定同一随机身份"
                 )
-            proposed_quality_value = float(
-                proposed_quality["embedding_pair_ssim"]
-            )
-            baseline_quality_value = float(
-                baseline_quality["embedding_pair_ssim"]
-            )
+            proposed_quality_value = float(proposed_quality["embedding_pair_ssim"])
+            baseline_quality_value = float(baseline_quality["embedding_pair_ssim"])
             quality_gap = proposed_quality_value - baseline_quality_value
             quality_payload = {
                 "quality_metric_name": QUALITY_MATCHING_METRIC_NAME,
@@ -999,8 +1173,7 @@ def _cluster_bootstrap_interval(
         raise PairedSuperiorityError("confidence_level 必须位于 (0, 1)")
     if resample_count < MINIMUM_BOOTSTRAP_RESAMPLE_COUNT:
         raise PairedSuperiorityError(
-            "bootstrap_resample_count 不得小于"
-            f"{MINIMUM_BOOTSTRAP_RESAMPLE_COUNT}"
+            "bootstrap_resample_count 不得小于" f"{MINIMUM_BOOTSTRAP_RESAMPLE_COUNT}"
         )
     generator = np.random.Generator(np.random.PCG64(seed))
     estimates = np.empty(resample_count, dtype=np.float64)
@@ -1171,9 +1344,7 @@ def build_paired_superiority_rows(
             int(prompt_values.size) - positive_prompt_count - negative_prompt_count
         )
         paired_test_prompt_id_digest = build_stable_digest(list(prompt_ids))
-        paired_attack_registry_digest = build_stable_digest(
-            list(attack_descriptors)
-        )
+        paired_attack_registry_digest = build_stable_digest(list(attack_descriptors))
         bootstrap_seed_digest, bootstrap_seed = _bootstrap_seed_digest_random(
             baseline_id=baseline_id,
             paired_test_prompt_id_digest=paired_test_prompt_id_digest,
@@ -1322,9 +1493,7 @@ def _build_quality_subset_statistical_rows(
                     "baseline_method_threshold_digest",
                 )
             )
-        attack_sets = {
-            frozenset(value) for value in attack_ids_by_prompt.values()
-        }
+        attack_sets = {frozenset(value) for value in attack_ids_by_prompt.values()}
         if len(attack_sets) != 1:
             raise PairedSuperiorityError(
                 f"{baseline_id} 的质量匹配 Prompt 未覆盖同一攻击集合"
@@ -1334,15 +1503,11 @@ def _build_quality_subset_statistical_rows(
             raise PairedSuperiorityError(
                 f"{baseline_id} 的质量匹配攻击 registry 覆盖不完整"
             )
-        if (
-            len(proposed_threshold_digests) != 1
-            or len(baseline_threshold_digests) != 1
-        ):
+        if len(proposed_threshold_digests) != 1 or len(baseline_threshold_digests) != 1:
             raise PairedSuperiorityError("质量匹配 outcome 未共享唯一方法阈值摘要")
         prompt_ids = tuple(sorted(by_prompt))
         attack_descriptors = tuple(
-            attack_descriptor_by_id[attack_id]
-            for attack_id in sorted(attack_ids)
+            attack_descriptor_by_id[attack_id] for attack_id in sorted(attack_ids)
         )
         prompt_values = np.asarray(
             [float(np.mean(by_prompt[prompt_id])) for prompt_id in prompt_ids],
@@ -1352,13 +1517,9 @@ def _build_quality_subset_statistical_rows(
             [sum(by_prompt[prompt_id]) for prompt_id in prompt_ids],
             dtype=np.int64,
         )
-        paired_outcome_set_digest = build_paired_outcome_set_digest(
-            baseline_rows
-        )
+        paired_outcome_set_digest = build_paired_outcome_set_digest(baseline_rows)
         paired_test_prompt_id_digest = build_stable_digest(list(prompt_ids))
-        paired_attack_registry_digest = build_stable_digest(
-            list(attack_descriptors)
-        )
+        paired_attack_registry_digest = build_stable_digest(list(attack_descriptors))
         bootstrap_seed_digest, bootstrap_seed = _bootstrap_seed_digest_random(
             baseline_id=baseline_id,
             paired_test_prompt_id_digest=paired_test_prompt_id_digest,
@@ -1487,14 +1648,19 @@ def build_quality_matched_superiority_rows(
             != expected_quality_protocol_digest
         ):
             raise PairedSuperiorityError("质量匹配协议摘要不一致")
+        quality_bounds = {
+            "proposed_embedding_pair_ssim": (-1.0, 1.0),
+            "baseline_embedding_pair_ssim": (-1.0, 1.0),
+            "embedding_pair_ssim_gap": (-2.0, 2.0),
+            "absolute_embedding_pair_ssim_gap": (0.0, 2.0),
+            "quality_match_caliper": (0.0, 2.0),
+        }
         values = {
             field_name: _bounded_float(
                 row.get(field_name),
                 field_name,
-                minimum=(
-                    -1.0 if field_name == "embedding_pair_ssim_gap" else 0.0
-                ),
-                maximum=1.0,
+                minimum=quality_bounds[field_name][0],
+                maximum=quality_bounds[field_name][1],
             )
             for field_name in quality_fields
         }
@@ -1555,9 +1721,7 @@ def build_quality_matched_superiority_rows(
                     protocol_digest,
                     "protocol_digest",
                 ),
-                "quality_matching_protocol_digest": (
-                    expected_quality_protocol_digest
-                ),
+                "quality_matching_protocol_digest": (expected_quality_protocol_digest),
             }
         ),
         confidence_level=confidence_level,
@@ -1571,16 +1735,13 @@ def build_quality_matched_superiority_rows(
         prompt_records = quality_by_baseline[baseline_id]
         total_prompt_count = len(prompt_records)
         matched_prompt_count = sum(
-            record["quality_matched"] is True
-            for record in prompt_records.values()
+            record["quality_matched"] is True for record in prompt_records.values()
         )
         minimum_matched_prompt_count = math.ceil(
             total_prompt_count * QUALITY_MATCHING_MINIMUM_FRACTION
         )
         matched_fraction = (
-            matched_prompt_count / total_prompt_count
-            if total_prompt_count
-            else 0.0
+            matched_prompt_count / total_prompt_count if total_prompt_count else 0.0
         )
         quality_values = list(prompt_records.values())
         statistic = matched_statistics.get(baseline_id)
@@ -1601,31 +1762,19 @@ def build_quality_matched_superiority_rows(
 
         row = {
             "baseline_id": baseline_id,
-            "quality_matching_protocol_schema": (
-                QUALITY_MATCHING_PROTOCOL_SCHEMA
-            ),
-            "quality_matching_protocol_digest": (
-                expected_quality_protocol_digest
-            ),
+            "quality_matching_protocol_schema": (QUALITY_MATCHING_PROTOCOL_SCHEMA),
+            "quality_matching_protocol_digest": (expected_quality_protocol_digest),
             "quality_metric_name": QUALITY_MATCHING_METRIC_NAME,
             "quality_match_caliper": QUALITY_MATCHING_CALIPER,
-            "minimum_matched_prompt_fraction": (
-                QUALITY_MATCHING_MINIMUM_FRACTION
-            ),
+            "minimum_matched_prompt_fraction": (QUALITY_MATCHING_MINIMUM_FRACTION),
             "total_quality_prompt_count": total_prompt_count,
             "minimum_matched_prompt_count": minimum_matched_prompt_count,
             "matched_prompt_count": matched_prompt_count,
             "unmatched_prompt_count": total_prompt_count - matched_prompt_count,
             "matched_prompt_fraction": matched_fraction,
-            "proposed_embedding_pair_ssim_mean": mean(
-                "proposed_embedding_pair_ssim"
-            ),
-            "baseline_embedding_pair_ssim_mean": mean(
-                "baseline_embedding_pair_ssim"
-            ),
-            "mean_embedding_pair_ssim_gap": mean(
-                "embedding_pair_ssim_gap"
-            ),
+            "proposed_embedding_pair_ssim_mean": mean("proposed_embedding_pair_ssim"),
+            "baseline_embedding_pair_ssim_mean": mean("baseline_embedding_pair_ssim"),
+            "mean_embedding_pair_ssim_gap": mean("embedding_pair_ssim_gap"),
             "max_absolute_embedding_pair_ssim_gap": (
                 max(
                     float(record["absolute_embedding_pair_ssim_gap"])
@@ -1715,14 +1864,10 @@ def build_quality_matched_superiority_summary(
             for row in materialized
         )
     ]
-    overall_ready = exact_set_ready and len(ready_ids) == len(
-        PRIMARY_BASELINE_IDS
-    )
+    overall_ready = exact_set_ready and len(ready_ids) == len(PRIMARY_BASELINE_IDS)
     return {
         "quality_matching_protocol_schema": QUALITY_MATCHING_PROTOCOL_SCHEMA,
-        "quality_matching_protocol_digest": (
-            build_quality_matching_protocol_digest()
-        ),
+        "quality_matching_protocol_digest": (build_quality_matching_protocol_digest()),
         "quality_metric_name": QUALITY_MATCHING_METRIC_NAME,
         "quality_match_caliper": QUALITY_MATCHING_CALIPER,
         "minimum_matched_prompt_fraction": QUALITY_MATCHING_MINIMUM_FRACTION,
@@ -1783,26 +1928,16 @@ def build_paired_superiority_manifest_config(
     return {
         "paper_claim_scale": str(summary.get("paper_claim_scale", "")),
         "target_fpr": float(summary.get("target_fpr", math.nan)),
-        "bootstrap_resample_count": int(
-            summary.get("bootstrap_resample_count", 0)
-        ),
+        "bootstrap_resample_count": int(summary.get("bootstrap_resample_count", 0)),
         "confidence_level": float(summary.get("confidence_level", math.nan)),
-        "bootstrap_analysis_schema": str(
-            summary.get("bootstrap_analysis_schema", "")
-        ),
-        "bootstrap_bit_generator": str(
-            summary.get("bootstrap_bit_generator", "")
-        ),
-        "bootstrap_quantile_method": str(
-            summary.get("bootstrap_quantile_method", "")
-        ),
+        "bootstrap_analysis_schema": str(summary.get("bootstrap_analysis_schema", "")),
+        "bootstrap_bit_generator": str(summary.get("bootstrap_bit_generator", "")),
+        "bootstrap_quantile_method": str(summary.get("bootstrap_quantile_method", "")),
         "claim_p_value_method": str(summary.get("claim_p_value_method", "")),
         "sharp_null_diagnostic_method": str(
             summary.get("sharp_null_diagnostic_method", "")
         ),
-        "paired_outcome_set_digest": str(
-            summary.get("paired_outcome_set_digest", "")
-        ),
+        "paired_outcome_set_digest": str(summary.get("paired_outcome_set_digest", "")),
         "paired_superiority_rows_digest": str(
             summary.get("paired_superiority_rows_digest", "")
         ),
@@ -1816,18 +1951,14 @@ def build_paired_superiority_manifest_config(
             summary.get("quality_matching_protocol_digest", "")
         ),
         "quality_metric_name": str(summary.get("quality_metric_name", "")),
-        "quality_match_caliper": float(
-            summary.get("quality_match_caliper", math.nan)
-        ),
+        "quality_match_caliper": float(summary.get("quality_match_caliper", math.nan)),
         "minimum_matched_prompt_fraction": float(
             summary.get("minimum_matched_prompt_fraction", math.nan)
         ),
         "quality_matched_rows_digest": str(
             summary.get("quality_matched_rows_digest", "")
         ),
-        "paired_test_prompt_count": int(
-            summary.get("paired_test_prompt_count", 0)
-        ),
+        "paired_test_prompt_count": int(summary.get("paired_test_prompt_count", 0)),
         "paired_test_prompt_id_digest": str(
             summary.get("paired_test_prompt_id_digest", "")
         ),

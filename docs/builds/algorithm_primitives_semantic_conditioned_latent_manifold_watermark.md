@@ -923,6 +923,37 @@ $$
 
 SLM-WM、Tree-Ring、Gaussian Shading、Shallow Diffuse 和 T2SMark 必须消费 $z^{(0)}_{i,q}$ 的 clone。顶层运行 manifest 保存完整9重复计划、目标 Tensor 的 shape、dtype 和生成协议；样本 observation 只保存实际目标 dtype Tensor 的内容 SHA-256、联合身份摘要及必要的 seed/key 引用。统计重建从顶层计划重新生成 $z^{(0)}_{i,q}$ 并比较样本摘要。水印密钥整数身份由统一根密钥和 $j$ 经 SHA-256 派生；各方法可以把该身份映射到自身 ring、message、patch 或 T2SMark 编码, 但不得改变重复索引。配对统计逐字段要求两侧的重复 ID、seed/key 索引、实际生成 seed、密钥材料摘要、基础 latent 内容摘要和基础 latent 身份摘要完全相同。
 
+### 质量匹配主表原语
+
+质量匹配只使用未攻击 clean-watermarked 图像 pair 的实测 SSIM, 不读取检测分数、阈值或二元判定。令 $Q^{S}_{q,r}$ 和 $Q^{b}_{q,r}$ 分别表示 SLM-WM 与 baseline $b$ 在同一 Prompt $q$、注册重复 $r$、生成 seed、密钥身份和基础 latent 下的 pair SSIM。逐重复差值为
+
+$$
+G_{b,q,r}=\left|Q^{S}_{q,r}-Q^{b}_{q,r}\right|.
+$$
+
+固定 baseline 的 Prompt 匹配状态定义为
+
+$$
+M_{b,q}=\mathbf{1}\!\left[\forall r\in\mathcal{R},\ G_{b,q,r}\le 0.02\right],
+\qquad |\mathcal{R}|=9.
+$$
+
+因此, 任一 repeat 越过0.02都会排除该 Prompt；禁止先平均9个差值来稀释越界, 也禁止只保留部分匹配 repeat。若 $M_{b,q}=1$, 统计必须纳入该 Prompt 的完整 $9\times|\mathcal{A}|$ 检测块。其 Prompt 级效应为
+
+$$
+D_{b,q}=\frac{1}{9|\mathcal{A}|}
+\sum_{r\in\mathcal{R}}\sum_{a\in\mathcal{A}}
+\left(Y^{S}_{q,r,a}-Y^{b}_{q,r,a}\right).
+$$
+
+全样本与质量匹配比较都只把 Prompt cluster 当作独立统计单位。质量匹配覆盖门禁为
+
+$$
+\sum_q M_{b,q}\ge\left\lceil0.8P\right\rceil,
+$$
+
+其中 $P$ 是完整 test Prompt 数, 因而 probe、pilot、full 的最低覆盖数分别为28、272和2720。质量匹配的4个 baseline 构成独立且固定的4项 Holm 家族；它不与全样本4项家族合并, 也不因某个 baseline 覆盖不足而缩小。单个 baseline 只有在全样本优势、质量覆盖和质量匹配优势全部通过时才支持主表行, 四个 baseline 全部通过后才能支持总体主表结论。
+
 每个攻击的随机种子按冻结域分离公式
 
 $$

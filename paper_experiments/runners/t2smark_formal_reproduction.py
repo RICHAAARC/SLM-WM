@@ -1817,6 +1817,8 @@ def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Pat
     rebuilt_observations, rebuilt_adapter_core = build_t2smark_observations(
         image_pairs=image_pairs,
         t2smark_results=rebuilt_results,
+        model_id=config.model_id,
+        model_revision=config.model_revision,
         target_fpr=config.target_fpr,
         evidence_root=root_path,
     )

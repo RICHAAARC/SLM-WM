@@ -11,7 +11,7 @@ from experiments.protocol.formal_randomization import formal_randomization_repea
 from main.core.digest import build_stable_digest
 from paper_experiments.analysis.paired_superiority import PRIMARY_BASELINE_IDS
 from paper_experiments.analysis.randomization_paired_superiority import (
-    RANDOMIZATION_PAIRED_SUPERIORITY_FIELDNAMES,
+    RANDOMIZATION_PAIRED_MAIN_TABLE_FIELDNAMES,
 )
 from paper_experiments.runners.randomization_aggregate_provenance import (
     RandomizationAggregateProvenance,
@@ -66,12 +66,8 @@ def _reconstruction() -> RandomizationMethodRepeatReconstruction:
     thresholds = []
     for repeat_id in formal_randomization_repeat_ids():
         for method_id in ("slm_wm", *PRIMARY_BASELINE_IDS):
-            source_sha = build_stable_digest(
-                {"source": repeat_id, "method": method_id}
-            )
-            leaf_sha = build_stable_digest(
-                {"leaf": repeat_id, "method": method_id}
-            )
+            source_sha = build_stable_digest({"source": repeat_id, "method": method_id})
+            leaf_sha = build_stable_digest({"leaf": repeat_id, "method": method_id})
             component_sha = build_stable_digest({"component": repeat_id})
             member = f"records/{repeat_id}/{method_id}.jsonl"
             source = SimpleNamespace(
@@ -90,6 +86,7 @@ def _reconstruction() -> RandomizationMethodRepeatReconstruction:
                 "randomization_repeat_id": repeat_id,
                 "method_id": method_id,
                 "fixed_fpr_threshold_ready": True,
+                "calibrated_detection_threshold": 0.5,
                 "threshold_digest": build_stable_digest(
                     {"threshold": repeat_id, "method": method_id}
                 ),
@@ -101,8 +98,8 @@ def _reconstruction() -> RandomizationMethodRepeatReconstruction:
                 "randomization_aggregate_digest": AGGREGATE_DIGEST,
                 "common_code_version": CODE_VERSION,
             }
-            threshold["method_repeat_threshold_record_digest"] = (
-                build_stable_digest(threshold)
+            threshold["method_repeat_threshold_record_digest"] = build_stable_digest(
+                threshold
             )
             sources.append(source)
             thresholds.append(threshold)
@@ -114,9 +111,7 @@ def _reconstruction() -> RandomizationMethodRepeatReconstruction:
         "prompt_protocol_digest": build_stable_digest({"prompts": 1}),
     }
     reconstruction_report = {
-        "reconstruction_report_digest": build_stable_digest(
-            {"reconstruction": 1}
-        )
+        "reconstruction_report_digest": build_stable_digest({"reconstruction": 1})
     }
     return RandomizationMethodRepeatReconstruction(
         method_sources=tuple(sources),
@@ -131,10 +126,17 @@ def _result() -> runner.RandomizationPairedSuperiorityResult:
     """构造 writer 事务测试所需的最小完整结果."""
 
     statistic_row = {
-        field_name: "" for field_name in RANDOMIZATION_PAIRED_SUPERIORITY_FIELDNAMES
+        field_name: "" for field_name in RANDOMIZATION_PAIRED_MAIN_TABLE_FIELDNAMES
     }
     summary = {
         "paired_outcome_set_digest": build_stable_digest({"outcomes": 1}),
+        "quality_matching_record_set_digest": build_stable_digest(
+            {"quality_records": 1}
+        ),
+        "all_sample_paired_superiority_rows_digest": build_stable_digest(
+            {"all_sample_rows": 1}
+        ),
+        "quality_matched_rows_digest": build_stable_digest({"quality_rows": 1}),
         "paired_superiority_rows_digest": build_stable_digest({"rows": 1}),
         "randomization_paired_superiority_summary_digest": build_stable_digest(
             {"summary": 1}
@@ -155,6 +157,9 @@ def _result() -> runner.RandomizationPairedSuperiorityResult:
     return runner.RandomizationPairedSuperiorityResult(
         threshold_records=({"threshold": 1},),
         paired_outcomes=({"outcome": 1},),
+        quality_matching_records=({"quality": 1},),
+        all_sample_rows=({"all_sample": 1},),
+        quality_matched_rows=({"quality_row": 1},),
         superiority_rows=(statistic_row,),
         summary=summary,
         report=report,
@@ -170,6 +175,7 @@ def test_runner_uses_each_repeat_specific_threshold_and_image_only_pairing(
     provenance = _provenance(tmp_path)
     rebuilt = _reconstruction()
     calls: list[dict[str, object]] = []
+    quality_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
         runner,
         "rebuild_randomization_method_repeat_observation_sources",
@@ -188,32 +194,60 @@ def test_runner_uses_each_repeat_specific_threshold_and_image_only_pairing(
 
     monkeypatch.setattr(runner, "build_paired_outcomes", fake_pair)
 
-    def fake_statistics(outcomes, **kwargs):
-        assert len(outcomes) == 9 * 4
-        return (
-            [{"baseline_id": baseline_id} for baseline_id in PRIMARY_BASELINE_IDS],
+    def fake_quality(proposed_rows, baseline_rows, **kwargs):
+        quality_calls.append(
             {
-                "paired_outcome_set_digest": build_stable_digest(outcomes),
-                "paired_superiority_rows_digest": build_stable_digest(
-                    list(PRIMARY_BASELINE_IDS)
-                ),
-                "randomization_paired_superiority_summary_digest": (
-                    build_stable_digest({"summary": 1})
-                ),
-                "conclusion_decision": "measured_not_supported",
-                "supports_paper_claim": False,
-            },
+                "proposed_rows": proposed_rows,
+                "baseline_rows": baseline_rows,
+                **kwargs,
+            }
         )
+        return ({"quality_call_index": len(quality_calls)},)
+
+    monkeypatch.setattr(runner, "build_quality_matching_records", fake_quality)
+
+    def fake_statistics(outcomes, quality_records, **kwargs):
+        assert len(outcomes) == 9 * 4
+        assert len(quality_records) == 9 * 4
+        main_rows = [
+            {"baseline_id": baseline_id} for baseline_id in PRIMARY_BASELINE_IDS
+        ]
+        all_sample_rows = [
+            {"baseline_id": baseline_id, "scope": "all"}
+            for baseline_id in PRIMARY_BASELINE_IDS
+        ]
+        quality_rows = [
+            {"baseline_id": baseline_id, "scope": "quality"}
+            for baseline_id in PRIMARY_BASELINE_IDS
+        ]
+        summary = {
+            "paired_outcome_set_digest": build_stable_digest(outcomes),
+            "quality_matching_record_set_digest": build_stable_digest(quality_records),
+            "all_sample_paired_superiority_rows_digest": build_stable_digest(
+                all_sample_rows
+            ),
+            "quality_matched_rows_digest": build_stable_digest(quality_rows),
+            "paired_superiority_rows_digest": build_stable_digest(main_rows),
+            "randomization_paired_superiority_summary_digest": (
+                build_stable_digest({"summary": 1})
+            ),
+            "overall_paired_superiority_ready": False,
+            "overall_quality_matched_superiority_ready": False,
+            "conclusion_decision": "measured_not_supported",
+            "supports_paper_claim": False,
+        }
+        return main_rows, summary, all_sample_rows, quality_rows
 
     monkeypatch.setattr(
         runner,
-        "build_randomization_aggregate_paired_superiority_statistics",
+        "build_randomization_quality_matched_main_table_statistics",
         fake_statistics,
     )
 
     result = runner._rebuild_randomization_paired_superiority(provenance)
 
     assert len(calls) == 9 * 4
+    assert len(quality_calls) == 9 * 4
     assert len(result.threshold_records) == 45
     threshold_by_key = {
         (row["randomization_repeat_id"], row["method_id"]): row
@@ -228,12 +262,22 @@ def test_runner_uses_each_repeat_specific_threshold_and_image_only_pairing(
             if source.observation_source_sha256 == repeat_id
         )
         assert call["require_image_only_evidence"] is True
-        assert call["proposed_method_threshold_digest"] == threshold_by_key[
-            (source.randomization_repeat_id, "slm_wm")
-        ]["threshold_digest"]
-        assert call["baseline_method_threshold_digest"] == threshold_by_key[
-            (source.randomization_repeat_id, baseline_id)
-        ]["threshold_digest"]
+        assert (
+            call["proposed_method_threshold_digest"]
+            == threshold_by_key[(source.randomization_repeat_id, "slm_wm")][
+                "threshold_digest"
+            ]
+        )
+        assert (
+            call["baseline_method_threshold_digest"]
+            == threshold_by_key[(source.randomization_repeat_id, baseline_id)][
+                "threshold_digest"
+            ]
+        )
+        assert call["baseline_calibrated_detection_threshold"] == 0.5
+    assert {str(call["baseline_id"]) for call in quality_calls} == set(
+        PRIMARY_BASELINE_IDS
+    )
 
 
 def test_public_runner_rejects_wrong_or_dirty_git_before_reconstruction(
@@ -301,6 +345,7 @@ def test_writer_publishes_complete_directory_transactionally(
     assert {path.name for path in output_dir.iterdir()} == {
         "method_repeat_threshold_records.jsonl",
         "paired_outcomes.jsonl",
+        "quality_matching_records.jsonl",
         "paired_superiority_table.csv",
         "paired_superiority_summary.json",
         "randomization_paired_superiority_report.json",
@@ -322,10 +367,7 @@ def test_writer_rejects_existing_directory_and_cleans_mid_write_failure(
         lambda source, root=".": _result(),
     )
     destination = (
-        tmp_path
-        / "outputs"
-        / "randomization_paired_superiority"
-        / "probe_paper"
+        tmp_path / "outputs" / "randomization_paired_superiority" / "probe_paper"
     )
     destination.mkdir(parents=True)
     with pytest.raises(

@@ -2539,32 +2539,63 @@ Notebook 与 repository module 的跨边界数据
 | paired_difference | metric | none | true | true | false | 同一 Prompt 与攻击条件下 SLM-WM 判定减 baseline 判定的差值, 取值为 -1、0或1。 |
 | paired_outcome_digest | provenance | none | true | true | false | 单条 Prompt x attack 配对结果核心内容的稳定摘要。 |
 | embedding_pair_ssim | metric | none | true | true | false | 同一 Prompt、seed、密钥和基础 latent 的未攻击 clean-watermarked 图像 pair 实测 SSIM。 |
-| quality_matching_protocol_schema | protocol | none | true | true | false | 检测标签无关的逐 Prompt 质量匹配协议版本。 |
-| quality_matching_protocol_digest | provenance | none | true | true | false | 质量指标、caliper、最低覆盖比例、匹配单位和标签独立约束的稳定摘要。 |
-| proposed_embedding_pair_ssim | metric | none | true | true | false | 当前配对 outcome 对应的 SLM-WM 未攻击图像 pair SSIM。 |
-| baseline_embedding_pair_ssim | metric | none | true | true | false | 当前配对 outcome 对应的 baseline 未攻击图像 pair SSIM。 |
+| quality_matching_protocol_schema | protocol | none | true | true | false | 检测标签无关、要求全部注册 repeat 逐一通过 caliper 的 Prompt 质量匹配协议版本。 |
+| quality_matching_protocol_digest | provenance | none | true | true | false | 质量指标、caliper、最低覆盖比例、全部 repeat 规则、完整检测块规则和标签独立约束的稳定摘要。 |
+| proposed_embedding_pair_ssim | metric | none | true | true | false | 当前 repeat、Prompt 与 baseline 比较对应的 SLM-WM 未攻击图像 pair 实测 SSIM。 |
+| baseline_embedding_pair_ssim | metric | none | true | true | false | 当前 repeat、Prompt 与 baseline 比较对应的 baseline 未攻击图像 pair 实测 SSIM。 |
 | embedding_pair_ssim_gap | metric | none | true | true | false | SLM-WM 未攻击 pair SSIM 减 baseline 未攻击 pair SSIM 的有符号差值。 |
 | absolute_embedding_pair_ssim_gap | metric | none | true | true | false | 两方法未攻击 pair SSIM 差值的绝对值。 |
-| quality_match_caliper | protocol | none | true | true | false | 逐 Prompt 质量匹配允许的最大绝对 SSIM 差, 正式值为0.02。 |
-| quality_matched | governance | none | true | true | false | 当前 Prompt 的绝对 SSIM 差是否不超过冻结 caliper。 |
+| quality_match_caliper | protocol | none | true | true | false | 每个注册 repeat 的质量匹配允许的最大绝对 SSIM 差, 正式值为0.02。 |
+| quality_matched | governance | none | true | true | false | 当前 repeat-Prompt 的绝对 SSIM 差是否不超过冻结 caliper; Prompt 只有在9个 repeat 均为 true 时才进入子集。 |
 | proposed_quality_record_digest | provenance | none | true | true | false | SLM-WM 未攻击质量记录及其完整随机身份的稳定摘要。 |
 | baseline_quality_record_digest | provenance | none | true | true | false | Baseline 未攻击质量记录及其完整随机身份的稳定摘要。 |
+| proposed_clean_image_digest | provenance | none | true | true | false | 当前质量记录绑定的 SLM-WM clean 图像文件 SHA-256。 |
+| proposed_watermarked_image_digest | provenance | none | true | true | false | 当前质量记录绑定的 SLM-WM watermarked 图像文件 SHA-256。 |
+| baseline_clean_image_digest | provenance | none | true | true | false | 当前质量记录绑定的 baseline clean 图像文件 SHA-256。 |
+| baseline_watermarked_image_digest | provenance | none | true | true | false | 当前质量记录绑定的 baseline watermarked 图像文件 SHA-256。 |
+| quality_matching_record_digest | provenance | none | true | true | false | 单条 repeat-baseline-Prompt 质量配对记录的稳定摘要。 |
+| quality_matching_record_count | metric | none | true | true | false | 精确9重复质量记录数量, 等于 9 x 4 x 完整 test Prompt 数。 |
+| quality_matching_record_set_digest | provenance | none | true | true | false | 按 repeat、baseline 与 Prompt 规范排序后的完整质量记录集合摘要。 |
 | minimum_matched_prompt_fraction | protocol | none | true | true | false | 单个 baseline 质量匹配子集要求覆盖的最低 test Prompt 比例, 正式值为0.80。 |
 | total_quality_prompt_count | metric | none | true | true | false | 单个 baseline 参与质量 caliper 判定的唯一 test Prompt 总数。 |
 | minimum_matched_prompt_count | metric | none | true | true | false | 按最低覆盖比例向上取整得到的最少匹配 Prompt 数量。 |
-| matched_prompt_count | metric | none | true | true | false | 单个 baseline 实际通过质量 caliper 的唯一 Prompt 数量。 |
-| unmatched_prompt_count | metric | none | true | true | false | 单个 baseline 未通过质量 caliper 的唯一 Prompt 数量。 |
+| registered_repeat_membership_rule | protocol | none | true | true | false | Prompt 质量 membership 规则, 固定为 all_registered_repeats_within_caliper。 |
+| matched_prompt_count | metric | none | true | true | false | 单个 baseline 的9个注册 repeat 全部通过 caliper 的唯一 Prompt 数量。 |
+| unmatched_prompt_count | metric | none | true | true | false | 单个 baseline 至少有一个注册 repeat 未通过 caliper 的唯一 Prompt 数量。 |
 | matched_prompt_fraction | metric | none | true | true | false | 单个 baseline 实际通过质量 caliper 的 Prompt 比例。 |
-| proposed_embedding_pair_ssim_mean | metric | none | true | true | false | 当前 baseline 比较中 SLM-WM 全部质量身份的逐 Prompt SSIM 均值。 |
-| baseline_embedding_pair_ssim_mean | metric | none | true | true | false | 当前 baseline 全部质量身份的逐 Prompt SSIM 均值。 |
-| mean_embedding_pair_ssim_gap | metric | none | true | true | false | 当前 baseline 比较中逐 Prompt 有符号 SSIM 差值均值。 |
-| max_absolute_embedding_pair_ssim_gap | metric | none | true | true | false | 当前 baseline 比较中逐 Prompt 绝对 SSIM 差的最大值。 |
+| quality_matched_prompt_id_digest | provenance | none | true | true | false | 单个 baseline 的质量匹配 Prompt ID 规范序列摘要。 |
+| quality_matched_prompt_ids_by_baseline | protocol | none | true | true | false | 4个 baseline 各自的质量匹配 Prompt ID 映射, 只由质量记录生成。 |
+| quality_matched_prompt_membership_digest | provenance | none | true | true | false | 4个 baseline 质量 membership 映射的稳定摘要, 不依赖检测标签。 |
+| proposed_embedding_pair_ssim_mean | metric | none | true | true | false | 当前 baseline 比较中 SLM-WM 在完整9重复与完整 test Prompt 上的 SSIM 均值。 |
+| baseline_embedding_pair_ssim_mean | metric | none | true | true | false | 当前 baseline 在完整9重复与完整 test Prompt 上的 SSIM 均值。 |
+| mean_embedding_pair_ssim_gap | metric | none | true | true | false | 当前 baseline 比较中完整9重复与完整 test Prompt 的有符号 SSIM 差均值。 |
+| max_absolute_embedding_pair_ssim_gap | metric | none | true | true | false | 当前 baseline 比较中所有 repeat-Prompt 绝对 SSIM 差的最大值。 |
 | quality_match_coverage_ready | governance | none | true | true | false | 单个 baseline 的质量匹配 Prompt 覆盖是否达到预注册最低比例。 |
-| quality_matched_observation_count | metric | none | true | true | false | 单个 baseline 质量匹配 Prompt 子集覆盖的 Prompt x attack 观测数量。 |
+| quality_matched_randomization_repeat_count | metric | none | true | true | false | 质量匹配检测效应完整覆盖的注册重复数量, 固定为9。 |
+| quality_matched_attack_count | metric | none | true | true | false | 每个质量匹配 Prompt 完整覆盖的正式攻击数量。 |
+| quality_matched_observation_count | metric | none | true | true | false | 单个 baseline 质量匹配子集覆盖的 Prompt x registered-repeat x attack 原子观测数量, 不作为推断样本量。 |
+| quality_matched_statistical_unit | protocol | none | true | true | false | 质量匹配推断的独立统计单位, 固定为 prompt_cluster。 |
 | quality_matched_mean_paired_true_positive_rate_difference | metric | none | true | true | false | 在当前 baseline 质量匹配 Prompt 子集上重算的平均二元检测差值。 |
 | quality_matched_mean_paired_difference_ci_low | metric | none | true | true | false | 质量匹配子集 Prompt-clustered bootstrap 均值差 CI 下界。 |
 | quality_matched_mean_paired_difference_ci_high | metric | none | true | true | false | 质量匹配子集 Prompt-clustered bootstrap 均值差 CI 上界。 |
+| quality_matched_positive_prompt_cluster_count | metric | none | true | true | false | 质量匹配子集中平均配对差值大于0的 Prompt 数量。 |
+| quality_matched_negative_prompt_cluster_count | metric | none | true | true | false | 质量匹配子集中平均配对差值小于0的 Prompt 数量。 |
+| quality_matched_tied_prompt_cluster_count | metric | none | true | true | false | 质量匹配子集中平均配对差值等于0的 Prompt 数量。 |
+| quality_matched_one_sided_bounded_hoeffding_mean_p_value | metric | none | true | true | false | 以匹配 Prompt 数为样本量计算的单侧 bounded Hoeffding claim p 值。 |
+| quality_matched_one_sided_exact_prompt_cluster_sign_flip_p_value | metric | none | true | true | false | 质量匹配 Prompt 聚类的 exact sign-flip sharp-null 诊断 p 值。 |
+| quality_matched_exact_prompt_cluster_sign_flip_p_value_is_diagnostic | governance | none | true | false | false | 明确质量匹配 exact sign-flip 只用于诊断, 不进入 claim 门禁。 |
+| quality_matched_claim_p_value_method | protocol | none | true | false | false | 质量匹配 claim 使用的 Prompt 聚类 bounded Hoeffding 方法。 |
+| quality_matched_sharp_null_diagnostic_method | protocol | none | true | false | false | 质量匹配 sharp-null 诊断方法, 固定为 exact_prompt_cluster_sign_flip_dp。 |
+| quality_matched_holm_family_id | protocol | none | true | false | false | 质量匹配固定4项主表 baseline Holm 家族身份。 |
+| quality_matched_holm_family_size | protocol | none | true | false | false | 质量匹配 Holm 家族大小, 无论覆盖结果均固定为4。 |
 | quality_matched_holm_adjusted_p_value | metric | none | true | true | false | 质量匹配子集按预注册4个 baseline 比较执行 Holm 校正后的 claim p 值。 |
+| quality_matched_confidence_level | protocol | none | true | false | false | 质量匹配 Prompt bootstrap 的置信水平。 |
+| quality_matched_bootstrap_resample_count | protocol | none | true | false | false | 质量匹配 Prompt bootstrap 重采样次数, 正式固定为100000。 |
+| quality_matched_bootstrap_seed_digest_random | random | _digest_random | true | false | false | 由匹配 Prompt 集、完整 outcome、攻击、repeat 与冻结统计配置确定的 bootstrap 随机源摘要。 |
+| quality_matched_bootstrap_analysis_schema | protocol | none | true | false | false | 质量匹配9重复 Prompt bootstrap 分析规范。 |
+| quality_matched_bootstrap_bit_generator | protocol | none | true | false | false | 质量匹配 bootstrap 使用的 NumPy bit generator, 固定为 PCG64。 |
+| quality_matched_bootstrap_quantile_method | protocol | none | true | false | false | 质量匹配 percentile CI 的 NumPy quantile 算法, 固定为 linear。 |
+| quality_matched_statistics_ready | governance | none | true | true | false | 精确9重复质量记录、Prompt membership 与完整检测块是否完成可重建统计; 不等价于效果通过。 |
 | quality_matched_superiority_ready | governance | none | true | true | false | 单个 baseline 是否同时达到质量覆盖、正效应、正 CI 下界和校正显著性门禁。 |
 | quality_matched_row_digest | provenance | none | true | true | false | 单个 baseline 质量匹配统计行的稳定摘要。 |
 | quality_matched_row_count | metric | none | true | true | false | 质量匹配统计实际包含的主表 baseline 行数, 闭合值为4。 |
@@ -2574,6 +2605,8 @@ Notebook 与 repository module 的跨边界数据
 | quality_matched_rows_digest | provenance | none | true | true | false | 按固定 baseline 顺序排列的4行质量匹配统计稳定摘要。 |
 | quality_matching_uses_detection_labels | governance | none | true | true | false | 质量子集选择是否读取检测标签, 正式闭合值必须为 false。 |
 | supports_quality_matched_paper_claim | governance | none | true | true | false | 质量匹配统计是否允许在当前论文运行层级支持质量控制后的优势结论。 |
+| all_sample_paired_superiority_rows_digest | provenance | none | true | true | false | 合并质量匹配列之前的4行全样本统计摘要。 |
+| all_sample_conclusion_decision | governance | none | true | true | false | 全样本统计分量的独立结论, 不与最终两类门禁合取状态混淆。 |
 | proposed_method_threshold_digest | provenance | none | true | true | false | 单条配对 outcome 中 SLM-WM 实际使用的审计冻结阈值摘要。 |
 | baseline_method_threshold_digest | provenance | none | true | true | false | 单条配对 outcome 中对应主表 baseline 实际使用的审计冻结阈值摘要。 |
 | paired_prompt_count | metric | none | true | true | false | 单个主表 baseline 参与总体配对统计的唯一 test Prompt 数量。 |
@@ -2612,7 +2645,7 @@ Notebook 与 repository module 的跨边界数据
 | paired_superiority_rows_digest | provenance | none | true | true | false | 对按主表 baseline 稳定排序的4行总体配对统计计算的稳定摘要。 |
 | method_repeat_threshold_digest_map | provenance | none | true | true | false | 精确9个 repeat 到 SLM-WM 与4个 baseline 独立 fixed-FPR 阈值摘要的规范映射。 |
 | method_repeat_threshold_map_digest | provenance | none | true | true | false | 对完整45项 method-repeat 阈值摘要映射计算的稳定摘要。 |
-| conclusion_decision | governance | none | true | true | false | 当前统计分量的结论状态; 全样本优势通过时为 all_sample_superiority_ready, 未通过时为 measured_not_supported, 在质量匹配比较合并前不得据此设置 supports_paper_claim=true。 |
+| conclusion_decision | governance | none | true | true | false | 当前统计结论状态; 精确9重复合并主表只有全样本与质量匹配优势均通过时为 supported, 否则为 measured_not_supported。 |
 | paired_prompt_counts | metric | none | true | true | false | 配对优势 summary 中4个主表 baseline 的唯一 Prompt 数量集合。 |
 | paired_attack_counts | metric | none | true | true | false | 配对优势 summary 中4个主表 baseline 的攻击条件数量集合。 |
 | paired_outcome_count | metric | none | true | true | false | 4个主表 baseline 的全部 Prompt x attack 配对结果总数。 |
