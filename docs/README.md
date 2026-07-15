@@ -11,6 +11,7 @@
 - `builds/real_scientific_operator_implementation.md`: 科学算子到代码文件、实验入口和论文主张门禁的映射。
 - `builds/external_gpu_workflow_persistence.md`: 7条外部 GPU 路径的共享持久化、formal execution/profile/config 身份绑定、Drive 恢复原子性和 checkpoint 证据边界。
 - `field_registry.md`: records、manifests、tables、reports 与跨进程数据字段登记表。
+- `paper_quality_evidence_governance.md`: 冻结四图配对质量 estimand、baseline 两层字段职责、9-repeat 质量结论链和 GPU 方法/资源双门禁。
 
 ## 术语规范
 

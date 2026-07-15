@@ -1,0 +1,35 @@
+{
+  "protocol_schema": "keyed_prg_cross_platform_known_answer_v1",
+  "keyed_prg_version": "sha256_counter_normal_icdf_table20_float32",
+  "keyed_prg_protocol_digest": "e1f97fd7457893cf4d92c0ffa383b44219cf6b1034055e43dcadf1d535ab1595",
+  "vectors": [
+    {
+      "vector_id": "uniform_3x5",
+      "distribution": "uniform",
+      "shape": [3, 5],
+      "public_key_material": "slm_wm_cross_platform_known_answer",
+      "domain_fields": {
+        "operator_role": "cross_platform_known_answer",
+        "vector_id": "uniform_3x5"
+      },
+      "tensor_content_digest_version": "slm_wm_tensor_content",
+      "tensor_dtype": "torch.float32",
+      "tensor_shape": [3, 5],
+      "tensor_content_sha256": "d5d15a922e53d488376ae776488ff9268098c7780ebe31b0c36acd3c00122701"
+    },
+    {
+      "vector_id": "gaussian_3x5",
+      "distribution": "gaussian",
+      "shape": [3, 5],
+      "public_key_material": "slm_wm_cross_platform_known_answer",
+      "domain_fields": {
+        "operator_role": "cross_platform_known_answer",
+        "vector_id": "gaussian_3x5"
+      },
+      "tensor_content_digest_version": "slm_wm_tensor_content",
+      "tensor_dtype": "torch.float32",
+      "tensor_shape": [3, 5],
+      "tensor_content_sha256": "914cc08baa4281b62d125db4fe526f3313a93f0d1f7d1baca442137ac79c6585"
+    }
+  ]
+}

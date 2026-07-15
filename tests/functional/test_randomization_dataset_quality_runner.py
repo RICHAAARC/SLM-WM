@@ -74,6 +74,7 @@ def _source(repeat_id: str, role: str) -> SimpleNamespace:
     """构造 writer 报告所需的最小聚合成员来源."""
 
     return SimpleNamespace(
+        randomization_repeat_id=repeat_id,
         record_role=role,
         record_member=f"records/{repeat_id}/{role}.jsonl",
         record_sha256=build_stable_digest(
@@ -187,6 +188,32 @@ class _Workspace:
     ) -> tuple[SimpleNamespace, ...]:
         return self._pairs_by_repeat[repeat_id]
 
+    def find_source(
+        self,
+        *,
+        randomization_repeat_id: str,
+        package_family: str,
+        record_role: str,
+    ) -> SimpleNamespace:
+        """返回新质量原始成员的最小来源身份."""
+
+        assert package_family == "dataset_level_quality"
+        return _source(randomization_repeat_id, record_role)
+
+    def iter_records(
+        self,
+        source: SimpleNamespace,
+    ) -> tuple[dict[str, object], ...]:
+        """按 runner 的精确数量契约提供不进入公式层的测试记录."""
+
+        record_counts = {
+            "attack_quality_pair_record": 0,
+            "attack_quality_inception_feature_record": 0,
+            "paired_quality_clip_feature_record": 2 * 70,
+            "paired_quality_metric_record": 70,
+        }
+        return tuple({} for _ in range(record_counts[source.record_role]))
+
 
 def _statistics(
     memberships: tuple[dict[str, object], ...],
@@ -241,6 +268,17 @@ def _statistics(
         "prompt_distribution_records_digest": build_stable_digest(
             prompt_distribution_records
         ),
+        "attack_prompt_distribution_records_digest": build_stable_digest(
+            ()
+        ),
+        "paired_quality_metric_records_digest": build_stable_digest(
+            {"paired_quality_metrics": 9 * 70}
+        ),
+        "attack_quality_membership_records_digest": build_stable_digest(()),
+        "attack_quality_feature_records_digest": build_stable_digest(()),
+        "paired_quality_clip_feature_records_digest": build_stable_digest(
+            {"clip_features": 2 * 9 * 70}
+        ),
         "randomization_dataset_quality_summary_digest": build_stable_digest(
             {"summary": 1}
         ),
@@ -252,6 +290,7 @@ def _statistics(
     return RandomizationDatasetQualityStatistics(
         membership_records=memberships,
         prompt_distribution_records=prompt_distribution_records,
+        attack_prompt_distribution_records=(),
         metric_rows=metric_rows,
         summary=summary,
     )
@@ -289,7 +328,7 @@ def test_runner_joins_each_repeat_to_same_prompt_contract_and_raw_features(
     monkeypatch.setattr(
         runner,
         "_validated_scientific_provenance",
-        lambda feature_records, expected_code_version: {
+        lambda feature_records, expected_code_version, **kwargs: {
             "scientific_unit_provenance_ready": True,
         },
     )
@@ -403,6 +442,9 @@ def _result() -> runner.RandomizationDatasetQualityResult:
     return runner.RandomizationDatasetQualityResult(
         membership_records=statistics.membership_records,
         prompt_distribution_records=statistics.prompt_distribution_records,
+        attack_prompt_distribution_records=(
+            statistics.attack_prompt_distribution_records
+        ),
         metric_rows=statistics.metric_rows,
         summary=statistics.summary,
         report=report,
@@ -433,6 +475,7 @@ def test_writer_publishes_minimal_quality_directory_transactionally(
         "fid_kid_metrics.csv",
         "quality_feature_membership.jsonl",
         "prompt_distributional_quality_records.jsonl",
+        "attack_prompt_distributional_quality_records.jsonl",
         "randomization_dataset_quality_summary.json",
         "randomization_dataset_quality_report.json",
         "manifest.local.json",

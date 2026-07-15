@@ -414,6 +414,60 @@ _ACTIVE_RECORD_MEMBER_SPECS = (
         ),
         record_format=RECORD_FORMAT_JSONL,
     ),
+    _RecordMemberSpec(
+        package_family="dataset_level_quality",
+        record_group=RECORD_GROUP_QUALITY,
+        record_role="attack_quality_image_record",
+        member_template=(
+            "outputs/dataset_level_quality/{paper_run}/"
+            "attack_conditioned_quality/"
+            "attack_conditioned_quality_image_records.jsonl"
+        ),
+        record_format=RECORD_FORMAT_JSONL,
+    ),
+    _RecordMemberSpec(
+        package_family="dataset_level_quality",
+        record_group=RECORD_GROUP_QUALITY,
+        record_role="attack_quality_pair_record",
+        member_template=(
+            "outputs/dataset_level_quality/{paper_run}/"
+            "attack_conditioned_quality/"
+            "attack_conditioned_quality_pair_records.jsonl"
+        ),
+        record_format=RECORD_FORMAT_JSONL,
+    ),
+    _RecordMemberSpec(
+        package_family="dataset_level_quality",
+        record_group=RECORD_GROUP_QUALITY,
+        record_role="attack_quality_inception_feature_record",
+        member_template=(
+            "outputs/dataset_level_quality/{paper_run}/"
+            "attack_conditioned_quality/"
+            "attack_conditioned_quality_inception_feature_records.jsonl"
+        ),
+        record_format=RECORD_FORMAT_JSONL,
+    ),
+    _RecordMemberSpec(
+        package_family="dataset_level_quality",
+        record_group=RECORD_GROUP_QUALITY,
+        record_role="paired_quality_clip_feature_record",
+        member_template=(
+            "outputs/dataset_level_quality/{paper_run}/"
+            "attack_conditioned_quality/"
+            "paired_quality_clip_feature_records.jsonl"
+        ),
+        record_format=RECORD_FORMAT_JSONL,
+    ),
+    _RecordMemberSpec(
+        package_family="dataset_level_quality",
+        record_group=RECORD_GROUP_QUALITY,
+        record_role="paired_quality_metric_record",
+        member_template=(
+            "outputs/dataset_level_quality/{paper_run}/"
+            "attack_conditioned_quality/paired_quality_metric_records.jsonl"
+        ),
+        record_format=RECORD_FORMAT_JSONL,
+    ),
 )
 
 _INVARIANT_RECORD_MEMBER_SPECS = tuple(

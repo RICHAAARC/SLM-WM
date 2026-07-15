@@ -13,7 +13,8 @@
 - `runners/image_only_dataset_runtime.py`: 运行完整 Prompt 集, 先对 calibration 和 test 图像执行不含阈值与判定字段的 Measure, 再将 calibration registered-key clean negatives 按版本化 Prompt 散列拆分为互斥的1/3 `window_fit` 和2/3 `threshold_freeze`, 分别拟合几何 rescue 参数与冻结最终 fixed-FPR 阈值, 最后对原始测量执行唯一一次 Apply。只有 test split 进入论文统计；分数分布、ROC 与 DET 使用与布尔判定严格等价的连续分数。
 - `ablations/mechanism_ablation_workload.py`: 构造当前论文规模的全部消融配置, 调用正式重运行消融并执行受治理打包。`scripts/run_runtime_rerun_ablations.py` 只转发到该模块。
 - `ablations/runtime_rerun.py`: 对完整方法与14个消融配置分别重新生成、攻击、检测并独立校准, 包括中心化 Q/K logit、可微行内 rank、关系概率和距离调制中心化概率四个逐项留一变体；不读取或变换完整方法分数。
-- `artifacts/dataset_level_quality_outputs.py`: 从真实 clean/watermarked 图像对提取正式 Inception 特征, 并构建 `fid`、`kid_mean`、`kid_std` 三行质量证据。KID 在 canonical feature population 上执行100轮均匀无放回子集估计, std 表示子集估计值的总体标准差而不是标准误。
+- `artifacts/dataset_level_quality_outputs.py`: 从真实 clean/watermarked 图像对提取正式 Inception 特征, 并构建 `fid`、`kid_mean`、`kid_std` 三行质量证据。该模块还消费同 Prompt、同 repeat、同攻击配置和同攻击 seed 的 clean/watermarked/attacked-clean/attacked-watermarked 四图记录, 生成逐攻击 Inception 特征、CLIP embedding 与配对 SSIM/CLIP 原始记录。KID 在 canonical feature population 上执行100轮均匀无放回子集估计, std 表示子集估计值的总体标准差而不是标准误。
+- `protocol/gpu_method_qualification.py`: 从单 Prompt 真实运行记录复验716维 JVP/VJP、无阻尼 PSD-CG、三次非零 latent 写回、真实 Q/K、三图保持性、最终双归因和跨平台 PRG 固定向量, 写出 `gpu_operator_preflight_ready`。资源观测由独立的 `gpu_resource_budget_ready` 处理, 资源失败不改变方法算子结论。
 - `artifacts/detection_score_curves.py`: 将内容主判与冻结几何救回转换为判定等价连续分数, 使用 `positive_source` 与 clean negative / wrong-key negative 的记录级真实标签, 对 test overall 与每个同时含正负样本的攻击条件枚举正负无穷端点和全部唯一观测分数, 输出可复用的完整 threshold sweep。
 - `artifacts/`: 保存通用 manifest schema、连续检测统计与正式质量产物构建器。
 - 正式攻击记录必须由运行端直接写入 `attack_id`、`attack_family`、`attack_name`、`resource_profile`、`attack_config_digest` 与 `attack_parameters`; 攻击矩阵只验证并传播该身份, 不根据名称后贴配置摘要。

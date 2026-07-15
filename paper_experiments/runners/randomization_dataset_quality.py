@@ -24,6 +24,7 @@ from experiments.artifacts.dataset_level_quality_outputs import (
 from experiments.protocol.formal_randomization import (
     formal_randomization_repeat_ids,
 )
+from experiments.protocol.attacks import default_attack_configs
 from experiments.protocol.paper_run_config import (
     RUN_EXPECTED_PROMPT_COUNTS,
     normalize_paper_run_name,
@@ -31,6 +32,7 @@ from experiments.protocol.paper_run_config import (
 from experiments.runtime.repository_environment import resolve_code_version
 from experiments.runtime.scientific_unit_provenance import (
     aggregate_scientific_unit_provenance,
+    validate_scientific_unit_provenance,
 )
 from main.core.digest import build_stable_digest
 from paper_experiments.analysis.formal_record_statistics import (
@@ -73,6 +75,7 @@ class RandomizationDatasetQualityResult:
 
     membership_records: tuple[Mapping[str, Any], ...]
     prompt_distribution_records: tuple[Mapping[str, Any], ...]
+    attack_prompt_distribution_records: tuple[Mapping[str, Any], ...]
     metric_rows: tuple[Mapping[str, Any], ...]
     summary: Mapping[str, Any]
     report: Mapping[str, Any]
@@ -131,19 +134,29 @@ def _require_provenance(source: RandomizationAggregateProvenance) -> None:
 
 
 def _validated_scientific_provenance(
-    feature_records: tuple[dict[str, Any], ...],
+    inception_feature_records: tuple[dict[str, Any], ...],
     *,
     expected_code_version: str,
+    clip_feature_records: tuple[dict[str, Any], ...] = (),
 ) -> dict[str, Any]:
-    """验证特征由正式 CUDA Inception 完成单元真实产生."""
+    """分别验证 Inception 和 CLIP 的 CUDA 完成单元来源."""
 
     try:
-        references = validate_inception_feature_provenance_groups(
-            list(feature_records)
+        inception_references = validate_inception_feature_provenance_groups(
+            list(inception_feature_records)
         )
+        clip_references = tuple(
+            validate_scientific_unit_provenance(
+                record["scientific_unit_provenance"]
+            )
+            for record in clip_feature_records
+        )
+        references = (*inception_references, *clip_references)
         summary = aggregate_scientific_unit_provenance(
             references,
-            expected_reference_count=len(feature_records),
+            expected_reference_count=(
+                len(inception_feature_records) + len(clip_feature_records)
+            ),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise RandomizationDatasetQualityRunnerError(
@@ -181,6 +194,10 @@ def _rebuild_randomization_dataset_quality(
     expected_prompt_count = RUN_EXPECTED_PROMPT_COUNTS[paper_run_name]
     membership_records: list[dict[str, Any]] = []
     feature_records: list[dict[str, Any]] = []
+    paired_quality_metric_records: list[dict[str, Any]] = []
+    attack_membership_records: list[dict[str, Any]] = []
+    attack_feature_records: list[dict[str, Any]] = []
+    clip_feature_records: list[dict[str, Any]] = []
     repeat_source_records: list[dict[str, Any]] = []
 
     with open_randomization_aggregate_record_workspace(source) as workspace:
@@ -199,6 +216,11 @@ def _rebuild_randomization_dataset_quality(
             )
         expected_prompt_ids = tuple(
             str(record["prompt_id"]) for record in prompt_rows
+        )
+        expected_attack_prompt_ids = tuple(
+            str(record["prompt_id"])
+            for record in prompt_rows
+            if record.get("split") == "test"
         )
         expected_prompt_id_digest = build_stable_digest(
             sorted(expected_prompt_ids)
@@ -243,6 +265,77 @@ def _rebuild_randomization_dataset_quality(
                     ),
                     "quality_feature_source": _source_record(
                         first_pair.feature_record_source
+                    ),
+                }
+            )
+
+            attack_pair_source = workspace.find_source(
+                randomization_repeat_id=repeat_id,
+                package_family="dataset_level_quality",
+                record_role="attack_quality_pair_record",
+            )
+            attack_feature_source = workspace.find_source(
+                randomization_repeat_id=repeat_id,
+                package_family="dataset_level_quality",
+                record_role="attack_quality_inception_feature_record",
+            )
+            clip_feature_source = workspace.find_source(
+                randomization_repeat_id=repeat_id,
+                package_family="dataset_level_quality",
+                record_role="paired_quality_clip_feature_record",
+            )
+            paired_metric_source = workspace.find_source(
+                randomization_repeat_id=repeat_id,
+                package_family="dataset_level_quality",
+                record_role="paired_quality_metric_record",
+            )
+            repeat_attack_pairs = tuple(
+                _materialize_json(record)
+                for record in workspace.iter_records(attack_pair_source)
+            )
+            repeat_attack_features = tuple(
+                _materialize_json(record)
+                for record in workspace.iter_records(attack_feature_source)
+            )
+            repeat_clip_features = tuple(
+                _materialize_json(record)
+                for record in workspace.iter_records(clip_feature_source)
+            )
+            repeat_paired_metrics = tuple(
+                _materialize_json(record)
+                for record in workspace.iter_records(paired_metric_source)
+            )
+            expected_attack_count = len(expected_attack_prompt_ids) * sum(
+                attack.enabled for attack in default_attack_configs()
+            )
+            if (
+                len(repeat_attack_pairs) != expected_attack_count
+                or len(repeat_attack_features) != expected_attack_count * 2
+                or len(repeat_paired_metrics)
+                != expected_prompt_count + expected_attack_count
+                or len(repeat_clip_features)
+                != 2 * (expected_prompt_count + expected_attack_count)
+            ):
+                raise RandomizationDatasetQualityRunnerError(
+                    f"逐攻击质量原始记录数量未匹配正式集合: {repeat_id}"
+                )
+            attack_membership_records.extend(repeat_attack_pairs)
+            attack_feature_records.extend(repeat_attack_features)
+            clip_feature_records.extend(repeat_clip_features)
+            paired_quality_metric_records.extend(repeat_paired_metrics)
+            repeat_source_records[-1].update(
+                {
+                    "attack_quality_pair_source": _source_record(
+                        attack_pair_source
+                    ),
+                    "attack_quality_feature_source": _source_record(
+                        attack_feature_source
+                    ),
+                    "clip_quality_feature_source": _source_record(
+                        clip_feature_source
+                    ),
+                    "paired_quality_metric_source": _source_record(
+                        paired_metric_source
                     ),
                 }
             )
@@ -297,8 +390,12 @@ def _rebuild_randomization_dataset_quality(
 
     materialized_features = tuple(feature_records)
     scientific_provenance = _validated_scientific_provenance(
-        materialized_features,
+        (
+            *materialized_features,
+            *attack_feature_records,
+        ),
         expected_code_version=source.common_code_version,
+        clip_feature_records=tuple(clip_feature_records),
     )
     statistics: RandomizationDatasetQualityStatistics = (
         rebuild_randomization_dataset_quality_statistics(
@@ -307,6 +404,11 @@ def _rebuild_randomization_dataset_quality(
             paper_run_name=paper_run_name,
             target_fpr=target_fpr,
             expected_prompt_ids=expected_prompt_ids,
+            paired_quality_metric_records=paired_quality_metric_records,
+            attack_membership_records=attack_membership_records,
+            attack_feature_records=attack_feature_records,
+            clip_feature_records=clip_feature_records,
+            expected_attack_prompt_ids=expected_attack_prompt_ids,
         )
     )
     prompt_report = _materialize_json(prompt_contract["report"])
@@ -348,6 +450,9 @@ def _rebuild_randomization_dataset_quality(
         "prompt_distribution_records_digest": statistics.summary[
             "prompt_distribution_records_digest"
         ],
+        "attack_prompt_distribution_records_digest": statistics.summary[
+            "attack_prompt_distribution_records_digest"
+        ],
         "randomization_dataset_quality_summary_digest": statistics.summary[
             "randomization_dataset_quality_summary_digest"
         ],
@@ -362,6 +467,9 @@ def _rebuild_randomization_dataset_quality(
         membership_records=statistics.membership_records,
         prompt_distribution_records=(
             statistics.prompt_distribution_records
+        ),
+        attack_prompt_distribution_records=(
+            statistics.attack_prompt_distribution_records
         ),
         metric_rows=statistics.metric_rows,
         summary=statistics.summary,
@@ -455,6 +563,10 @@ def write_randomization_dataset_quality_outputs(
         prompt_distribution_path = (
             temporary_directory / "prompt_distributional_quality_records.jsonl"
         )
+        attack_prompt_distribution_path = (
+            temporary_directory
+            / "attack_prompt_distributional_quality_records.jsonl"
+        )
         summary_path = (
             temporary_directory / "randomization_dataset_quality_summary.json"
         )
@@ -486,6 +598,14 @@ def write_randomization_dataset_quality_outputs(
             ),
             encoding="utf-8",
         )
+        attack_prompt_distribution_path.write_text(
+            "".join(
+                json.dumps(dict(record), ensure_ascii=False, sort_keys=True)
+                + "\n"
+                for record in result.attack_prompt_distribution_records
+            ),
+            encoding="utf-8",
+        )
         summary_path.write_text(
             json.dumps(
                 dict(result.summary),
@@ -510,6 +630,7 @@ def write_randomization_dataset_quality_outputs(
             metrics_path,
             membership_path,
             prompt_distribution_path,
+            attack_prompt_distribution_path,
             summary_path,
             report_path,
         )
@@ -572,6 +693,21 @@ def write_randomization_dataset_quality_outputs(
                 ],
                 "prompt_distribution_records_digest": result.summary[
                     "prompt_distribution_records_digest"
+                ],
+                "attack_prompt_distribution_records_digest": result.summary[
+                    "attack_prompt_distribution_records_digest"
+                ],
+                "paired_quality_metric_records_digest": result.summary[
+                    "paired_quality_metric_records_digest"
+                ],
+                "attack_quality_membership_records_digest": result.summary[
+                    "attack_quality_membership_records_digest"
+                ],
+                "attack_quality_feature_records_digest": result.summary[
+                    "attack_quality_feature_records_digest"
+                ],
+                "paired_quality_clip_feature_records_digest": result.summary[
+                    "paired_quality_clip_feature_records_digest"
                 ],
                 "paper_quality_claim_protocol_digest": result.summary[
                     "paper_quality_claim_protocol"

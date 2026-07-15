@@ -1,0 +1,57 @@
+{
+  "attack_pairing": {
+    "attack_configuration_rule": "identical_registered_attack_config_digest",
+    "attack_randomness_rule": "identical_formal_attack_seed_random",
+    "comparison_image_role": "attacked_watermarked",
+    "comparison_path": "attack(watermarked_image)",
+    "pair_role": "matched_attack_clean_to_watermarked",
+    "source_image_role": "attacked_clean",
+    "source_path": "attack(clean_image)"
+  },
+  "base_pairing": {
+    "comparison_image_role": "watermarked",
+    "comparison_path": "watermarked_image",
+    "pair_role": "clean_to_watermarked",
+    "source_image_role": "clean",
+    "source_path": "clean_image"
+  },
+  "clip_image_similarity": {
+    "feature_dtype": "float32",
+    "feature_normalization": "l2",
+    "metric": "cosine_similarity_between_projected_image_embeddings",
+    "model_id": "openai/clip-vit-base-patch32",
+    "model_revision": "3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268",
+    "model_usage_role": "semantic_condition_encoder",
+    "preprocessing": "transformers_clip_image_processor_from_same_revision",
+    "vision_output": "CLIPVisionModelWithProjection.image_embeds"
+  },
+  "distributional_quality": {
+    "attack_conditioned_population": "attacked_clean_vs_attacked_watermarked_within_prompt_across_registered_repeats",
+    "feature_extractor_id": "torch_fidelity_0_4_0_inception_v3_compat_2048",
+    "feature_population_unit": "persisted_rgb_image",
+    "primary_estimand": "prompt_conditional_kid_mean",
+    "primary_sampling_unit": "prompt",
+    "repeat_aggregation": "registered_randomization_repeats_nested_within_prompt"
+  },
+  "four_image_roles": [
+    "clean",
+    "watermarked",
+    "attacked_clean",
+    "attacked_watermarked"
+  ],
+  "interpretation_boundaries": {
+    "attack_severity_pairs": [
+      "clean_to_attacked_clean",
+      "watermarked_to_attacked_watermarked"
+    ],
+    "attack_severity_role": "descriptive_only",
+    "generation_quality_against_real_reference": "not_claimed_without_registered_real_reference",
+    "watermark_quality_under_attack": "incremental_watermark_effect_after_matched_attack"
+  },
+  "metric_estimands": {
+    "clip_cosine": "mean_prompt_level_image_to_image_cosine",
+    "paired_ssim": "mean_prompt_level_pairwise_ssim",
+    "prompt_conditional_kid": "mean_prompt_level_unbiased_polynomial_mmd"
+  },
+  "protocol_schema": "attack_conditioned_quality_estimand_v1"
+}

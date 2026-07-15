@@ -3596,3 +3596,31 @@ Notebook 与 repository module 的跨边界数据
 | workflow_completion_state | governance | none | false | true | true | 区分续跑、数据集组件完成、单重复组件完成和单重复打包完成的会话状态。 |
 | session_execution_decision | governance | none | false | true | true | 本次命令是否正常结束, 不表示论文运行已经闭合。 |
 | paper_run_closed | governance | none | false | true | true | 当前论文运行层级是否已通过最终结果闭合, 单重复 GPU 会话中固定为 false。 |
+
+## 四图质量证据与 GPU 资格化字段
+
+| field | role | unit | per_record | per_artifact | derived | description |
+|---|---|---|---|---|---|---|
+| quality_estimand_id | protocol | none | true | true | true | 四图配对质量 estimand 配置摘要派生的稳定标识。 |
+| quality_estimand_protocol_digest | provenance | none | true | true | true | clean/watermarked 与 attacked-clean/attacked-watermarked 配对规则、CLIP revision 和 Prompt 条件 KID 含义的稳定摘要。 |
+| attack_quality_record_id | provenance | none | true | false | true | 同 Prompt、repeat、攻击配置和攻击 seed 的四图原始质量记录标识。 |
+| attack_quality_record_digest | provenance | none | true | false | true | 四图路径、文件摘要、像素摘要、分辨率、攻击身份和科学运行来源的稳定摘要。 |
+| image_sha256 | provenance | none | true | false | true | 四图嵌套图像身份中的实际文件 SHA-256。 |
+| estimand_scope | protocol | none | true | false | false | 区分 `base` 与 `registered_attack` 配对质量观察总体。 |
+| paired_ssim | metric | none | true | false | true | 同一 Prompt 和 repeat 下 source/comparison 实际持久图像的 SSIM。 |
+| clip_cosine | metric | none | true | false | true | 冻结 CLIP 图像投影 embedding 之间的 cosine。 |
+| clip_source_feature_digest | provenance | none | true | false | true | 配对指标引用的 source CLIP 向量稳定摘要。 |
+| clip_comparison_feature_digest | provenance | none | true | false | true | 配对指标引用的 comparison CLIP 向量稳定摘要。 |
+| paired_quality_metric_record_id | provenance | none | true | false | true | base 或逐攻击 SSIM/CLIP 配对原始记录标识。 |
+| paired_quality_metric_record_digest | provenance | none | true | false | true | 配对质量指标、图像摘要、estimand scope 和 CLIP 向量摘要的稳定摘要。 |
+| attack_prompt_distribution_record_digest | provenance | none | true | false | true | 单一注册攻击和 Prompt 下9个 repeat 的无偏 Prompt 条件 KID 记录摘要。 |
+| attack_conditioned_quality_component_ready | governance | none | false | true | true | 单 repeat 是否完整产生 test Prompt 乘注册攻击的四图、Inception、CLIP 和配对指标证据。 |
+| attack_conditioned_quality_statistics_ready | governance | none | false | true | true | 9-repeat 聚合是否完成逐攻击 Prompt bootstrap 与跨攻击质量决策。 |
+| gpu_operator_preflight_ready | governance | none | false | true | true | 单 Prompt 真实 CUDA 方法算子、数值门禁、三图保持、Q/K 归因和 PRG 固定向量是否全部通过。 |
+| gpu_resource_budget_ready | governance | none | false | true | true | 已登记 GPU 资源上限是否覆盖显存、单 Prompt 时间和估计总 GPU 小时。该字段不改变方法算子结论。 |
+| resource_budget_evaluation_status | governance | none | false | true | true | 资源预算比较为 `pass`、`fail` 或缺少观测/上限时的未评估状态。 |
+| known_answer_report_digest | provenance | none | false | true | true | 当前平台重建公开 PRG uniform/Gaussian 固定向量报告的稳定摘要。 |
+| gpu_operator_preflight_report_digest | provenance | none | false | true | true | 不含资源预算判定的方法算子资格化报告摘要。 |
+| gpu_resource_budget_report_digest | provenance | none | false | true | true | 独立资源预算报告摘要。 |
+
+`result_status`, `paper_claim_support` 和 `baseline_result_source` 不属于同一层的替代字段. 前两者位于 baseline 来源注册层, 分别表示结果可用状态和来源注册项的论文支持状态; `baseline_result_source` 位于正式结果记录层, 表示具体证据文件或结果包. 两层状态必须交叉一致, 但不得删除或合并字段.

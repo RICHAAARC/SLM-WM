@@ -40,6 +40,10 @@ from experiments.protocol.formal_randomization import (
 )
 from experiments.protocol.splits import apply_split_assignments, build_group_split_counts
 from experiments.protocol.attacks import default_attack_configs
+from experiments.protocol.attack_conditioned_quality import (
+    build_attack_conditioned_quality_image_records,
+    load_attack_conditioned_quality_estimand,
+)
 from experiments.runtime import repository_environment
 from experiments.runtime.scientific_execution_binding import (
     validate_scientific_execution_binding,
@@ -1395,6 +1399,9 @@ def run_image_only_dataset_runtime(
     runtime_results_path = output_dir / "runtime_results.jsonl"
     detection_records_path = output_dir / "image_only_detection_records.jsonl"
     quality_registry_path = output_dir / "watermark_quality_image_registry.jsonl"
+    attack_quality_registry_path = (
+        output_dir / "attack_conditioned_quality_image_records.jsonl"
+    )
     protocol_path = output_dir / "frozen_evidence_protocol.json"
     metrics_path = output_dir / "test_detection_metrics.csv"
     summary_path = output_dir / "dataset_runtime_summary.json"
@@ -1405,6 +1412,26 @@ def run_image_only_dataset_runtime(
     )
     detection_records_path.write_text(
         "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in formal_records),
+        encoding="utf-8",
+    )
+    attack_quality_protocol = load_attack_conditioned_quality_estimand()
+    attack_quality_records = build_attack_conditioned_quality_image_records(
+        formal_records,
+        runtime_results,
+        expected_randomization_repeat_id=(
+            resolved_paper_run.randomization_repeat_id
+        ),
+        expected_prompt_ids=(
+            record.prompt_id for record in prompt_records if record.split == "test"
+        ),
+        protocol=attack_quality_protocol,
+    )
+    attack_quality_registry_path.write_text(
+        "".join(
+            json.dumps(record.to_dict(), ensure_ascii=False, sort_keys=True)
+            + "\n"
+            for record in attack_quality_records
+        ),
         encoding="utf-8",
     )
     quality_registry_rows = []
@@ -1644,6 +1671,19 @@ def run_image_only_dataset_runtime(
         "det_curve_point_count": len(detection_score_tables["det_curve_points"]),
         "detection_curve_data_ready": all(detection_score_tables.values()),
         "watermark_quality_pair_count": len(quality_registry_rows),
+        "attack_conditioned_quality_record_count": len(
+            attack_quality_records
+        ),
+        "attack_conditioned_quality_estimand_id": (
+            attack_quality_protocol["quality_estimand_id"]
+        ),
+        "attack_conditioned_quality_estimand_protocol_digest": (
+            attack_quality_protocol["quality_estimand_protocol_digest"]
+        ),
+        "attack_conditioned_quality_records_ready": (
+            len(attack_quality_records)
+            == len(attack_prompt_ids) * len(expected_attack_ids)
+        ),
         "scientific_update_record_count": len(scientific_update_records),
         "expected_scientific_update_record_count": expected_scientific_update_count,
         "scientific_operator_failure_count": scientific_operator_failure_count,
@@ -1820,6 +1860,7 @@ def run_image_only_dataset_runtime(
             runtime_results_path.relative_to(root_path).as_posix(),
             detection_records_path.relative_to(root_path).as_posix(),
             quality_registry_path.relative_to(root_path).as_posix(),
+            attack_quality_registry_path.relative_to(root_path).as_posix(),
             protocol_path.relative_to(root_path).as_posix(),
             metrics_path.relative_to(root_path).as_posix(),
             detection_score_table_paths["score_distribution_table"].relative_to(root_path).as_posix(),
@@ -1852,6 +1893,7 @@ def run_image_only_dataset_runtime(
             "scientific_unit_identity_records": (
                 scientific_unit_identity_records
             ),
+            "attack_conditioned_quality_estimand": attack_quality_protocol,
             # manifest 现在保存完整配置, 因此必须复用运行时的密钥脱敏配置。
             # 该结构保留全部可复现实验参数, 但只记录 key material 的稳定摘要。
             "method_config": semantic_watermark_runtime_config_payload(
@@ -1948,6 +1990,7 @@ def package_image_only_dataset_runtime(
             "runtime_results.jsonl",
             "image_only_detection_records.jsonl",
             "watermark_quality_image_registry.jsonl",
+            "attack_conditioned_quality_image_records.jsonl",
             "frozen_evidence_protocol.json",
             "test_detection_metrics.csv",
             "score_distribution_table.csv",

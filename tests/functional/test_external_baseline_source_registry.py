@@ -54,7 +54,11 @@ def test_external_baseline_source_registry_matches_adapter_specs_when_present() 
         assert item["source_status"] in {"not_downloaded", "downloaded"}
         if source_dir.exists():
             assert (source_dir / "README.md").exists() or (source_dir / ".git").exists()
+        assert item["result_status"] == "not_available"
         assert item["paper_claim_support"] is False
+        assert spec.baseline_result_source == "not_available"
+        assert spec.baseline_reproduced_result_ready is False
+        assert spec.baseline_imported_result_ready is False
         assert item["official_source_tracked"] is False
         if item["comparison_group"] == "primary":
             if item["baseline_id"] == "t2smark":

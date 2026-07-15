@@ -192,11 +192,19 @@ def run_image_only_dataset_workload(
             "outputs/image_only_dataset_runtime/"
             f"{paper_run.run_name}/watermark_quality_image_registry.jsonl"
         ),
+        attack_quality_registry_path=(
+            "outputs/image_only_dataset_runtime/"
+            f"{paper_run.run_name}/attack_conditioned_quality_image_records.jsonl"
+        ),
         formal_min_sample_count=paper_run.dataset_level_quality_minimum_count,
         auto_extract_formal_features=True,
         inception_device_name=os.environ.get("SLM_WM_INCEPTION_DEVICE"),
         inception_batch_size=int(
             os.environ.get("SLM_WM_INCEPTION_BATCH_SIZE", "32")
+        ),
+        clip_device_name=os.environ.get("SLM_WM_CLIP_DEVICE"),
+        clip_batch_size=int(
+            os.environ.get("SLM_WM_CLIP_BATCH_SIZE", "32")
         ),
     )
     quality_archive_path = (

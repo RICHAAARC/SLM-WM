@@ -685,6 +685,16 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
             QUALITY_PREFIX + "dataset_quality_formal_feature_import_report.json",
             QUALITY_PREFIX + "dataset_quality_formal_feature_records.jsonl",
             QUALITY_PREFIX + "dataset_quality_metrics.csv",
+            QUALITY_PREFIX
+            + "attack_conditioned_quality/attack_conditioned_quality_image_records.jsonl",
+            QUALITY_PREFIX
+            + "attack_conditioned_quality/attack_conditioned_quality_pair_records.jsonl",
+            QUALITY_PREFIX
+            + "attack_conditioned_quality/attack_conditioned_quality_inception_feature_records.jsonl",
+            QUALITY_PREFIX
+            + "attack_conditioned_quality/paired_quality_clip_feature_records.jsonl",
+            QUALITY_PREFIX
+            + "attack_conditioned_quality/paired_quality_metric_records.jsonl",
             QUALITY_SUMMARY,
             QUALITY_MANIFEST,
             QUALITY_PACKAGE_INPUT,
@@ -728,6 +738,11 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
                 True,
             ),
             _require(QUALITY_SUMMARY, "formal_fid_kid_component_ready", True),
+            _require(
+                QUALITY_SUMMARY,
+                "attack_conditioned_quality_component_ready",
+                True,
+            ),
             _require(QUALITY_SUMMARY, "repeat_component_ready", True),
             _require(QUALITY_SUMMARY, "randomization_aggregate_ready", False),
             _require(QUALITY_SUMMARY, "supports_paper_claim", False),

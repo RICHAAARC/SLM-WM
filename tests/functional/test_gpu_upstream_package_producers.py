@@ -32,6 +32,21 @@ from experiments.artifacts.dataset_level_quality_outputs import (
     package_dataset_level_quality_outputs,
     path_digest,
 )
+from experiments.artifacts.paired_quality_outputs import (
+    FORMAL_CLIP_FEATURE_BACKEND,
+    FORMAL_CLIP_FEATURE_DIMENSION,
+    PAIRED_QUALITY_METRIC_RECORD_SCHEMA,
+)
+from experiments.protocol.attack_conditioned_quality import (
+    ATTACK_CONDITIONED_IMAGE_PAIR_ROLE,
+    ATTACK_CONDITIONED_QUALITY_RECORD_SCHEMA,
+    attack_quality_dataset_image_records,
+    load_attack_conditioned_quality_estimand,
+)
+from experiments.protocol.attacks import (
+    attack_config_digest,
+    default_attack_configs,
+)
 from experiments.protocol.paper_run_config import build_paper_run_config
 from experiments.protocol.formal_randomization import (
     formal_generation_seed,
@@ -388,6 +403,7 @@ def _prepare_image_runtime(
         (
             "image_only_detection_records.jsonl",
             "watermark_quality_image_registry.jsonl",
+            "attack_conditioned_quality_image_records.jsonl",
             "frozen_evidence_protocol.json",
             "test_detection_metrics.csv",
             "score_distribution_table.csv",
@@ -509,6 +525,7 @@ def _prepare_image_runtime(
                     "runtime_results.jsonl",
                     "image_only_detection_records.jsonl",
                     "watermark_quality_image_registry.jsonl",
+                    "attack_conditioned_quality_image_records.jsonl",
                     "frozen_evidence_protocol.json",
                     "test_detection_metrics.csv",
                     "score_distribution_table.csv",
@@ -818,7 +835,7 @@ def _prepare_dataset_quality(root: Path) -> Path:
     """构造正式 FID/KID 打包门禁所需的最小正式形状。"""
 
     directory = root / "outputs" / "dataset_level_quality" / PAPER_RUN_NAME
-    _canonical_prompt_records(root)
+    prompt_records = _canonical_prompt_records(root)
     paper_run = build_paper_run_config(root)
     repeat_identity = _randomization_repeat_identity(paper_run)
     canonical_ids = canonical_prompt_ids_for_paper_run(
@@ -933,6 +950,260 @@ def _prepare_dataset_quality(root: Path) -> Path:
     )
     for row in feature_rows:
         row["scientific_unit_provenance"] = batch_provenance
+
+    estimand = load_attack_conditioned_quality_estimand()
+    enabled_attacks = tuple(
+        attack for attack in default_attack_configs() if attack.enabled
+    )
+    test_prompt_ids = tuple(
+        record.prompt_id for record in prompt_records if record.split == "test"
+    )
+    attack_quality_records: list[dict[str, object]] = []
+    for prompt_id in test_prompt_ids:
+        for attack_index, attack in enumerate(enabled_attacks):
+            attack_digest = attack_config_digest(attack)
+            identity_base = {
+                "repeat_id": paper_run.randomization_repeat_id,
+                "prompt_id": prompt_id,
+                "attack_id": attack.attack_id,
+            }
+            clean_digest = build_stable_digest(
+                {**identity_base, "image_role": "clean"}
+            )
+            watermarked_digest = build_stable_digest(
+                {**identity_base, "image_role": "watermarked"}
+            )
+            attacked_clean_digest = build_stable_digest(
+                {**identity_base, "image_role": "attacked_clean"}
+            )
+            attacked_watermarked_digest = build_stable_digest(
+                {**identity_base, "image_role": "attacked_watermarked"}
+            )
+
+            def image_identity(role: str, digest: str) -> dict[str, object]:
+                """构造不参与图像解码的测试图像身份."""
+
+                return {
+                    "image_path": (
+                        "outputs/fixture_images/attack_quality/"
+                        f"{prompt_id}_{attack.attack_id}_{role}.png"
+                    ),
+                    "image_sha256": digest,
+                    "image_rgb_uint8_content_sha256": build_stable_digest(
+                        {**identity_base, "pixel_role": role}
+                    ),
+                    "image_width": 512,
+                    "image_height": 512,
+                }
+
+            core = {
+                "record_schema": ATTACK_CONDITIONED_QUALITY_RECORD_SCHEMA,
+                "quality_estimand_id": estimand["quality_estimand_id"],
+                "quality_estimand_protocol_digest": estimand[
+                    "quality_estimand_protocol_digest"
+                ],
+                "run_id": f"attack_quality_{prompt_id}",
+                "prompt_id": prompt_id,
+                "split": "test",
+                "randomization_repeat_id": paper_run.randomization_repeat_id,
+                "sample_role": "four_image_matched_attack_pair",
+                "attack_id": attack.attack_id,
+                "attack_name": attack.attack_name,
+                "attack_family": attack.attack_family,
+                "attack_config_digest": attack_digest,
+                "attack_seed_random": 1000 + attack_index,
+                "formal_attack_seed_protocol_digest": build_stable_digest(
+                    {"attack_seed_protocol": 1}
+                ),
+                "attack_parameters": dict(attack.attack_parameters),
+                "source_image_role": "attacked_clean",
+                "comparison_image_role": "attacked_watermarked",
+                "image_pair_role": ATTACK_CONDITIONED_IMAGE_PAIR_ROLE,
+                "clean_image": image_identity("clean", clean_digest),
+                "watermarked_image": image_identity(
+                    "watermarked",
+                    watermarked_digest,
+                ),
+                "attacked_clean_image": image_identity(
+                    "attacked_clean",
+                    attacked_clean_digest,
+                ),
+                "attacked_watermarked_image": image_identity(
+                    "attacked_watermarked",
+                    attacked_watermarked_digest,
+                ),
+                "generation_scientific_unit_provenance": batch_provenance,
+                "code_version": "b" * 40,
+                "scientific_dependency_profile_id": "sd35_method_runtime_gpu",
+                "scientific_dependency_profile_digest": "d" * 64,
+                "scientific_complete_hash_lock_digest": "e" * 64,
+                "supports_paper_claim": False,
+            }
+            attack_record_digest = build_stable_digest(core)
+            attack_quality_records.append(
+                {
+                    "attack_quality_record_id": (
+                        f"attack_quality_record_{attack_record_digest[:16]}"
+                    ),
+                    "attack_quality_record_digest": attack_record_digest,
+                    **core,
+                }
+            )
+    attack_pair_rows = list(
+        attack_quality_dataset_image_records(attack_quality_records)
+    )
+    attack_feature_rows: list[dict[str, object]] = []
+    attack_item_identity: list[dict[str, object]] = []
+    for pair_index, pair in enumerate(attack_pair_rows):
+        for role, path_field, digest_field in (
+            ("source", "source_image_path", "source_image_digest"),
+            (
+                "comparison",
+                "comparison_image_path",
+                "comparison_image_digest",
+            ),
+        ):
+            item = {
+                "dataset_quality_record_id": pair[
+                    "dataset_quality_record_id"
+                ],
+                "dataset_quality_image_role": role,
+                "image_path": pair[path_field],
+                "image_digest": pair[digest_field],
+            }
+            attack_item_identity.append(item)
+            attack_feature_rows.append(
+                {
+                    **item,
+                    "feature_backend": FORMAL_FEATURE_BACKEND,
+                    "feature_extractor_id": FORMAL_FEATURE_EXTRACTOR_ID,
+                    "feature_dimension": 2048,
+                    "feature_vector": [float(pair_index % 7)] * 2048,
+                    "supports_paper_claim": False,
+                }
+            )
+    attack_batch_digest = build_stable_digest(
+        [
+            (
+                item["dataset_quality_record_id"],
+                item["dataset_quality_image_role"],
+            )
+            for item in attack_item_identity
+        ]
+    )
+    attack_batch_provenance = build_test_scientific_unit_provenance(
+        f"feature_batch_{attack_batch_digest[:16]}",
+        _inception_batch_config_digest(attack_item_identity),
+        formal_execution_lock=FORMAL_EXECUTION_LOCK,
+    )
+    for row in attack_feature_rows:
+        row["scientific_unit_provenance"] = attack_batch_provenance
+
+    all_pair_rows = [*quality_records, *attack_pair_rows]
+    clip_feature_rows: list[dict[str, object]] = []
+    paired_metric_rows: list[dict[str, object]] = []
+    clip_vector = [1.0] + [0.0] * (FORMAL_CLIP_FEATURE_DIMENSION - 1)
+    for pair in all_pair_rows:
+        record_id = str(pair["dataset_quality_record_id"])
+        for role, path_field, digest_field in (
+            ("source", "source_image_path", "source_image_digest"),
+            (
+                "comparison",
+                "comparison_image_path",
+                "comparison_image_digest",
+            ),
+        ):
+            clip_feature_rows.append(
+                {
+                    "dataset_quality_record_id": record_id,
+                    "dataset_quality_image_role": role,
+                    "feature_backend": FORMAL_CLIP_FEATURE_BACKEND,
+                    "feature_extractor_id": (
+                        "openai/clip-vit-base-patch32@"
+                        "3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268"
+                    ),
+                    "feature_dimension": FORMAL_CLIP_FEATURE_DIMENSION,
+                    "image_path": pair[path_field],
+                    "image_digest": pair[digest_field],
+                    "feature_vector": clip_vector,
+                    "quality_estimand_protocol_digest": estimand[
+                        "quality_estimand_protocol_digest"
+                    ],
+                    "scientific_unit_provenance": batch_provenance,
+                    "supports_paper_claim": False,
+                }
+            )
+        is_attack = "attack_id" in pair
+        metric_core = {
+            "record_schema": PAIRED_QUALITY_METRIC_RECORD_SCHEMA,
+            "dataset_quality_record_id": record_id,
+            "dataset_quality_record_digest": pair[
+                "dataset_quality_record_digest"
+            ],
+            "attack_quality_record_id": pair.get(
+                "attack_quality_record_id",
+                "",
+            ),
+            "randomization_repeat_id": paper_run.randomization_repeat_id,
+            "prompt_id": pair["prompt_id"],
+            "estimand_scope": (
+                "registered_attack" if is_attack else "base"
+            ),
+            "sample_role": (
+                "matched_attack_quality_pair"
+                if is_attack
+                else "base_quality_pair"
+            ),
+            "attack_id": pair.get("attack_id", "none"),
+            "attack_config_digest": pair.get("attack_config_digest", ""),
+            "attack_seed_random": pair.get("attack_seed_random"),
+            "image_pair_role": pair["image_pair_role"],
+            "source_image_digest": pair["source_image_digest"],
+            "comparison_image_digest": pair["comparison_image_digest"],
+            "paired_ssim": 1.0,
+            "clip_cosine": 1.0,
+            "clip_source_feature_digest": build_stable_digest(clip_vector),
+            "clip_comparison_feature_digest": build_stable_digest(
+                clip_vector
+            ),
+            "quality_estimand_protocol_digest": estimand[
+                "quality_estimand_protocol_digest"
+            ],
+            "supports_paper_claim": False,
+        }
+        metric_digest = build_stable_digest(metric_core)
+        paired_metric_rows.append(
+            {
+                "paired_quality_metric_record_id": (
+                    f"paired_quality_metric_{metric_digest[:16]}"
+                ),
+                "paired_quality_metric_record_digest": metric_digest,
+                **metric_core,
+            }
+        )
+
+    attack_quality_dir = directory / "attack_conditioned_quality"
+    _write_jsonl(
+        attack_quality_dir / "attack_conditioned_quality_image_records.jsonl",
+        attack_quality_records,
+    )
+    _write_jsonl(
+        attack_quality_dir / "attack_conditioned_quality_pair_records.jsonl",
+        attack_pair_rows,
+    )
+    _write_jsonl(
+        attack_quality_dir
+        / "attack_conditioned_quality_inception_feature_records.jsonl",
+        attack_feature_rows,
+    )
+    _write_jsonl(
+        attack_quality_dir / "paired_quality_clip_feature_records.jsonl",
+        clip_feature_rows,
+    )
+    _write_jsonl(
+        attack_quality_dir / "paired_quality_metric_records.jsonl",
+        paired_metric_rows,
+    )
     _write_jsonl(
         directory / "dataset_quality_image_records.jsonl",
         quality_records,
@@ -1019,6 +1290,7 @@ def _prepare_dataset_quality(root: Path) -> Path:
             "canonical_formal_feature_extractor_ready": True,
             "scientific_unit_provenance_identity_ready": True,
             "formal_fid_kid_component_ready": True,
+            "attack_conditioned_quality_component_ready": True,
             "repeat_component_ready": True,
             "randomization_aggregate_ready": False,
             "supports_paper_claim": False,
@@ -1047,6 +1319,20 @@ def _prepare_dataset_quality(root: Path) -> Path:
                     "dataset_quality_summary.json",
                     "manifest.local.json",
                 )
+            ]
+            + [
+                path.relative_to(root).as_posix()
+                for path in (
+                    attack_quality_dir
+                    / "attack_conditioned_quality_image_records.jsonl",
+                    attack_quality_dir
+                    / "attack_conditioned_quality_pair_records.jsonl",
+                    attack_quality_dir
+                    / "attack_conditioned_quality_inception_feature_records.jsonl",
+                    attack_quality_dir
+                    / "paired_quality_clip_feature_records.jsonl",
+                    attack_quality_dir / "paired_quality_metric_records.jsonl",
+                )
             ],
             "metadata": {
                 "paper_run_name": PAPER_RUN_NAME,
@@ -1058,12 +1344,44 @@ def _prepare_dataset_quality(root: Path) -> Path:
                 **coverage,
                 **resolution_contract,
                 "randomization_repeat_identity": repeat_identity,
+                "attack_conditioned_quality_component_ready": True,
+                "attack_conditioned_quality_records_digest": (
+                    build_stable_digest(attack_quality_records)
+                ),
+                "attack_conditioned_quality_pair_records_digest": (
+                    build_stable_digest(attack_pair_rows)
+                ),
+                "attack_conditioned_quality_inception_feature_records_digest": (
+                    build_stable_digest(attack_feature_rows)
+                ),
+                "paired_quality_clip_feature_records_digest": (
+                    build_stable_digest(clip_feature_rows)
+                ),
+                "paired_quality_metric_records_digest": build_stable_digest(
+                    paired_metric_rows
+                ),
             },
             "config_digest": build_stable_digest(
                 {
                     **coverage,
                     **resolution_contract,
                     "randomization_repeat_identity": repeat_identity,
+                    "attack_conditioned_quality_component_ready": True,
+                    "attack_conditioned_quality_records_digest": (
+                        build_stable_digest(attack_quality_records)
+                    ),
+                    "attack_conditioned_quality_pair_records_digest": (
+                        build_stable_digest(attack_pair_rows)
+                    ),
+                    "attack_conditioned_quality_inception_feature_records_digest": (
+                        build_stable_digest(attack_feature_rows)
+                    ),
+                    "paired_quality_clip_feature_records_digest": (
+                        build_stable_digest(clip_feature_rows)
+                    ),
+                    "paired_quality_metric_records_digest": (
+                        build_stable_digest(paired_metric_rows)
+                    ),
                 }
             ),
         },

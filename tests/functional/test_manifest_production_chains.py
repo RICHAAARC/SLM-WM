@@ -14,6 +14,11 @@ import pytest
 
 from experiments.ablations import runtime_rerun
 from experiments.artifacts import dataset_level_quality_outputs
+from experiments.artifacts.paired_quality_outputs import (
+    FORMAL_CLIP_FEATURE_BACKEND,
+    FORMAL_CLIP_FEATURE_DIMENSION,
+    PAIRED_QUALITY_METRIC_RECORD_SCHEMA,
+)
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.artifacts.manifest_schema import manifest_config_digest_ready
 from experiments.protocol.attacks import (
@@ -25,6 +30,12 @@ from experiments.protocol.attacks import (
 from experiments.protocol.dataset_quality import (
     FORMAL_DATASET_QUALITY_METRIC_NAMES,
     build_dataset_quality_image_records,
+)
+from experiments.protocol.attack_conditioned_quality import (
+    ATTACK_CONDITIONED_IMAGE_PAIR_ROLE,
+    ATTACK_CONDITIONED_QUALITY_RECORD_SCHEMA,
+    attack_quality_dataset_image_records,
+    load_attack_conditioned_quality_estimand,
 )
 from experiments.protocol.detection_key_identity import (
     REGISTERED_WRONG_KEY_ROLE,
@@ -621,6 +632,199 @@ def test_dataset_quality_writer_and_package_share_manifest_config(
     )
     _write_jsonl(feature_source_path, feature_rows)
 
+    estimand = load_attack_conditioned_quality_estimand()
+    split_records = apply_split_assignments(
+        build_prompt_records(PAPER_RUN_NAME, read_prompt_file(prompt_path))
+    )
+    test_prompt_ids = tuple(
+        record.prompt_id for record in split_records if record.split == "test"
+    )
+    attack_quality_rows: list[dict[str, Any]] = []
+    for prompt_id in test_prompt_ids:
+        for attack_index, attack in enumerate(
+            config for config in default_attack_configs() if config.enabled
+        ):
+            identity = {
+                "prompt_id": prompt_id,
+                "attack_id": attack.attack_id,
+            }
+
+            def image_identity(role: str) -> dict[str, Any]:
+                """构造 manifest 链测试使用的确定性图像身份."""
+
+                return {
+                    "image_path": (
+                        "outputs/manifest_chain_attack_images/"
+                        f"{prompt_id}_{attack.attack_id}_{role}.bin"
+                    ),
+                    "image_sha256": build_stable_digest(
+                        {**identity, "image_role": role}
+                    ),
+                    "image_rgb_uint8_content_sha256": build_stable_digest(
+                        {**identity, "pixel_role": role}
+                    ),
+                    "image_width": 512,
+                    "image_height": 512,
+                }
+
+            attack_core = {
+                "record_schema": ATTACK_CONDITIONED_QUALITY_RECORD_SCHEMA,
+                "quality_estimand_id": estimand["quality_estimand_id"],
+                "quality_estimand_protocol_digest": estimand[
+                    "quality_estimand_protocol_digest"
+                ],
+                "run_id": f"manifest_attack_{prompt_id}",
+                "prompt_id": prompt_id,
+                "split": "test",
+                "randomization_repeat_id": paper_run.randomization_repeat_id,
+                "sample_role": "four_image_matched_attack_pair",
+                "attack_id": attack.attack_id,
+                "attack_name": attack.attack_name,
+                "attack_family": attack.attack_family,
+                "attack_config_digest": attack_config_digest(attack),
+                "attack_seed_random": 2000 + attack_index,
+                "formal_attack_seed_protocol_digest": (
+                    formal_attack_seed_protocol_record()[
+                        "formal_attack_seed_protocol_digest"
+                    ]
+                ),
+                "attack_parameters": dict(attack.attack_parameters),
+                "source_image_role": "attacked_clean",
+                "comparison_image_role": "attacked_watermarked",
+                "image_pair_role": ATTACK_CONDITIONED_IMAGE_PAIR_ROLE,
+                "clean_image": image_identity("clean"),
+                "watermarked_image": image_identity("watermarked"),
+                "attacked_clean_image": image_identity("attacked_clean"),
+                "attacked_watermarked_image": image_identity(
+                    "attacked_watermarked"
+                ),
+                "generation_scientific_unit_provenance": batch_provenance,
+                "code_version": FORMAL_EXECUTION_LOCK[
+                    "formal_execution_commit"
+                ],
+                "scientific_dependency_profile_id": "sd35_method_runtime_gpu",
+                "scientific_dependency_profile_digest": "1" * 64,
+                "scientific_complete_hash_lock_digest": "3" * 64,
+                "supports_paper_claim": False,
+            }
+            attack_digest = build_stable_digest(attack_core)
+            attack_quality_rows.append(
+                {
+                    "attack_quality_record_id": (
+                        f"attack_quality_record_{attack_digest[:16]}"
+                    ),
+                    "attack_quality_record_digest": attack_digest,
+                    **attack_core,
+                }
+            )
+    attack_registry_path = (
+        tmp_path
+        / "outputs/image_only_dataset_runtime"
+        / PAPER_RUN_NAME
+        / "attack_conditioned_quality_image_records.jsonl"
+    )
+    _write_jsonl(attack_registry_path, attack_quality_rows)
+    attack_pair_rows = list(
+        attack_quality_dataset_image_records(attack_quality_rows)
+    )
+    attack_item_identity: list[dict[str, Any]] = []
+    attack_feature_rows: list[dict[str, Any]] = []
+    for pair_index, pair in enumerate(attack_pair_rows):
+        for role, path_field, digest_field in (
+            ("source", "source_image_path", "source_image_digest"),
+            (
+                "comparison",
+                "comparison_image_path",
+                "comparison_image_digest",
+            ),
+        ):
+            item = {
+                "dataset_quality_record_id": pair[
+                    "dataset_quality_record_id"
+                ],
+                "dataset_quality_image_role": role,
+                "image_path": pair[path_field],
+                "image_digest": pair[digest_field],
+            }
+            attack_item_identity.append(item)
+            attack_feature_rows.append(
+                {
+                    **item,
+                    "feature_backend": (
+                        dataset_level_quality_outputs.FORMAL_FEATURE_BACKEND
+                    ),
+                    "feature_extractor_id": (
+                        dataset_level_quality_outputs.FORMAL_FEATURE_EXTRACTOR_ID
+                    ),
+                    "feature_dimension": 2048,
+                    "feature_vector": [float(pair_index % 5)] * 2048,
+                    "supports_paper_claim": False,
+                }
+            )
+    attack_batch_identity_digest = build_stable_digest(
+        [
+            (
+                item["dataset_quality_record_id"],
+                item["dataset_quality_image_role"],
+            )
+            for item in attack_item_identity
+        ]
+    )
+    attack_batch_provenance = build_test_scientific_unit_provenance(
+        f"feature_batch_{attack_batch_identity_digest[:16]}",
+        dataset_level_quality_outputs._inception_batch_config_digest(
+            attack_item_identity
+        ),
+        formal_execution_lock=FORMAL_EXECUTION_LOCK,
+    )
+    for row in attack_feature_rows:
+        row["scientific_unit_provenance"] = attack_batch_provenance
+    output_dir = tmp_path / "outputs/dataset_level_quality" / PAPER_RUN_NAME
+    attack_output_dir = output_dir / "attack_conditioned_quality"
+    _write_jsonl(
+        attack_output_dir
+        / "attack_conditioned_quality_inception_feature_records.jsonl",
+        attack_feature_rows,
+    )
+    clip_vector = [1.0] + [0.0] * (FORMAL_CLIP_FEATURE_DIMENSION - 1)
+    clip_rows: list[dict[str, Any]] = []
+    for pair in (*quality_records, *attack_pair_rows):
+        for role, path_field, digest_field in (
+            ("source", "source_image_path", "source_image_digest"),
+            (
+                "comparison",
+                "comparison_image_path",
+                "comparison_image_digest",
+            ),
+        ):
+            clip_rows.append(
+                {
+                    "dataset_quality_record_id": pair.dataset_quality_record_id
+                    if not isinstance(pair, dict)
+                    else pair["dataset_quality_record_id"],
+                    "dataset_quality_image_role": role,
+                    "feature_backend": FORMAL_CLIP_FEATURE_BACKEND,
+                    "feature_extractor_id": "formal_test_clip_extractor",
+                    "feature_dimension": FORMAL_CLIP_FEATURE_DIMENSION,
+                    "image_path": getattr(pair, path_field, None)
+                    if not isinstance(pair, dict)
+                    else pair[path_field],
+                    "image_digest": getattr(pair, digest_field, None)
+                    if not isinstance(pair, dict)
+                    else pair[digest_field],
+                    "feature_vector": clip_vector,
+                    "quality_estimand_protocol_digest": estimand[
+                        "quality_estimand_protocol_digest"
+                    ],
+                    "scientific_unit_provenance": batch_provenance,
+                    "supports_paper_claim": False,
+                }
+            )
+    _write_jsonl(
+        attack_output_dir / "paired_quality_clip_feature_records.jsonl",
+        clip_rows,
+    )
+
     monkeypatch.setattr(
         repository_environment,
         "require_published_formal_execution_lock",
@@ -684,15 +888,113 @@ def test_dataset_quality_writer_and_package_share_manifest_config(
         "build_dataset_quality_metric_rows",
         measured_metric_rows,
     )
+
+    def paired_metric_records(
+        base_records: Any,
+        attack_records: Any,
+        _clip_rows: Any,
+        *,
+        randomization_repeat_id: str,
+        **_kwargs: Any,
+    ) -> tuple[dict[str, Any], ...]:
+        """构造由生产 validator 复验的轻量配对质量记录."""
+
+        rows: list[dict[str, Any]] = []
+        for scope, records_for_scope in (
+            ("base", tuple(base_records)),
+            ("registered_attack", tuple(attack_records)),
+        ):
+            for record in records_for_scope:
+                attack_id = (
+                    "none"
+                    if scope == "base"
+                    else str(getattr(record, "attack_id"))
+                )
+                core = {
+                    "record_schema": PAIRED_QUALITY_METRIC_RECORD_SCHEMA,
+                    "dataset_quality_record_id": getattr(
+                        record,
+                        "dataset_quality_record_id",
+                    ),
+                    "dataset_quality_record_digest": getattr(
+                        record,
+                        "dataset_quality_record_digest",
+                    ),
+                    "attack_quality_record_id": getattr(
+                        record,
+                        "attack_quality_record_id",
+                        "",
+                    ),
+                    "randomization_repeat_id": randomization_repeat_id,
+                    "prompt_id": getattr(record, "prompt_id"),
+                    "estimand_scope": scope,
+                    "sample_role": (
+                        "base_quality_pair"
+                        if scope == "base"
+                        else "matched_attack_quality_pair"
+                    ),
+                    "attack_id": attack_id,
+                    "attack_config_digest": getattr(
+                        record,
+                        "attack_config_digest",
+                        "",
+                    ),
+                    "attack_seed_random": getattr(
+                        record,
+                        "attack_seed_random",
+                        None,
+                    ),
+                    "image_pair_role": getattr(
+                        record,
+                        "image_pair_role",
+                    ),
+                    "source_image_digest": getattr(
+                        record,
+                        "source_image_digest",
+                    ),
+                    "comparison_image_digest": getattr(
+                        record,
+                        "comparison_image_digest",
+                    ),
+                    "paired_ssim": 1.0,
+                    "clip_cosine": 1.0,
+                    "clip_source_feature_digest": build_stable_digest(
+                        clip_vector
+                    ),
+                    "clip_comparison_feature_digest": (
+                        build_stable_digest(clip_vector)
+                    ),
+                    "quality_estimand_protocol_digest": estimand[
+                        "quality_estimand_protocol_digest"
+                    ],
+                    "supports_paper_claim": False,
+                }
+                digest = build_stable_digest(core)
+                rows.append(
+                    {
+                        "paired_quality_metric_record_id": (
+                            f"paired_quality_metric_{digest[:16]}"
+                        ),
+                        "paired_quality_metric_record_digest": digest,
+                        **core,
+                    }
+                )
+        return tuple(rows)
+
+    monkeypatch.setattr(
+        dataset_level_quality_outputs,
+        "build_paired_quality_metric_records",
+        paired_metric_records,
+    )
     manifest = dataset_level_quality_outputs.write_dataset_level_quality_outputs(
         paper_run_name=PAPER_RUN_NAME,
         target_fpr=TARGET_FPR,
         root=tmp_path,
         quality_image_registry_path=registry_path,
+        attack_quality_registry_path=attack_registry_path,
         formal_feature_records_path=feature_source_path,
         formal_min_sample_count=3,
     )
-    output_dir = tmp_path / "outputs/dataset_level_quality" / PAPER_RUN_NAME
 
     assert manifest["config_digest"] == build_stable_digest(manifest["config"])
     assert manifest["config"]["formal_feature_records_sha256"] == (

@@ -429,10 +429,21 @@ def test_workspace_revalidates_and_inspects_every_leaf_before_exposing_records(
         assert len(workspace.prompt_source_sources) == 27
         assert len(workspace.ablation_sources) == 27
         assert len(workspace.sensitivity_sources) == 27
-        assert len(workspace.quality_sources) == 27
+        assert len(workspace.quality_sources) == 72
         assert len(workspace.quality_feature_sources) == 9
         assert len(workspace.reference_sources) == 3
-        assert len(workspace.record_sources) == 273
+        assert len(workspace.record_sources) == 318
+        for record_role in (
+            "attack_quality_image_record",
+            "attack_quality_pair_record",
+            "attack_quality_inception_feature_record",
+            "paired_quality_clip_feature_record",
+            "paired_quality_metric_record",
+        ):
+            assert sum(
+                source.record_role == record_role
+                for source in workspace.quality_sources
+            ) == 9
         assert sum(
             source.record_group == "run_manifest"
             for source in workspace.record_sources

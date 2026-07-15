@@ -31,10 +31,26 @@ from experiments.protocol import (
     build_dataset_quality_summary,
     formal_dataset_quality_metric_protocol,
 )
+from experiments.protocol.attack_conditioned_quality import (
+    attack_quality_dataset_image_records,
+    load_attack_conditioned_quality_estimand,
+)
+from experiments.protocol.attacks import default_attack_configs
 from experiments.protocol.paper_run_config import (
     RUN_EXPECTED_PROMPT_COUNTS,
     build_paper_run_config,
     normalize_paper_run_name,
+)
+from experiments.protocol.splits import (
+    apply_split_assignments,
+    build_group_split_counts,
+)
+from experiments.artifacts.paired_quality_outputs import (
+    as_dataset_quality_namespaces,
+    build_paired_quality_metric_records,
+    extract_formal_clip_feature_rows,
+    validate_formal_clip_feature_rows,
+    validate_paired_quality_metric_records,
 )
 from experiments.runtime import repository_environment
 from experiments.runtime.scientific_execution_binding import (
@@ -1382,6 +1398,7 @@ def write_dataset_level_quality_outputs(
     target_fpr: float,
     root: str | Path = ".",
     quality_image_registry_path: str | Path | None = None,
+    attack_quality_registry_path: str | Path | None = None,
     image_search_roots: Any = (),
     input_package_paths: Any = (),
     formal_feature_records_path: str | Path | None = None,
@@ -1389,6 +1406,8 @@ def write_dataset_level_quality_outputs(
     auto_extract_formal_features: bool = False,
     inception_device_name: str | None = None,
     inception_batch_size: int = 32,
+    clip_device_name: str | None = None,
+    clip_batch_size: int = 32,
 ) -> dict[str, Any]:
     """写出正式 Inception FID / KID records、metrics、summary 和 manifest。
 
@@ -1439,6 +1458,16 @@ def write_dataset_level_quality_outputs(
         / "watermark_quality_image_registry.jsonl"
     )
     resolved_registry_path = resolve_path(root_path, registry_path)
+    resolved_attack_quality_registry_path = resolve_path(
+        root_path,
+        attack_quality_registry_path
+        or (
+            Path("outputs")
+            / "image_only_dataset_runtime"
+            / resolved_paper_run_name
+            / "attack_conditioned_quality_image_records.jsonl"
+        ),
+    )
     formal_feature_source_path = (
         resolve_path(root_path, formal_feature_records_path)
         if formal_feature_records_path
@@ -1452,6 +1481,9 @@ def write_dataset_level_quality_outputs(
         resolve_path(root_path, path) for path in normalize_path_values(image_search_roots)
     )
     registry_rows = read_jsonl_rows(resolved_registry_path)
+    attack_quality_registry_rows = read_jsonl_rows(
+        resolved_attack_quality_registry_path
+    )
     canonical_prompt_ids = canonical_prompt_ids_for_paper_run(
         root_path=root_path,
         prompt_set=paper_run.prompt_set,
@@ -1467,9 +1499,25 @@ def write_dataset_level_quality_outputs(
     records = build_dataset_quality_image_records(registry_rows, root_path)
     if len(records) != expected_prompt_count:
         raise ValueError("数据集级质量 records 数量必须恰好等于当前 Prompt 数量")
+    attack_quality_pair_rows = attack_quality_dataset_image_records(
+        attack_quality_registry_rows
+    )
+    attack_quality_pair_records = as_dataset_quality_namespaces(
+        attack_quality_pair_rows
+    )
+    expected_attack_quality_record_count = (
+        int(build_group_split_counts(expected_prompt_count)["test"])
+        * sum(attack.enabled for attack in default_attack_configs())
+    )
+    if attack_quality_registry_rows and (
+        len(attack_quality_registry_rows) != expected_attack_quality_record_count
+        or len(attack_quality_pair_records)
+        != expected_attack_quality_record_count
+    ):
+        raise ValueError("逐攻击四图质量记录未精确覆盖完整 test Prompt 与攻击集合")
     materialized_root = resolved_output_dir / "materialized_image_inputs"
     materialized_records = materialize_images_from_input_packages(
-        records=records,
+        records=(*records, *attack_quality_pair_records),
         materialized_root=materialized_root,
         input_package_paths=resolved_input_package_paths,
     )
@@ -1574,6 +1622,143 @@ def write_dataset_level_quality_outputs(
         formal_min_sample_count=resolved_formal_min_sample_count,
     )
 
+    attack_quality_output_dir = (
+        resolved_output_dir / "attack_conditioned_quality"
+    )
+    attack_quality_output_dir.mkdir(parents=True, exist_ok=True)
+    attack_quality_records_path = (
+        attack_quality_output_dir
+        / "attack_conditioned_quality_image_records.jsonl"
+    )
+    attack_quality_pair_records_path = (
+        attack_quality_output_dir
+        / "attack_conditioned_quality_pair_records.jsonl"
+    )
+    attack_quality_inception_feature_records_path = (
+        attack_quality_output_dir
+        / "attack_conditioned_quality_inception_feature_records.jsonl"
+    )
+    paired_quality_clip_feature_records_path = (
+        attack_quality_output_dir / "paired_quality_clip_feature_records.jsonl"
+    )
+    paired_quality_metric_records_path = (
+        attack_quality_output_dir / "paired_quality_metric_records.jsonl"
+    )
+    attack_quality_inception_feature_rows = read_formal_feature_rows(
+        attack_quality_inception_feature_records_path
+    )
+    if (
+        auto_extract_formal_features
+        and attack_quality_pair_records
+        and not attack_quality_inception_feature_rows
+    ):
+        attack_quality_inception_feature_rows = (
+            extract_formal_inception_feature_rows(
+                records=attack_quality_pair_records,
+                root_path=root_path,
+                image_search_roots=all_image_search_roots,
+                output_path=attack_quality_inception_feature_records_path,
+                device_name=inception_device_name,
+                batch_size=inception_batch_size,
+            )
+        )
+    write_canonical_formal_feature_records(
+        attack_quality_inception_feature_records_path,
+        attack_quality_inception_feature_rows,
+    )
+    paired_quality_clip_feature_rows = read_formal_feature_rows(
+        paired_quality_clip_feature_records_path
+    )
+    all_paired_quality_records = (*records, *attack_quality_pair_records)
+    if (
+        auto_extract_formal_features
+        and all_paired_quality_records
+        and not paired_quality_clip_feature_rows
+    ):
+        paired_quality_clip_feature_rows = extract_formal_clip_feature_rows(
+            records=all_paired_quality_records,
+            root_path=root_path,
+            image_search_roots=all_image_search_roots,
+            output_path=paired_quality_clip_feature_records_path,
+            device_name=clip_device_name,
+            batch_size=clip_batch_size,
+        )
+    if paired_quality_clip_feature_rows:
+        paired_quality_clip_feature_rows = list(
+            validate_formal_clip_feature_rows(
+                paired_quality_clip_feature_rows,
+                expected_record_ids=(
+                    record.dataset_quality_record_id
+                    for record in all_paired_quality_records
+                ),
+                expected_code_version=formal_execution_run_lock[
+                    "formal_execution_commit"
+                ],
+            )
+        )
+        paired_quality_metric_records = build_paired_quality_metric_records(
+            records,
+            attack_quality_pair_records,
+            paired_quality_clip_feature_rows,
+            randomization_repeat_id=paper_run.randomization_repeat_id,
+            root_path=root_path,
+            image_search_roots=all_image_search_roots,
+        )
+        paired_quality_metric_records = (
+            validate_paired_quality_metric_records(
+                paired_quality_metric_records,
+                base_records=records,
+                attack_records=attack_quality_pair_records,
+                expected_randomization_repeat_id=(
+                    paper_run.randomization_repeat_id
+                ),
+            )
+        )
+    else:
+        paired_quality_metric_records = ()
+    attack_quality_records_path.write_text(
+        "".join(json_line(row) for row in attack_quality_registry_rows),
+        encoding="utf-8",
+    )
+    attack_quality_pair_records_path.write_text(
+        "".join(json_line(row) for row in attack_quality_pair_rows),
+        encoding="utf-8",
+    )
+    paired_quality_clip_feature_records_path.write_text(
+        "".join(json_line(row) for row in paired_quality_clip_feature_rows),
+        encoding="utf-8",
+    )
+    paired_quality_metric_records_path.write_text(
+        "".join(json_line(row) for row in paired_quality_metric_records),
+        encoding="utf-8",
+    )
+    if attack_quality_inception_feature_rows:
+        validate_inception_feature_provenance_groups(
+            attack_quality_inception_feature_rows
+        )
+    attack_feature_keys = {
+        (
+            str(row.get("dataset_quality_record_id", "")),
+            str(row.get("dataset_quality_image_role", "")),
+        )
+        for row in attack_quality_inception_feature_rows
+    }
+    expected_attack_feature_keys = {
+        (record.dataset_quality_record_id, role)
+        for record in attack_quality_pair_records
+        for role in ("source", "comparison")
+    }
+    attack_conditioned_quality_component_ready = bool(
+        attack_quality_registry_rows
+        and len(attack_quality_registry_rows)
+        == expected_attack_quality_record_count
+        and attack_feature_keys == expected_attack_feature_keys
+        and len(paired_quality_metric_records)
+        == expected_prompt_count + expected_attack_quality_record_count
+        and len(paired_quality_clip_feature_rows)
+        == 2 * (expected_prompt_count + expected_attack_quality_record_count)
+    )
+
 
     records_path = resolved_output_dir / "dataset_quality_image_records.jsonl"
     image_resolution_records_path = resolved_output_dir / "dataset_quality_image_resolution_records.jsonl"
@@ -1642,6 +1827,54 @@ def write_dataset_level_quality_outputs(
             resolved_registry_path,
             root_path,
         ),
+        "attack_conditioned_quality_registry_path": relative_or_absolute(
+            resolved_attack_quality_registry_path,
+            root_path,
+        ),
+        "attack_conditioned_quality_image_records_path": (
+            relative_or_absolute(attack_quality_records_path, root_path)
+        ),
+        "attack_conditioned_quality_pair_records_path": (
+            relative_or_absolute(
+                attack_quality_pair_records_path,
+                root_path,
+            )
+        ),
+        "attack_conditioned_quality_inception_feature_records_path": (
+            relative_or_absolute(
+                attack_quality_inception_feature_records_path,
+                root_path,
+            )
+        ),
+        "paired_quality_clip_feature_records_path": relative_or_absolute(
+            paired_quality_clip_feature_records_path,
+            root_path,
+        ),
+        "paired_quality_metric_records_path": relative_or_absolute(
+            paired_quality_metric_records_path,
+            root_path,
+        ),
+        "attack_conditioned_quality_estimand": (
+            load_attack_conditioned_quality_estimand()
+        ),
+        "expected_attack_conditioned_quality_record_count": (
+            expected_attack_quality_record_count
+        ),
+        "attack_conditioned_quality_record_count": len(
+            attack_quality_registry_rows
+        ),
+        "attack_conditioned_quality_feature_record_count": len(
+            attack_quality_inception_feature_rows
+        ),
+        "paired_quality_clip_feature_record_count": len(
+            paired_quality_clip_feature_rows
+        ),
+        "paired_quality_metric_record_count": len(
+            paired_quality_metric_records
+        ),
+        "attack_conditioned_quality_component_ready": (
+            attack_conditioned_quality_component_ready
+        ),
         "dataset_quality_metrics_path": relative_or_absolute(metrics_path, root_path),
         "dataset_quality_formal_metrics_path": relative_or_absolute(metrics_path, root_path),
         "dataset_quality_image_resolution_records_path": relative_or_absolute(image_resolution_records_path, root_path),
@@ -1686,7 +1919,10 @@ def write_dataset_level_quality_outputs(
                 else base_summary.get("formal_fid_kid_component_blocker", "formal_fid_kid_not_measured")
             )
         ),
-        "repeat_component_ready": formal_component_ready,
+        "repeat_component_ready": bool(
+            formal_component_ready
+            and attack_conditioned_quality_component_ready
+        ),
         "randomization_aggregate_ready": False,
         "supports_paper_claim": False,
     }
@@ -1718,6 +1954,13 @@ def write_dataset_level_quality_outputs(
     summary_path.write_text(stable_json_text(summary), encoding="utf-8")
 
     input_paths = [relative_or_absolute(resolved_registry_path, root_path)] if resolved_registry_path.exists() else []
+    if resolved_attack_quality_registry_path.exists():
+        input_paths.append(
+            relative_or_absolute(
+                resolved_attack_quality_registry_path,
+                root_path,
+            )
+        )
     input_paths.extend(relative_or_absolute(path, root_path) for path in resolved_input_package_paths)
     if formal_feature_source_path.exists() and formal_feature_source_path != resolved_formal_feature_records_path:
         input_paths.append(relative_or_absolute(formal_feature_source_path, root_path))
@@ -1733,6 +1976,11 @@ def write_dataset_level_quality_outputs(
             image_resolution_records_path,
             formal_feature_import_report_path,
             resolved_formal_feature_records_path,
+            attack_quality_records_path,
+            attack_quality_pair_records_path,
+            attack_quality_inception_feature_records_path,
+            paired_quality_clip_feature_records_path,
+            paired_quality_metric_records_path,
             metrics_path,
             summary_path,
             *materialized_image_paths,
@@ -1769,6 +2017,26 @@ def write_dataset_level_quality_outputs(
                 ),
             },
             "records_digest": build_stable_digest([record.to_dict() for record in records]),
+            "attack_conditioned_quality_records_digest": build_stable_digest(
+                attack_quality_registry_rows
+            ),
+            "attack_conditioned_quality_pair_records_digest": (
+                build_stable_digest(attack_quality_pair_rows)
+            ),
+            "attack_conditioned_quality_inception_feature_records_digest": (
+                build_stable_digest(
+                    attack_quality_inception_feature_rows
+                )
+            ),
+            "paired_quality_clip_feature_records_digest": build_stable_digest(
+                paired_quality_clip_feature_rows
+            ),
+            "paired_quality_metric_records_digest": build_stable_digest(
+                paired_quality_metric_records
+            ),
+            "attack_conditioned_quality_component_ready": (
+                attack_conditioned_quality_component_ready
+            ),
             "image_resolution_records_digest": build_stable_digest(image_resolution_records),
             "formal_feature_import_report_digest": build_stable_digest(formal_feature_payload["report"]),
             "formal_feature_records_sha256": formal_feature_records_sha256,
@@ -1819,6 +2087,11 @@ def package_dataset_level_quality_outputs(
             "dataset_quality_formal_feature_import_report.json",
             "dataset_quality_metrics.csv",
             "dataset_quality_summary.json",
+            "attack_conditioned_quality/attack_conditioned_quality_image_records.jsonl",
+            "attack_conditioned_quality/attack_conditioned_quality_pair_records.jsonl",
+            "attack_conditioned_quality/attack_conditioned_quality_inception_feature_records.jsonl",
+            "attack_conditioned_quality/paired_quality_clip_feature_records.jsonl",
+            "attack_conditioned_quality/paired_quality_metric_records.jsonl",
             "manifest.local.json",
         )
     )
@@ -1885,6 +2158,124 @@ def package_dataset_level_quality_outputs(
         for field_name in SCIENTIFIC_UNIT_PROVENANCE_AGGREGATE_FIELDS
     )
     manifest_config = manifest.get("config", {})
+    attack_quality_dir = source_dir / "attack_conditioned_quality"
+    packaged_attack_quality_records = read_jsonl_rows(
+        attack_quality_dir / "attack_conditioned_quality_image_records.jsonl"
+    )
+    packaged_attack_quality_pair_rows = read_jsonl_rows(
+        attack_quality_dir / "attack_conditioned_quality_pair_records.jsonl"
+    )
+    rebuilt_attack_quality_pair_rows = attack_quality_dataset_image_records(
+        packaged_attack_quality_records
+    )
+    packaged_attack_quality_pairs = as_dataset_quality_namespaces(
+        packaged_attack_quality_pair_rows
+    )
+    packaged_attack_inception_rows = read_formal_feature_rows(
+        attack_quality_dir
+        / "attack_conditioned_quality_inception_feature_records.jsonl"
+    )
+    packaged_clip_rows = read_formal_feature_rows(
+        attack_quality_dir / "paired_quality_clip_feature_records.jsonl"
+    )
+    packaged_paired_metric_rows = read_jsonl_rows(
+        attack_quality_dir / "paired_quality_metric_records.jsonl"
+    )
+    expected_test_prompt_ids = tuple(
+        record.prompt_id
+        for record in apply_split_assignments(
+            build_prompt_records(
+                paper_run.prompt_set,
+                read_prompt_file(root_path / paper_run.prompt_file),
+            )
+        )
+        if record.split == "test"
+    )
+    registered_attack_ids = tuple(
+        sorted(
+            attack.attack_id
+            for attack in default_attack_configs()
+            if attack.enabled
+        )
+    )
+    expected_attack_keys = {
+        (prompt_id, attack_id)
+        for prompt_id in expected_test_prompt_ids
+        for attack_id in registered_attack_ids
+    }
+    actual_attack_keys = {
+        (str(row.get("prompt_id", "")), str(row.get("attack_id", "")))
+        for row in packaged_attack_quality_pair_rows
+    }
+    expected_attack_feature_keys = {
+        (str(row["dataset_quality_record_id"]), role)
+        for row in packaged_attack_quality_pair_rows
+        for role in ("source", "comparison")
+    }
+    actual_attack_feature_keys = {
+        (
+            str(row.get("dataset_quality_record_id", "")),
+            str(row.get("dataset_quality_image_role", "")),
+        )
+        for row in packaged_attack_inception_rows
+    }
+    if packaged_attack_inception_rows:
+        validate_inception_feature_provenance_groups(
+            packaged_attack_inception_rows
+        )
+    packaged_clip_rows = list(
+        validate_formal_clip_feature_rows(
+            packaged_clip_rows,
+            expected_record_ids=(
+                record.dataset_quality_record_id
+                for record in (
+                    *packaged_quality_records,
+                    *packaged_attack_quality_pairs,
+                )
+            ),
+            expected_code_version=str(manifest.get("code_version", "")),
+        )
+    )
+    packaged_paired_metric_rows = list(
+        validate_paired_quality_metric_records(
+            packaged_paired_metric_rows,
+            base_records=packaged_quality_records,
+            attack_records=packaged_attack_quality_pairs,
+            expected_randomization_repeat_id=(
+                paper_run.randomization_repeat_id
+            ),
+        )
+    )
+    attack_quality_contract_ready = all(
+        (
+            packaged_attack_quality_pair_rows
+            == list(rebuilt_attack_quality_pair_rows),
+            actual_attack_keys == expected_attack_keys,
+            actual_attack_feature_keys == expected_attack_feature_keys,
+            len(packaged_attack_quality_records) == len(expected_attack_keys),
+            len(packaged_paired_metric_rows)
+            == expected_prompt_count + len(expected_attack_keys),
+            len(packaged_clip_rows)
+            == 2 * (expected_prompt_count + len(expected_attack_keys)),
+            summary.get("attack_conditioned_quality_component_ready") is True,
+            manifest_config.get("attack_conditioned_quality_component_ready")
+            is True,
+            manifest_config.get("attack_conditioned_quality_records_digest")
+            == build_stable_digest(packaged_attack_quality_records),
+            manifest_config.get(
+                "attack_conditioned_quality_pair_records_digest"
+            )
+            == build_stable_digest(packaged_attack_quality_pair_rows),
+            manifest_config.get(
+                "attack_conditioned_quality_inception_feature_records_digest"
+            )
+            == build_stable_digest(packaged_attack_inception_rows),
+            manifest_config.get("paired_quality_clip_feature_records_digest")
+            == build_stable_digest(packaged_clip_rows),
+            manifest_config.get("paired_quality_metric_records_digest")
+            == build_stable_digest(packaged_paired_metric_rows),
+        )
+    )
     expected_metric_protocol = formal_dataset_quality_metric_protocol()
     expected_kid_effective_subset_size = min(
         int(expected_metric_protocol["kid_subset_size"]),
@@ -2004,6 +2395,7 @@ def package_dataset_level_quality_outputs(
             feature_contract_ready,
             image_resolution_contract_ready,
             metric_protocol_ready,
+            attack_quality_contract_ready,
         )
     ):
         raise RuntimeError("数据集级质量身份、精确 Prompt/特征覆盖或 ready 门禁未通过")
@@ -2086,6 +2478,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="clean/watermarked 质量图像 registry 路径; 默认读取当前论文层级主方法 registry。",
     )
     parser.add_argument(
+        "--attack-quality-registry-path",
+        default=None,
+        help="四图逐攻击质量 registry 路径; 默认读取当前论文层级主方法记录。",
+    )
+    parser.add_argument(
         "--image-search-root",
         action="append",
         default=[],
@@ -2115,6 +2512,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--inception-device-name", default=None, help="正式 Inception 特征提取设备。")
     parser.add_argument("--inception-batch-size", type=int, default=32, help="正式 Inception 特征 batch 大小。")
+    parser.add_argument("--clip-device-name", default=None, help="正式 CLIP 特征提取设备。")
+    parser.add_argument("--clip-batch-size", type=int, default=32, help="正式 CLIP 特征 batch 大小。")
     return parser
 
 
@@ -2128,6 +2527,7 @@ def main() -> None:
         target_fpr=paper_run.target_fpr,
         root=args.root,
         quality_image_registry_path=args.quality_image_registry_path,
+        attack_quality_registry_path=args.attack_quality_registry_path,
         image_search_roots=args.image_search_root,
         input_package_paths=args.input_package_path,
         formal_feature_records_path=args.formal_feature_records_path,
@@ -2135,6 +2535,8 @@ def main() -> None:
         auto_extract_formal_features=args.auto_extract_formal_features,
         inception_device_name=args.inception_device_name,
         inception_batch_size=args.inception_batch_size,
+        clip_device_name=args.clip_device_name,
+        clip_batch_size=args.clip_batch_size,
     )
     print(stable_json_text(manifest), end="")
 

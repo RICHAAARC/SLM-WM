@@ -15,6 +15,14 @@ from experiments.protocol.dataset_quality import (
 from experiments.protocol.formal_randomization import (
     formal_randomization_repeat_ids,
 )
+from experiments.protocol.attacks import (
+    attack_config_digest,
+    default_attack_configs,
+)
+from experiments.artifacts.paired_quality_outputs import (
+    FORMAL_CLIP_FEATURE_BACKEND,
+    PAIRED_QUALITY_METRIC_RECORD_SCHEMA,
+)
 from main.core.digest import build_stable_digest
 from paper_experiments.analysis import randomization_dataset_quality as analysis
 
@@ -235,6 +243,232 @@ def test_exact9_quality_preserves_measured_zero_difference_result(
     assert metric_by_name["fid"] == pytest.approx(0.0, abs=1e-12)
     assert metric_by_name["kid_mean"] <= 0.0
     assert metric_by_name["kid_std"] == 0.0
+
+
+def test_exact9_raw_quality_producer_records_close_all_quality_decisions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """真实格式原始记录必须直接形成逐攻击及跨攻击支持结论."""
+
+    prompt_ids, memberships, features = _quality_evidence()
+    source_features = {
+        str(row["dataset_quality_record_id"]): list(row["feature_vector"])
+        for row in features
+        if row["dataset_quality_image_role"] == "source"
+    }
+    for row in features:
+        if row["dataset_quality_image_role"] == "comparison":
+            row["feature_vector"] = list(
+                source_features[str(row["dataset_quality_record_id"])]
+            )
+
+    test_prompt_ids = prompt_ids[-34:]
+    attack_configs = tuple(
+        config for config in default_attack_configs() if config.enabled
+    )
+    attack_memberships: list[dict[str, object]] = []
+    attack_features: list[dict[str, object]] = []
+    paired_metrics: list[dict[str, object]] = []
+    clip_features: list[dict[str, object]] = []
+    clip_vector = [1.0, 0.0, 0.0]
+
+    def add_clip_pair(
+        record_id: str,
+        source_digest: str,
+        comparison_digest: str,
+    ) -> None:
+        """为一个图像对补齐可复算的归一化 CLIP 原始向量."""
+
+        for role, image_digest in (
+            ("source", source_digest),
+            ("comparison", comparison_digest),
+        ):
+            clip_features.append(
+                {
+                    "dataset_quality_record_id": record_id,
+                    "dataset_quality_image_role": role,
+                    "image_digest": image_digest,
+                    "feature_backend": FORMAL_CLIP_FEATURE_BACKEND,
+                    "feature_dimension": 3,
+                    "feature_vector": list(clip_vector),
+                    "supports_paper_claim": False,
+                }
+            )
+
+    def add_metric(
+        *,
+        repeat_id: str,
+        prompt_id: str,
+        attack_id: str,
+        record_id: str,
+    ) -> None:
+        """补齐一个 base 或注册攻击配对的 SSIM/CLIP 原始观测."""
+
+        scope = "base" if attack_id == "none" else "registered_attack"
+        core = {
+            "record_schema": PAIRED_QUALITY_METRIC_RECORD_SCHEMA,
+            "dataset_quality_record_id": record_id,
+            "randomization_repeat_id": repeat_id,
+            "prompt_id": prompt_id,
+            "estimand_scope": scope,
+            "sample_role": (
+                "base_quality_pair"
+                if scope == "base"
+                else "matched_attack_quality_pair"
+            ),
+            "attack_id": attack_id,
+            "paired_ssim": 1.0,
+            "clip_cosine": 1.0,
+            "clip_source_feature_digest": build_stable_digest(clip_vector),
+            "clip_comparison_feature_digest": build_stable_digest(
+                clip_vector
+            ),
+            "supports_paper_claim": False,
+        }
+        digest = build_stable_digest(core)
+        paired_metrics.append(
+            {
+                "paired_quality_metric_record_id": (
+                    f"paired_quality_metric_{digest[:16]}"
+                ),
+                "paired_quality_metric_record_digest": digest,
+                **core,
+            }
+        )
+
+    membership_by_key = {
+        (
+            str(row["randomization_repeat_id"]),
+            str(row["prompt_id"]),
+        ): row
+        for row in memberships
+    }
+    for repeat_id in formal_randomization_repeat_ids():
+        for prompt_id in prompt_ids:
+            base = membership_by_key[(repeat_id, prompt_id)]
+            base_record_id = str(base["dataset_quality_record_id"])
+            add_clip_pair(
+                base_record_id,
+                str(base["source_image_digest"]),
+                str(base["comparison_image_digest"]),
+            )
+            add_metric(
+                repeat_id=repeat_id,
+                prompt_id=prompt_id,
+                attack_id="none",
+                record_id=base_record_id,
+            )
+
+        for prompt_index, prompt_id in enumerate(test_prompt_ids):
+            for attack_index, attack in enumerate(attack_configs):
+                source_digest = build_stable_digest(
+                    {
+                        "repeat_id": repeat_id,
+                        "prompt_id": prompt_id,
+                        "attack_id": attack.attack_id,
+                        "role": "source",
+                    }
+                )
+                comparison_digest = build_stable_digest(
+                    {
+                        "repeat_id": repeat_id,
+                        "prompt_id": prompt_id,
+                        "attack_id": attack.attack_id,
+                        "role": "comparison",
+                    }
+                )
+                dataset_core = {
+                    "run_id": f"{repeat_id}:{prompt_id}",
+                    "prompt_id": prompt_id,
+                    "attack_name": attack.attack_id,
+                    "image_pair_index": (
+                        prompt_index * len(attack_configs) + attack_index
+                    ),
+                    "image_pair_role": (
+                        "matched_attack_clean_to_watermarked"
+                    ),
+                    "source_image_path": (
+                        f"images/{repeat_id}/{prompt_id}/"
+                        f"{attack.attack_id}_source.png"
+                    ),
+                    "source_image_digest": source_digest,
+                    "comparison_image_path": (
+                        f"images/{repeat_id}/{prompt_id}/"
+                        f"{attack.attack_id}_comparison.png"
+                    ),
+                    "comparison_image_digest": comparison_digest,
+                    "feature_backend": FORMAL_FEATURE_BACKEND,
+                    "supports_paper_claim": False,
+                }
+                dataset_digest = build_stable_digest(dataset_core)
+                record_id = f"dataset_quality_record_{dataset_digest[:16]}"
+                membership = {
+                    "dataset_quality_record_id": record_id,
+                    "dataset_quality_record_digest": dataset_digest,
+                    "randomization_repeat_id": repeat_id,
+                    "attack_id": attack.attack_id,
+                    "attack_config_digest": attack_config_digest(attack),
+                    "attack_seed_random": 3000 + attack_index,
+                    **dataset_core,
+                }
+                attack_memberships.append(membership)
+                vector = [
+                    prompt_index / 34.0,
+                    formal_randomization_repeat_ids().index(repeat_id) / 9.0,
+                    (attack_index + 1) / len(attack_configs),
+                ]
+                for role, image_digest in (
+                    ("source", source_digest),
+                    ("comparison", comparison_digest),
+                ):
+                    attack_features.append(
+                        {
+                            "dataset_quality_record_id": record_id,
+                            "dataset_quality_image_role": role,
+                            "image_digest": image_digest,
+                            "feature_backend": FORMAL_FEATURE_BACKEND,
+                            "feature_dimension": 3,
+                            "feature_vector": list(vector),
+                            "supports_paper_claim": False,
+                        }
+                    )
+                add_clip_pair(record_id, source_digest, comparison_digest)
+                add_metric(
+                    repeat_id=repeat_id,
+                    prompt_id=prompt_id,
+                    attack_id=attack.attack_id,
+                    record_id=record_id,
+                )
+
+    monkeypatch.setattr(analysis, "FORMAL_FEATURE_DIMENSION", 3)
+    monkeypatch.setattr(analysis, "FORMAL_CLIP_FEATURE_DIMENSION", 3)
+    result = analysis.rebuild_randomization_dataset_quality_statistics(
+        features,
+        memberships,
+        paper_run_name="probe_paper",
+        target_fpr=0.1,
+        expected_prompt_ids=prompt_ids,
+        paired_quality_metric_records=paired_metrics,
+        attack_membership_records=attack_memberships,
+        attack_feature_records=attack_features,
+        clip_feature_records=clip_features,
+        expected_attack_prompt_ids=test_prompt_ids,
+    )
+
+    assert result.summary["attack_conditioned_quality_statistics_ready"] is True
+    assert result.summary["quality_preservation_claim_decision"][
+        "decision"
+    ] == "supported"
+    assert result.summary["cross_attack_quality_decision"]["decision"] == (
+        "supported"
+    )
+    assert all(
+        record["decision"] == "supported"
+        for record in result.summary[
+            "per_attack_quality_decisions"
+        ].values()
+    )
+    assert result.summary["supports_paper_claim"] is True
 
 
 @pytest.mark.parametrize(
