@@ -321,6 +321,7 @@ def test_paper_artifact_rebuild_package_includes_full_experiment_layer(tmp_path:
     assert manifest["required_entrypoints"] == [
         "scripts/validate_extracted_package.py",
         "scripts/run_gpu_server_result_closure.py",
+        "scripts/write_paper_profile_protocol_isomorphism_report.py",
     ]
 
 
@@ -347,6 +348,10 @@ def test_paper_experiment_execution_package_excludes_colab_and_tests(
         "scripts/run_gpu_server_result_closure.py"
         in manifest["required_entrypoints"]
     )
+    assert (
+        "scripts/write_paper_profile_protocol_isomorphism_report.py"
+        in manifest["required_entrypoints"]
+    )
     assert manifest["standalone_repository"] is True
     assert manifest["complete_dependency_locks_required"] is True
 
@@ -365,6 +370,10 @@ def test_standalone_profiles_require_complete_locks_and_real_entrypoints() -> No
         assert "scripts/validate_extracted_package.py" in profile.required_entrypoints
         assert (
             "scripts/run_gpu_server_result_closure.py"
+            in profile.required_entrypoints
+        )
+        assert (
+            "scripts/write_paper_profile_protocol_isomorphism_report.py"
             in profile.required_entrypoints
         )
         assert "scripts/paper_result_closure.py" not in profile.required_entrypoints

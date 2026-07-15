@@ -31,6 +31,8 @@ python -I validate_core_method_package.py --root .
 
 该 profile 包含核心方法、实验协议、论文分析、重建脚本、配置和必要文档, 但不包含外部 baseline 源码、开发测试、`paper_workflow/`、Notebook 或 Colab / Drive 包装。抽离命令会为该包创建独立 Git 根提交, 因而可在脱离开发仓库后使用自己的 clean detached commit 作为正式代码身份。
 
+该包的必需入口同时包括 `scripts/run_gpu_server_result_closure.py` 和 `scripts/write_paper_profile_protocol_isomorphism_report.py`。前者从精确9重复聚合包重建论文统计与闭合结果, 后者从 probe 闭合报告重建三种运行规模的协议同构与流程迁移结论；两者都不导入 Notebook 或 Colab helper。
+
 ## `paper_experiment_execution_package`
 
 用途: 在独立 CPU 或 GPU 运行环境中执行 probe_paper、pilot_paper 或 full_paper 的同一正式实验协议。三个论文运行层级只改变 Prompt / 样本数量和统计强度, 不改变方法、baseline、攻击、检测、固定 FPR 或证据闭合要求。
@@ -46,6 +48,8 @@ python -I validate_core_method_package.py --root .
 - 独立执行所需 README、重建文档、`.gitignore` 与 `.gitattributes`。
 
 该 profile 排除 `paper_workflow/`、Notebook、Colab / Drive 包装、开发 harness、开发测试、运行产物和第三方 `source/` 缓存。官方源码由 runner 按固定 URL 与 commit 获取。
+
+独立服务器执行面以 `scripts/run_formal_workflow_host.py` 作为 clean detached checkout 的精确父环境入口, 再调用 `scripts/formal_workflow_entry.py` 和 `scripts/run_gpu_server_workflow.py`。CPU 结果闭合与 profile 同构报告分别使用 `scripts/run_gpu_server_result_closure.py` 和 `scripts/write_paper_profile_protocol_isomorphism_report.py`。这些入口全部列入抽离 manifest 的 `required_entrypoints`, 包内 validator 会在清除 `PYTHONPATH` 后以 `python -I ... --help` 逐一复验其可启动性。
 
 ## 独立执行身份
 

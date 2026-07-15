@@ -111,6 +111,7 @@ PROFILES = {
         required_entrypoints=(
             "scripts/validate_extracted_package.py",
             "scripts/run_gpu_server_result_closure.py",
+            "scripts/write_paper_profile_protocol_isomorphism_report.py",
         ),
     ),
     "paper_experiment_execution_package": ExtractionProfile(
@@ -149,6 +150,7 @@ PROFILES = {
             "scripts/formal_workflow_entry.py",
             "scripts/run_gpu_server_workflow.py",
             "scripts/run_gpu_server_result_closure.py",
+            "scripts/write_paper_profile_protocol_isomorphism_report.py",
         ),
     ),
 }
