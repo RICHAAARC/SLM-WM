@@ -121,7 +121,7 @@ $$
 
 质量后端固定为 [torch-fidelity v0.4.0](https://github.com/toshas/torch-fidelity/tree/v0.4.0), 提取器为 `inception-v3-compat`, 特征层为 `2048`。运行记录必须保存 `feature_extractor_id=torch_fidelity_0_4_0_inception_v3_compat_2048`; 只有 `canonical_formal_feature_extractor_ready=true` 的质量摘要才能通过论文记录门禁。普通 torchvision ImageNet 分类权重或像素直方图不能冒充该后端。
 
-为降低 Colab 上完整特征 JVP/VJP 遇到 fused attention 不支持自动微分的风险，正式运行固定 CLIP 视觉编码器使用 eager attention，VAE 使用 Diffusers `AttnProcessor`。该调整只改变等价注意力算子的运行实现，不更改模型权重或方法目标；实际配置写入 `scientific_autograd_operator_configuration` 环境记录。显存不足、形状错误、CG 不收敛或模型实现错误仍直接失败, 不能通过切换执行方式隐藏。
+为降低 Colab 上完整特征 JVP/VJP 遇到 fused attention 不支持自动微分的风险，正式运行固定 CLIP 视觉编码器使用 eager attention，VAE 使用 Diffusers `AttnProcessor`。SD3.5 pipeline 固定使用 Diffusers 模型级 CPU offload，使三个文本编码器、Transformer 与 VAE 按实际调用顺序进入 GPU，避免无关组件与精确 JVP/VJP、Q/K 梯度计算同时占用显存；该策略不量化权重、不改变 dtype，也不替换任何科学算子。自动微分配置写入 `scientific_autograd_operator_configuration`，设备放置写入 `sd35_device_placement`。显存不足、形状错误、CG 不收敛或模型实现错误仍直接失败, 不能通过切换执行方式隐藏。
 
 ## 七、原子证据与派生结论绑定
 

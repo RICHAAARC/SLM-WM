@@ -3377,6 +3377,9 @@ Notebook 与 repository module 的跨边界数据
 | formal_method_config_schema | protocol | none | true | true | false | 完整方法运行配置规范 payload 的 schema 身份, 当前固定为 slm_wm_formal_method_runtime_config。 |
 | formal_method_config_digest | provenance | none | true | true | false | `configs/model_sd35.yaml` 经完整解析和规范化后的稳定方法配置摘要, 包含预注册注意力配准三项结构常量。 |
 | sd35_operator_identity | provenance | none | true | true | false | 实际加载 SD3.5 pipeline 的组件类、VAE 常量和参数 dtype 联合身份记录。 |
+| sd35_device_placement | environment | none | true | false | false | SD3.5 pipeline 在科学运行中的组件驻留与执行设备配置。 |
+| placement_protocol | environment | none | true | false | false | pipeline 使用的设备放置协议, 当前 CUDA 正式路径为 diffusers_model_cpu_offload。 |
+| offload_device | environment | none | true | false | false | 非当前执行组件的模型权重驻留设备, 模型级 CPU offload 路径固定为 cpu。 |
 | component_class_names | provenance | none | true | true | false | 实际加载 pipeline、VAE、Transformer 与 scheduler 的完整 Python 类名映射。 |
 | latent_component_dtypes | provenance | none | true | true | false | 实际加载 VAE 与 Transformer 参数 dtype 的映射。 |
 | pipeline_class_name | protocol | none | true | true | false | 正式扩散 pipeline 的完整 Python 类名。 |

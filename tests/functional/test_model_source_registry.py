@@ -740,11 +740,10 @@ def test_sd35_pipeline_forwards_registered_revision(monkeypatch: pytest.MonkeyPa
             captured.update(kwargs)
             return cls()
 
-        def to(self, device_name: str) -> "FakePipeline":
-            """记录目标设备并返回自身."""
+        def enable_model_cpu_offload(self, *, device: str) -> None:
+            """记录模型级 CPU offload 的执行设备."""
 
-            captured["device_name"] = device_name
-            return self
+            captured["offload_execution_device"] = device
 
         def set_progress_bar_config(self, disable: bool) -> None:
             """记录进度条配置."""
@@ -792,7 +791,13 @@ def test_sd35_pipeline_forwards_registered_revision(monkeypatch: pytest.MonkeyPa
     assert captured["model_id"] == config.model_id
     assert captured["revision"] == config.model_revision
     assert captured["torch_dtype"] == "float16"
+    assert captured["offload_execution_device"] == "cuda"
     assert runtime_versions["diffusion_model_source"]["revision"] == config.model_revision
+    assert runtime_versions["sd35_device_placement"] == {
+        "placement_protocol": "diffusers_model_cpu_offload",
+        "execution_device": "cuda",
+        "offload_device": "cpu",
+    }
     assert runtime_versions["sd35_operator_identity"] == {
         "component_class_names": {
             "pipeline": config.pipeline_class_name,

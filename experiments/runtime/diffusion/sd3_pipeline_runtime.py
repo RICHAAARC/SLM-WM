@@ -114,7 +114,7 @@ def _validate_loaded_pipeline(config: Any, pipeline: Any) -> dict[str, Any]:
 
 
 def load_pipeline(config: Any) -> tuple[Any, dict[str, Any]]:
-    """加载真实 SD3 系列 pipeline 并移动到目标设备。
+    """加载真实 SD3 系列 pipeline 并建立受治理的设备放置。
 
     `config` 必须提供设备、精确模型 revision、组件类身份、VAE 归一化常量和
     latent dtype。加载后会复验实际对象, 任一身份不匹配都会在科学运行前失败。
@@ -149,14 +149,31 @@ def load_pipeline(config: Any) -> tuple[Any, dict[str, Any]]:
         torch_dtype=dtype,
         token=token,
     )
-    pipeline = pipeline.to(config.device_name)
     operator_identity = _validate_loaded_pipeline(config, pipeline)
+    if config.device_name == "cuda":
+        # 模型级 CPU offload 仅改变组件驻留位置, 不改变权重、dtype 或科学算子。
+        # 该通用运行时策略避免三个文本编码器与需要自动微分的 Transformer
+        # 同时常驻 GPU, 从而为精确 JVP/VJP 和 Q/K 梯度保留显存。
+        pipeline.enable_model_cpu_offload(device=config.device_name)
+        device_placement = {
+            "placement_protocol": "diffusers_model_cpu_offload",
+            "execution_device": config.device_name,
+            "offload_device": "cpu",
+        }
+    else:
+        pipeline = pipeline.to(config.device_name)
+        device_placement = {
+            "placement_protocol": "whole_pipeline_single_device",
+            "execution_device": config.device_name,
+            "offload_device": None,
+        }
     pipeline.set_progress_bar_config(disable=False)
     runtime_versions = {
         **flatten_environment_versions(environment_report),
         "runtime_environment": environment_report,
         "diffusion_model_source": model_source.to_dict(),
         "sd35_operator_identity": operator_identity,
+        "sd35_device_placement": device_placement,
     }
     return pipeline, runtime_versions
 
