@@ -22,6 +22,8 @@ def build_test_scientific_unit_provenance(
     seed: int = 0,
     formal_execution_lock: Mapping[str, Any] | None = None,
     dependency_profile_id: str = "sd35_method_runtime_gpu",
+    dependency_profile_digest: str = "1" * 64,
+    complete_hash_lock_digest: str = "3" * 64,
 ) -> dict[str, Any]:
     """构造可由生产 validator 完整复算的 CUDA 测试来源记录."""
 
@@ -30,9 +32,9 @@ def build_test_scientific_unit_provenance(
     )
     execution_environment = {
         "dependency_profile_id": dependency_profile_id,
-        "dependency_profile_digest": "1" * 64,
+        "dependency_profile_digest": dependency_profile_digest,
         "direct_requirements_digest": "2" * 64,
-        "complete_hash_lock_digest": "3" * 64,
+        "complete_hash_lock_digest": complete_hash_lock_digest,
         "formal_execution_commit": execution_lock["formal_execution_commit"],
         "formal_execution_lock_digest": execution_lock[
             "formal_execution_lock_digest"

@@ -21,7 +21,9 @@
   "primary_sampling_unit": "prompt",
   "protocol_schema": "paper_quality_claim_protocol_v1",
   "semantic_alignment_noninferiority": {
-    "metric_name": "clip_cosine",
-    "minimum_lower_confidence_bound": 0.995
+    "evaluator_id": "independent_visual_semantic_dinov2_base",
+    "metric_name": "independent_semantic_cosine",
+    "minimum_lower_confidence_bound": 0.995,
+    "threshold_basis": "preregistered_unit_vector_angular_bound_equivalent_to_maximum_l2_distance_0_1"
   }
 }

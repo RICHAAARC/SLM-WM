@@ -44,6 +44,9 @@ from paper_experiments.analysis.randomization_dataset_quality import (
     RandomizationDatasetQualityStatistics,
     rebuild_randomization_dataset_quality_statistics,
 )
+from paper_experiments.analysis.paper_profile_protocol_isomorphism import (
+    registered_artifact_contract,
+)
 from paper_experiments.runners.randomization_aggregate_provenance import (
     RandomizationAggregateProvenance,
     validate_randomization_aggregate_provenance,
@@ -138,8 +141,9 @@ def _validated_scientific_provenance(
     *,
     expected_code_version: str,
     clip_feature_records: tuple[dict[str, Any], ...] = (),
+    independent_semantic_feature_records: tuple[dict[str, Any], ...] = (),
 ) -> dict[str, Any]:
-    """分别验证 Inception 和 CLIP 的 CUDA 完成单元来源."""
+    """分别验证 Inception、CLIP 诊断与独立语义特征的 CUDA 来源."""
 
     try:
         inception_references = validate_inception_feature_provenance_groups(
@@ -151,11 +155,23 @@ def _validated_scientific_provenance(
             )
             for record in clip_feature_records
         )
-        references = (*inception_references, *clip_references)
+        independent_references = tuple(
+            validate_scientific_unit_provenance(
+                record["scientific_unit_provenance"]
+            )
+            for record in independent_semantic_feature_records
+        )
+        references = (
+            *inception_references,
+            *clip_references,
+            *independent_references,
+        )
         summary = aggregate_scientific_unit_provenance(
             references,
             expected_reference_count=(
-                len(inception_feature_records) + len(clip_feature_records)
+                len(inception_feature_records)
+                + len(clip_feature_records)
+                + len(independent_semantic_feature_records)
             ),
         )
     except (KeyError, TypeError, ValueError) as exc:
@@ -198,6 +214,7 @@ def _rebuild_randomization_dataset_quality(
     attack_membership_records: list[dict[str, Any]] = []
     attack_feature_records: list[dict[str, Any]] = []
     clip_feature_records: list[dict[str, Any]] = []
+    independent_semantic_feature_records: list[dict[str, Any]] = []
     repeat_source_records: list[dict[str, Any]] = []
 
     with open_randomization_aggregate_record_workspace(source) as workspace:
@@ -284,6 +301,13 @@ def _rebuild_randomization_dataset_quality(
                 package_family="dataset_level_quality",
                 record_role="paired_quality_clip_feature_record",
             )
+            independent_semantic_feature_source = workspace.find_source(
+                randomization_repeat_id=repeat_id,
+                package_family="dataset_level_quality",
+                record_role=(
+                    "paired_quality_independent_semantic_feature_record"
+                ),
+            )
             paired_metric_source = workspace.find_source(
                 randomization_repeat_id=repeat_id,
                 package_family="dataset_level_quality",
@@ -301,6 +325,12 @@ def _rebuild_randomization_dataset_quality(
                 _materialize_json(record)
                 for record in workspace.iter_records(clip_feature_source)
             )
+            repeat_independent_semantic_features = tuple(
+                _materialize_json(record)
+                for record in workspace.iter_records(
+                    independent_semantic_feature_source
+                )
+            )
             repeat_paired_metrics = tuple(
                 _materialize_json(record)
                 for record in workspace.iter_records(paired_metric_source)
@@ -315,6 +345,8 @@ def _rebuild_randomization_dataset_quality(
                 != expected_prompt_count + expected_attack_count
                 or len(repeat_clip_features)
                 != 2 * (expected_prompt_count + expected_attack_count)
+                or len(repeat_independent_semantic_features)
+                != 2 * (expected_prompt_count + expected_attack_count)
             ):
                 raise RandomizationDatasetQualityRunnerError(
                     f"逐攻击质量原始记录数量未匹配正式集合: {repeat_id}"
@@ -322,6 +354,9 @@ def _rebuild_randomization_dataset_quality(
             attack_membership_records.extend(repeat_attack_pairs)
             attack_feature_records.extend(repeat_attack_features)
             clip_feature_records.extend(repeat_clip_features)
+            independent_semantic_feature_records.extend(
+                repeat_independent_semantic_features
+            )
             paired_quality_metric_records.extend(repeat_paired_metrics)
             repeat_source_records[-1].update(
                 {
@@ -333,6 +368,9 @@ def _rebuild_randomization_dataset_quality(
                     ),
                     "clip_quality_feature_source": _source_record(
                         clip_feature_source
+                    ),
+                    "independent_semantic_quality_feature_source": (
+                        _source_record(independent_semantic_feature_source)
                     ),
                     "paired_quality_metric_source": _source_record(
                         paired_metric_source
@@ -396,6 +434,9 @@ def _rebuild_randomization_dataset_quality(
         ),
         expected_code_version=source.common_code_version,
         clip_feature_records=tuple(clip_feature_records),
+        independent_semantic_feature_records=tuple(
+            independent_semantic_feature_records
+        ),
     )
     statistics: RandomizationDatasetQualityStatistics = (
         rebuild_randomization_dataset_quality_statistics(
@@ -408,6 +449,9 @@ def _rebuild_randomization_dataset_quality(
             attack_membership_records=attack_membership_records,
             attack_feature_records=attack_feature_records,
             clip_feature_records=clip_feature_records,
+            independent_semantic_feature_records=(
+                independent_semantic_feature_records
+            ),
             expected_attack_prompt_ids=expected_attack_prompt_ids,
         )
     )
@@ -556,6 +600,15 @@ def write_randomization_dataset_quality_outputs(
         )
     )
     try:
+        artifact_contract = registered_artifact_contract(
+            "randomization_dataset_quality_manifest"
+        )
+        if artifact_contract["writer_module"] != (
+            "paper_experiments.runners.randomization_dataset_quality"
+        ):
+            raise RandomizationDatasetQualityRunnerError(
+                "质量 writer 未匹配唯一正式产物登记"
+            )
         metrics_path = temporary_directory / "fid_kid_metrics.csv"
         membership_path = (
             temporary_directory / "quality_feature_membership.jsonl"
@@ -709,6 +762,11 @@ def write_randomization_dataset_quality_outputs(
                 "paired_quality_clip_feature_records_digest": result.summary[
                     "paired_quality_clip_feature_records_digest"
                 ],
+                "paired_quality_independent_semantic_feature_records_digest": (
+                    result.summary[
+                        "paired_quality_independent_semantic_feature_records_digest"
+                    ]
+                ),
                 "paper_quality_claim_protocol_digest": result.summary[
                     "paper_quality_claim_protocol"
                 ]["paper_quality_claim_protocol_digest"],
@@ -757,6 +815,16 @@ def write_randomization_dataset_quality_outputs(
             + "\n",
             encoding="utf-8",
         )
+        actual_file_names = {
+            path.name
+            for path in temporary_directory.iterdir()
+            if path.is_file()
+        }
+        expected_file_names = set(artifact_contract["file_names"])
+        if actual_file_names != expected_file_names:
+            raise RandomizationDatasetQualityRunnerError(
+                "质量 writer 输出未精确匹配唯一正式产物清单"
+            )
         temporary_directory.rename(destination)
         return destination / manifest_path.name
     except Exception:

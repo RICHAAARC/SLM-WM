@@ -206,6 +206,12 @@ def run_image_only_dataset_workload(
         clip_batch_size=int(
             os.environ.get("SLM_WM_CLIP_BATCH_SIZE", "32")
         ),
+        independent_semantic_device_name=os.environ.get(
+            "SLM_WM_INDEPENDENT_SEMANTIC_DEVICE"
+        ),
+        independent_semantic_batch_size=int(
+            os.environ.get("SLM_WM_INDEPENDENT_SEMANTIC_BATCH_SIZE", "32")
+        ),
     )
     quality_archive_path = (
         None

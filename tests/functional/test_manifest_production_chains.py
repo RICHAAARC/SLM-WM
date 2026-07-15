@@ -41,6 +41,11 @@ from experiments.protocol.detection_key_identity import (
     REGISTERED_WRONG_KEY_ROLE,
     REGISTERED_WATERMARK_KEY_ROLE,
 )
+from experiments.protocol.independent_semantic_quality import (
+    INDEPENDENT_SEMANTIC_FEATURE_BACKEND,
+    INDEPENDENT_SEMANTIC_FEATURE_DIMENSION,
+    load_independent_semantic_quality_evaluator,
+)
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.formal_randomization import (
     formal_generation_seed,
@@ -824,6 +829,54 @@ def test_dataset_quality_writer_and_package_share_manifest_config(
         attack_output_dir / "paired_quality_clip_feature_records.jsonl",
         clip_rows,
     )
+    independent_protocol = load_independent_semantic_quality_evaluator()
+    independent_vector = [1.0] + [0.0] * (
+        INDEPENDENT_SEMANTIC_FEATURE_DIMENSION - 1
+    )
+    independent_provenance = build_test_scientific_unit_provenance(
+        "independent_semantic_manifest_fixture",
+        build_stable_digest({"independent_semantic_manifest_fixture": 1}),
+        formal_execution_lock=FORMAL_EXECUTION_LOCK,
+        dependency_profile_digest=independent_protocol[
+            "dependency_profile_digest"
+        ],
+        complete_hash_lock_digest=independent_protocol[
+            "complete_hash_lock_digest"
+        ],
+    )
+    independent_rows = [
+        {
+            "dataset_quality_record_id": row["dataset_quality_record_id"],
+            "dataset_quality_image_role": row[
+                "dataset_quality_image_role"
+            ],
+            "feature_backend": INDEPENDENT_SEMANTIC_FEATURE_BACKEND,
+            "feature_extractor_id": (
+                f"{independent_protocol['model_contract']['model_id']}@"
+                f"{independent_protocol['model_contract']['model_revision']}"
+            ),
+            "feature_dimension": INDEPENDENT_SEMANTIC_FEATURE_DIMENSION,
+            "feature_layer": "last_hidden_state_cls_token",
+            "feature_normalization": "l2",
+            "image_path": row["image_path"],
+            "image_digest": row["image_digest"],
+            "feature_vector": independent_vector,
+            "feature_vector_digest": build_stable_digest(independent_vector),
+            "independent_semantic_quality_protocol_digest": (
+                independent_protocol[
+                    "independent_semantic_quality_protocol_digest"
+                ]
+            ),
+            "scientific_unit_provenance": independent_provenance,
+            "supports_paper_claim": False,
+        }
+        for row in clip_rows
+    ]
+    _write_jsonl(
+        attack_output_dir
+        / "paired_quality_independent_semantic_feature_records.jsonl",
+        independent_rows,
+    )
 
     monkeypatch.setattr(
         repository_environment,
@@ -893,6 +946,7 @@ def test_dataset_quality_writer_and_package_share_manifest_config(
         base_records: Any,
         attack_records: Any,
         _clip_rows: Any,
+        _independent_semantic_rows: Any,
         *,
         randomization_repeat_id: str,
         **_kwargs: Any,
@@ -958,11 +1012,29 @@ def test_dataset_quality_writer_and_package_share_manifest_config(
                     ),
                     "paired_ssim": 1.0,
                     "clip_cosine": 1.0,
+                    "clip_evidence_role": (
+                        "mechanism_consistency_diagnostic"
+                    ),
                     "clip_source_feature_digest": build_stable_digest(
                         clip_vector
                     ),
                     "clip_comparison_feature_digest": (
                         build_stable_digest(clip_vector)
+                    ),
+                    "independent_semantic_cosine": 1.0,
+                    "independent_semantic_evidence_role": (
+                        "independent_semantic_preservation_primary"
+                    ),
+                    "independent_semantic_source_feature_digest": (
+                        build_stable_digest(independent_vector)
+                    ),
+                    "independent_semantic_comparison_feature_digest": (
+                        build_stable_digest(independent_vector)
+                    ),
+                    "independent_semantic_quality_protocol_digest": (
+                        independent_protocol[
+                            "independent_semantic_quality_protocol_digest"
+                        ]
                     ),
                     "quality_estimand_protocol_digest": estimand[
                         "quality_estimand_protocol_digest"

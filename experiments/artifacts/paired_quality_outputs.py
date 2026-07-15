@@ -33,7 +33,7 @@ from main.core.digest import build_stable_digest
 
 FORMAL_CLIP_FEATURE_BACKEND = "clip_projected_image_embedding"
 FORMAL_CLIP_FEATURE_DIMENSION = 512
-PAIRED_QUALITY_METRIC_RECORD_SCHEMA = "paired_quality_metric_record_v1"
+PAIRED_QUALITY_METRIC_RECORD_SCHEMA = "paired_quality_metric_record_v2"
 
 
 def _stable_json_text(value: Any) -> str:
@@ -426,12 +426,13 @@ def build_paired_quality_metric_records(
     base_records: Iterable[Any],
     attack_records: Iterable[Any],
     clip_feature_rows: Iterable[Mapping[str, Any]],
+    independent_semantic_feature_rows: Iterable[Mapping[str, Any]],
     *,
     randomization_repeat_id: str,
     root_path: Path,
     image_search_roots: tuple[Path, ...],
 ) -> tuple[dict[str, Any], ...]:
-    """从真实图像和 CLIP embedding 形成 base 及逐攻击配对指标记录."""
+    """从真实图像及两套冻结特征形成 base 与逐攻击配对指标记录."""
 
     feature_by_key: dict[tuple[str, str], Mapping[str, Any]] = {}
     for row in clip_feature_rows:
@@ -442,6 +443,15 @@ def build_paired_quality_metric_records(
         if key in feature_by_key:
             raise ValueError("CLIP feature 身份重复")
         feature_by_key[key] = row
+    independent_feature_by_key: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for row in independent_semantic_feature_rows:
+        key = (
+            str(row.get("dataset_quality_record_id", "")),
+            str(row.get("dataset_quality_image_role", "")),
+        )
+        if key in independent_feature_by_key:
+            raise ValueError("独立语义 feature 身份重复")
+        independent_feature_by_key[key] = row
     observations = [
         ("base", record) for record in base_records
     ] + [("registered_attack", record) for record in attack_records]
@@ -456,6 +466,17 @@ def build_paired_quality_metric_records(
         )
         if source_feature is None or comparison_feature is None:
             raise ValueError("配对质量记录缺少完整 CLIP feature 对")
+        independent_source_feature = independent_feature_by_key.get(
+            (dataset_record_id, "source")
+        )
+        independent_comparison_feature = independent_feature_by_key.get(
+            (dataset_record_id, "comparison")
+        )
+        if (
+            independent_source_feature is None
+            or independent_comparison_feature is None
+        ):
+            raise ValueError("配对质量记录缺少完整独立语义 feature 对")
         source_path = _resolve_existing_image_path(
             str(_record_value(record, "source_image_path", "")),
             root_path,
@@ -493,6 +514,31 @@ def build_paired_quality_metric_records(
         )
         if not math.isfinite(clip_cosine):
             raise ValueError("CLIP cosine 不能由零范数或非有限特征形成")
+        independent_source_vector = np.asarray(
+            independent_source_feature["feature_vector"],
+            dtype=np.float64,
+        )
+        independent_comparison_vector = np.asarray(
+            independent_comparison_feature["feature_vector"],
+            dtype=np.float64,
+        )
+        independent_denominator = float(
+            np.linalg.norm(independent_source_vector)
+            * np.linalg.norm(independent_comparison_vector)
+        )
+        independent_semantic_cosine = (
+            float(
+                np.dot(
+                    independent_source_vector,
+                    independent_comparison_vector,
+                )
+                / independent_denominator
+            )
+            if independent_denominator > 0.0
+            else math.nan
+        )
+        if not math.isfinite(independent_semantic_cosine):
+            raise ValueError("独立语义 cosine 不能由零范数或非有限特征形成")
         attack_id = (
             "none"
             if estimand_scope == "base"
@@ -538,11 +584,27 @@ def build_paired_quality_metric_records(
             ),
             "paired_ssim": float(quality["ssim"]),
             "clip_cosine": clip_cosine,
+            "clip_evidence_role": "mechanism_consistency_diagnostic",
             "clip_source_feature_digest": build_stable_digest(
                 source_feature["feature_vector"]
             ),
             "clip_comparison_feature_digest": build_stable_digest(
                 comparison_feature["feature_vector"]
+            ),
+            "independent_semantic_cosine": independent_semantic_cosine,
+            "independent_semantic_evidence_role": (
+                "independent_semantic_preservation_primary"
+            ),
+            "independent_semantic_source_feature_digest": build_stable_digest(
+                independent_source_feature["feature_vector"]
+            ),
+            "independent_semantic_comparison_feature_digest": build_stable_digest(
+                independent_comparison_feature["feature_vector"]
+            ),
+            "independent_semantic_quality_protocol_digest": str(
+                independent_source_feature.get(
+                    "independent_semantic_quality_protocol_digest", ""
+                )
             ),
             "quality_estimand_protocol_digest": (
                 load_attack_conditioned_quality_estimand()[
@@ -675,6 +737,24 @@ def validate_paired_quality_metric_records(
             or not isinstance(row.get("clip_cosine"), (int, float))
             or not math.isfinite(float(row["clip_cosine"]))
             or not -1.0 <= float(row["clip_cosine"]) <= 1.0
+            or row.get("clip_evidence_role")
+            != "mechanism_consistency_diagnostic"
+            or not isinstance(
+                row.get("independent_semantic_cosine"), (int, float)
+            )
+            or not math.isfinite(float(row["independent_semantic_cosine"]))
+            or not -1.0 <= float(row["independent_semantic_cosine"]) <= 1.0
+            or row.get("independent_semantic_evidence_role")
+            != "independent_semantic_preservation_primary"
+            or not all(
+                isinstance(row.get(field_name), str)
+                and len(str(row[field_name])) == 64
+                for field_name in (
+                    "independent_semantic_source_feature_digest",
+                    "independent_semantic_comparison_feature_digest",
+                    "independent_semantic_quality_protocol_digest",
+                )
+            )
             or build_stable_digest(digest_payload) != digest
             or row.get("paired_quality_metric_record_id")
             != f"paired_quality_metric_{digest[:16]}"

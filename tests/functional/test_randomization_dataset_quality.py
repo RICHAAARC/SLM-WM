@@ -23,6 +23,10 @@ from experiments.artifacts.paired_quality_outputs import (
     FORMAL_CLIP_FEATURE_BACKEND,
     PAIRED_QUALITY_METRIC_RECORD_SCHEMA,
 )
+from experiments.protocol.independent_semantic_quality import (
+    INDEPENDENT_SEMANTIC_FEATURE_BACKEND,
+    load_independent_semantic_quality_evaluator,
+)
 from main.core.digest import build_stable_digest
 from paper_experiments.analysis import randomization_dataset_quality as analysis
 
@@ -270,7 +274,11 @@ def test_exact9_raw_quality_producer_records_close_all_quality_decisions(
     attack_features: list[dict[str, object]] = []
     paired_metrics: list[dict[str, object]] = []
     clip_features: list[dict[str, object]] = []
+    independent_semantic_features: list[dict[str, object]] = []
     clip_vector = [1.0, 0.0, 0.0]
+    independent_protocol_digest = load_independent_semantic_quality_evaluator()[
+        "independent_semantic_quality_protocol_digest"
+    ]
 
     def add_clip_pair(
         record_id: str,
@@ -291,6 +299,27 @@ def test_exact9_raw_quality_producer_records_close_all_quality_decisions(
                     "feature_backend": FORMAL_CLIP_FEATURE_BACKEND,
                     "feature_dimension": 3,
                     "feature_vector": list(clip_vector),
+                    "supports_paper_claim": False,
+                }
+            )
+            independent_semantic_features.append(
+                {
+                    "dataset_quality_record_id": record_id,
+                    "dataset_quality_image_role": role,
+                    "image_digest": image_digest,
+                    "feature_backend": INDEPENDENT_SEMANTIC_FEATURE_BACKEND,
+                    "feature_extractor_id": (
+                        "facebook/dinov2-base@"
+                        "f9e44c814b77203eaa57a6bdbbd535f21ede1415"
+                    ),
+                    "feature_dimension": 3,
+                    "feature_layer": "last_hidden_state_cls_token",
+                    "feature_normalization": "l2",
+                    "feature_vector": list(clip_vector),
+                    "feature_vector_digest": build_stable_digest(clip_vector),
+                    "independent_semantic_quality_protocol_digest": (
+                        independent_protocol_digest
+                    ),
                     "supports_paper_claim": False,
                 }
             )
@@ -319,9 +348,23 @@ def test_exact9_raw_quality_producer_records_close_all_quality_decisions(
             "attack_id": attack_id,
             "paired_ssim": 1.0,
             "clip_cosine": 1.0,
+            "clip_evidence_role": "mechanism_consistency_diagnostic",
             "clip_source_feature_digest": build_stable_digest(clip_vector),
             "clip_comparison_feature_digest": build_stable_digest(
                 clip_vector
+            ),
+            "independent_semantic_cosine": 1.0,
+            "independent_semantic_evidence_role": (
+                "independent_semantic_preservation_primary"
+            ),
+            "independent_semantic_source_feature_digest": (
+                build_stable_digest(clip_vector)
+            ),
+            "independent_semantic_comparison_feature_digest": (
+                build_stable_digest(clip_vector)
+            ),
+            "independent_semantic_quality_protocol_digest": (
+                independent_protocol_digest
             ),
             "supports_paper_claim": False,
         }
@@ -442,6 +485,11 @@ def test_exact9_raw_quality_producer_records_close_all_quality_decisions(
 
     monkeypatch.setattr(analysis, "FORMAL_FEATURE_DIMENSION", 3)
     monkeypatch.setattr(analysis, "FORMAL_CLIP_FEATURE_DIMENSION", 3)
+    monkeypatch.setattr(
+        analysis,
+        "INDEPENDENT_SEMANTIC_FEATURE_DIMENSION",
+        3,
+    )
     result = analysis.rebuild_randomization_dataset_quality_statistics(
         features,
         memberships,
@@ -452,6 +500,7 @@ def test_exact9_raw_quality_producer_records_close_all_quality_decisions(
         attack_membership_records=attack_memberships,
         attack_feature_records=attack_features,
         clip_feature_records=clip_features,
+        independent_semantic_feature_records=independent_semantic_features,
         expected_attack_prompt_ids=test_prompt_ids,
     )
 

@@ -150,6 +150,7 @@ PROFILES = {
             "scripts/formal_workflow_entry.py",
             "scripts/run_gpu_server_workflow.py",
             "scripts/run_gpu_server_result_closure.py",
+            "scripts/run_gpu_method_qualification.py",
             "scripts/write_paper_profile_protocol_isomorphism_report.py",
         ),
     ),

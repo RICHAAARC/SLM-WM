@@ -23,15 +23,16 @@
 真实攻击图像
 -> 四图身份记录
 -> 攻击后 Inception 特征
--> base 与逐攻击 CLIP 图像 embedding
--> 配对 SSIM 和 CLIP cosine
+-> base 与逐攻击同源 CLIP 诊断 embedding
+-> base 与逐攻击独立 DINOv2 CLS embedding
+-> 配对 SSIM、诊断 CLIP cosine 和独立语义 cosine
 -> 9-repeat 原始记录聚合
 -> Prompt 聚类 bootstrap
 -> 逐攻击质量决策
 -> 跨攻击质量决策
 ```
 
-所有记录必须绑定 Prompt, repeat, 样本角色, 攻击身份, 攻击随机种子, 图像文件 SHA-256, 图像像素 SHA-256, 分辨率, 代码提交和科学依赖 profile. 聚合器从原始向量复算 CLIP cosine, 从 Inception 特征复算 Prompt 条件 KID, 不接受调用方直接注入最终质量决策.
+所有记录必须绑定 Prompt, repeat, 样本角色, 攻击身份, 攻击随机种子, 图像文件 SHA-256, 图像像素 SHA-256, 分辨率, 代码提交和科学依赖 profile. `openai/clip-vit-base-patch32` 与方法语义条件编码器同源, 因而其 cosine 只保留为 `mechanism_consistency_diagnostic`. 正式语义保持主张使用不参与优化或检测的 `facebook/dinov2-base` 冻结 CLS 特征. 模型 ID、精确 revision、预处理、特征层、L2 归一化和完整依赖锁由 `configs/independent_semantic_quality_evaluator.json` 冻结. 聚合器从两套原始向量分别复算 cosine, 但只有独立语义 cosine 进入质量决策; Prompt 条件 KID 仍从 Inception 特征复算. 调用方不得直接注入最终质量决策.
 
 ## 3. baseline 两层字段
 
@@ -80,18 +81,16 @@ baseline_imported_result_ready=false
 
 缺少观测或上限时状态为 `not_evaluated_missing_observation_or_registered_limit`. 超出预算时该门禁失败, 但不得改变 `gpu_operator_preflight_ready`. 资源失败只说明当前设备, 会话长度或调度方案不足, 不说明方法机制不成立.
 
-报告入口为:
+真实单 Prompt 服务器入口为:
 
 ```text
-python scripts/write_gpu_method_qualification_report.py \
-  --runtime-result <单 Prompt runtime_result.json> \
-  --update-records <更新记录 JSONL> \
-  --detection-records <检测记录 JSONL> \
-  --resource-observation <可选资源观测 JSON> \
+python scripts/run_gpu_method_qualification.py \
+  --paper-run-name probe_paper \
+  --prompt-id <受治理 Prompt ID> \
   --registered-budget <可选登记预算 JSON>
 ```
 
-输出固定写入 `outputs/gpu_method_qualification/<run_id>/`. 进程状态码只跟随方法算子门禁, 资源预算结论在报告中独立保存.
+该入口直接调用 `experiments.runners.semantic_watermark_runtime.write_semantic_watermark_runtime_outputs`, 不复制方法实现. 运行结束后自动读取真实更新与检测记录并调用资格化协议. 报告绑定精确 Git commit、依赖 profile 与完整锁、SD3.5/VAE/CLIP revision、Prompt 摘要及运行文件 SHA-256. 输出固定写入 `outputs/gpu_method_qualification/<run_id>/`. 进程状态码只跟随方法算子门禁, 资源预算结论在报告中独立保存. `scripts/write_gpu_method_qualification_report.py` 仅用于对已有真实记录重建报告, 且必须显式提供同一资格化绑定文件.
 
 ## 5. 论文结论边界
 

@@ -206,6 +206,25 @@ def load_paper_profile_protocol_registry(
     }
 
 
+def registered_artifact_contract(
+    artifact_id: str,
+    *,
+    path: str | Path = DEFAULT_PAPER_PROFILE_PROTOCOL_REGISTRY_PATH,
+) -> dict[str, Any]:
+    """从唯一登记表返回一个正式产物契约, 避免消费者复制文件名清单."""
+
+    resolved_id = str(artifact_id).strip()
+    registry = load_paper_profile_protocol_registry(path)
+    matches = [
+        dict(record)
+        for record in registry["artifact_contract"]
+        if record["artifact_id"] == resolved_id
+    ]
+    if len(matches) != 1:
+        raise PaperProfileProtocolError("正式产物契约标识必须唯一存在")
+    return deepcopy(matches[0])
+
+
 def _baseline_protocol_definitions() -> list[dict[str, Any]]:
     """返回主表 baseline 的机制与共同输入协议身份, 不混入运行结果状态。"""
 

@@ -19,6 +19,7 @@
 1. `experiments/runtime/resume_checkpoint.py` 提供通用的逐文件摘要、原子复制、完成单元发布和两阶段恢复原语.该模块不感知 Notebook、Drive 或具体 baseline.
 2. `paper_experiments/runners/persistent_workflow_session.py` 保存7条路由的输出白名单、真实 summary 字段、科学 profile 身份、定时快照和完成态重入门禁.
 3. `scripts/run_gpu_server_workflow.py` 是可脱离 Notebook 的服务器入口.它只传递路由、论文运行层级、正式 commit 和持久化目录.
+4. `scripts/run_gpu_method_qualification.py` 是正式批量运行前的单 Prompt 方法资格化入口.它复用真实主方法 writer, 自动形成方法真实性与资源预算相互独立的报告, 并固定 `supports_paper_claim=false`. Notebook 只能调用该脚本, 不得实现资格化事实或门禁.
 4. `paper_workflow/notebook_utils/notebook_entrypoint.py` 是 Colab 薄入口.它从已配置环境解析 Drive 目录, 调用与服务器相同的持久化会话和 runner.
 5. `.ipynb` 文件只负责挂载 Drive、检出精确提交、准备 CPU 父 profile、检查 GPU 和调用入口, 不包含 checkpoint 或科学算法实现.
 

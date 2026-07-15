@@ -27,6 +27,11 @@ from experiments.protocol.attacks import attack_config_digest, default_attack_co
 from experiments.protocol.attack_conditioned_quality import (
     load_attack_conditioned_quality_estimand,
 )
+from experiments.protocol.independent_semantic_quality import (
+    INDEPENDENT_SEMANTIC_FEATURE_BACKEND,
+    INDEPENDENT_SEMANTIC_FEATURE_DIMENSION,
+    load_independent_semantic_quality_evaluator,
+)
 from experiments.protocol.paper_run_config import (
     RUN_EXPECTED_PROMPT_COUNTS,
     normalize_paper_run_name,
@@ -519,7 +524,7 @@ def _canonical_paired_quality_metric_records(
     expected_prompt_ids: tuple[str, ...],
     expected_attack_prompt_ids: tuple[str, ...],
 ) -> tuple[dict[str, Any], ...]:
-    """验证 base 与逐攻击 SSIM/CLIP 指标的精确观测集合。"""
+    """验证 base 与逐攻击 SSIM、诊断 CLIP 及独立语义指标集合。"""
 
     repeat_ids = formal_randomization_repeat_ids()
     attack_ids = tuple(sorted(_registered_attack_digests()))
@@ -553,6 +558,9 @@ def _canonical_paired_quality_metric_records(
         }
         ssim = record.get("paired_ssim")
         clip_cosine = record.get("clip_cosine")
+        independent_semantic_cosine = record.get(
+            "independent_semantic_cosine"
+        )
         if (
             key not in expected_keys
             or key in by_key
@@ -566,6 +574,13 @@ def _canonical_paired_quality_metric_records(
             or not isinstance(clip_cosine, (int, float))
             or not math.isfinite(float(clip_cosine))
             or not -1.0 <= float(clip_cosine) <= 1.0
+            or record.get("clip_evidence_role")
+            != "mechanism_consistency_diagnostic"
+            or not isinstance(independent_semantic_cosine, (int, float))
+            or not math.isfinite(float(independent_semantic_cosine))
+            or not -1.0 <= float(independent_semantic_cosine) <= 1.0
+            or record.get("independent_semantic_evidence_role")
+            != "independent_semantic_preservation_primary"
             or record.get("supports_paper_claim") is not False
         ):
             raise RandomizationDatasetQualityError(
@@ -665,6 +680,121 @@ def _canonical_clip_feature_records(
             != build_stable_digest(comparison_vector)
         ):
             raise RandomizationDatasetQualityError("CLIP cosine 与原始向量复算结果不一致")
+    return tuple(
+        by_key[(str(membership["dataset_quality_record_id"]), role)]
+        for membership in memberships
+        for role in ("source", "comparison")
+    )
+
+
+def _canonical_independent_semantic_feature_records(
+    records: Iterable[Mapping[str, Any]],
+    *,
+    base_membership_records: tuple[Mapping[str, Any], ...],
+    attack_membership_records: tuple[Mapping[str, Any], ...],
+    paired_metric_records: tuple[Mapping[str, Any], ...],
+) -> tuple[dict[str, Any], ...]:
+    """复算独立 DINOv2 cosine, 并拒绝未绑定冻结协议的特征记录."""
+
+    protocol = load_independent_semantic_quality_evaluator()
+    protocol_digest = protocol["independent_semantic_quality_protocol_digest"]
+    memberships = (*base_membership_records, *attack_membership_records)
+    membership_by_id = {
+        str(record["dataset_quality_record_id"]): record
+        for record in memberships
+    }
+    by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for row_index, raw_record in enumerate(records):
+        record = dict(raw_record)
+        record_id = str(record.get("dataset_quality_record_id", ""))
+        role = str(record.get("dataset_quality_image_role", ""))
+        membership = membership_by_id.get(record_id)
+        key = (record_id, role)
+        vector = record.get("feature_vector")
+        expected_digest = (
+            str(membership[f"{role}_image_digest"])
+            if membership is not None and role in {"source", "comparison"}
+            else ""
+        )
+        if (
+            membership is None
+            or key in by_key
+            or role not in {"source", "comparison"}
+            or record.get("image_digest") != expected_digest
+            or record.get("feature_backend")
+            != INDEPENDENT_SEMANTIC_FEATURE_BACKEND
+            or record.get("feature_extractor_id")
+            != (
+                f"{protocol['model_contract']['model_id']}@"
+                f"{protocol['model_contract']['model_revision']}"
+            )
+            or record.get("feature_dimension")
+            != INDEPENDENT_SEMANTIC_FEATURE_DIMENSION
+            or record.get("feature_layer") != "last_hidden_state_cls_token"
+            or record.get("feature_normalization") != "l2"
+            or record.get("independent_semantic_quality_protocol_digest")
+            != protocol_digest
+            or not isinstance(vector, list)
+            or len(vector) != INDEPENDENT_SEMANTIC_FEATURE_DIMENSION
+            or record.get("feature_vector_digest")
+            != build_stable_digest(vector)
+        ):
+            raise RandomizationDatasetQualityError(
+                f"独立语义特征身份、角色或协议无效: row={row_index}"
+            )
+        array = np.asarray(vector, dtype=np.float64)
+        if (
+            array.ndim != 1
+            or not np.isfinite(array).all()
+            or not math.isclose(
+                float(np.linalg.norm(array)),
+                1.0,
+                rel_tol=1e-5,
+                abs_tol=1e-5,
+            )
+        ):
+            raise RandomizationDatasetQualityError(
+                "独立语义特征必须是有限 L2 归一化向量"
+            )
+        by_key[key] = record
+    expected_keys = {
+        (record_id, role)
+        for record_id in membership_by_id
+        for role in ("source", "comparison")
+    }
+    if set(by_key) != expected_keys:
+        raise RandomizationDatasetQualityError(
+            "独立语义特征未精确覆盖全部 base 和攻击图像对"
+        )
+    for metric in paired_metric_records:
+        record_id = str(metric["dataset_quality_record_id"])
+        source_vector = by_key[(record_id, "source")]["feature_vector"]
+        comparison_vector = by_key[(record_id, "comparison")]["feature_vector"]
+        cosine = float(
+            np.dot(
+                np.asarray(source_vector, dtype=np.float64),
+                np.asarray(comparison_vector, dtype=np.float64),
+            )
+        )
+        if not all(
+            (
+                math.isclose(
+                    cosine,
+                    float(metric["independent_semantic_cosine"]),
+                    rel_tol=1e-7,
+                    abs_tol=1e-7,
+                ),
+                metric.get("independent_semantic_source_feature_digest")
+                == build_stable_digest(source_vector),
+                metric.get("independent_semantic_comparison_feature_digest")
+                == build_stable_digest(comparison_vector),
+                metric.get("independent_semantic_quality_protocol_digest")
+                == protocol_digest,
+            )
+        ):
+            raise RandomizationDatasetQualityError(
+                "独立语义 cosine 与原始 DINOv2 向量复算结果不一致"
+            )
     return tuple(
         by_key[(str(membership["dataset_quality_record_id"]), role)]
         for membership in memberships
@@ -775,6 +905,7 @@ def rebuild_randomization_dataset_quality_statistics(
     attack_membership_records: Iterable[Mapping[str, Any]] = (),
     attack_feature_records: Iterable[Mapping[str, Any]] = (),
     clip_feature_records: Iterable[Mapping[str, Any]] = (),
+    independent_semantic_feature_records: Iterable[Mapping[str, Any]] = (),
     expected_attack_prompt_ids: Iterable[str] = (),
 ) -> RandomizationDatasetQualityStatistics:
     """从9重复原始特征联合重建一次正式 FID/KID 结果."""
@@ -818,6 +949,9 @@ def rebuild_randomization_dataset_quality_statistics(
     raw_attack_membership = tuple(attack_membership_records)
     raw_attack_features = tuple(attack_feature_records)
     raw_clip_features = tuple(clip_feature_records)
+    raw_independent_semantic_features = tuple(
+        independent_semantic_feature_records
+    )
     attack_prompt_ids = tuple(
         str(prompt_id) for prompt_id in expected_attack_prompt_ids
     )
@@ -827,6 +961,7 @@ def rebuild_randomization_dataset_quality_statistics(
             bool(raw_attack_membership),
             bool(raw_attack_features),
             bool(raw_clip_features),
+            bool(raw_independent_semantic_features),
             bool(attack_prompt_ids),
         )
     )
@@ -836,6 +971,7 @@ def rebuild_randomization_dataset_quality_statistics(
             bool(raw_attack_membership),
             bool(raw_attack_features),
             bool(raw_clip_features),
+            bool(raw_independent_semantic_features),
             bool(attack_prompt_ids),
         )
     )
@@ -847,9 +983,11 @@ def rebuild_randomization_dataset_quality_statistics(
     canonical_attack_membership: tuple[dict[str, Any], ...] = ()
     canonical_attack_features: tuple[dict[str, Any], ...] = ()
     canonical_clip_features: tuple[dict[str, Any], ...] = ()
+    canonical_independent_semantic_features: tuple[dict[str, Any], ...] = ()
     attack_prompt_distribution_records: tuple[dict[str, Any], ...] = ()
     paired_perceptual_inference = None
     semantic_alignment_inference = None
+    mechanism_consistency_clip_inference = None
     per_attack_inference = None
     if complete_attack_inputs:
         expected_attack_prompt_count = int(
@@ -882,6 +1020,14 @@ def rebuild_randomization_dataset_quality_statistics(
             attack_membership_records=canonical_attack_membership,
             paired_metric_records=canonical_paired_metrics,
         )
+        canonical_independent_semantic_features = (
+            _canonical_independent_semantic_feature_records(
+                raw_independent_semantic_features,
+                base_membership_records=canonical_membership,
+                attack_membership_records=canonical_attack_membership,
+                paired_metric_records=canonical_paired_metrics,
+            )
+        )
         attack_prompt_distribution_records = (
             _attack_prompt_conditional_kid_records(
                 canonical_attack_features,
@@ -901,11 +1047,20 @@ def rebuild_randomization_dataset_quality_statistics(
         semantic_alignment_inference = build_prompt_cluster_mean_inference(
             _prompt_mean_values(
                 canonical_paired_metrics,
+                value_field="independent_semantic_cosine",
+                attack_id="none",
+                expected_prompt_ids=prompt_ids,
+            ),
+            analysis_id="semantic_alignment_base_independent_semantic_cosine",
+        )
+        mechanism_consistency_clip_inference = build_prompt_cluster_mean_inference(
+            _prompt_mean_values(
+                canonical_paired_metrics,
                 value_field="clip_cosine",
                 attack_id="none",
                 expected_prompt_ids=prompt_ids,
             ),
-            analysis_id="semantic_alignment_base_clip_cosine",
+            analysis_id="mechanism_consistency_base_clip_cosine",
         )
         per_attack_inference = {}
         for attack_id in sorted(_registered_attack_digests()):
@@ -932,11 +1087,14 @@ def rebuild_randomization_dataset_quality_statistics(
                     build_prompt_cluster_mean_inference(
                         _prompt_mean_values(
                             canonical_paired_metrics,
-                            value_field="clip_cosine",
+                            value_field="independent_semantic_cosine",
                             attack_id=attack_id,
                             expected_prompt_ids=attack_prompt_ids,
                         ),
-                        analysis_id=f"attack_clip_cosine:{attack_id}",
+                        analysis_id=(
+                            "attack_independent_semantic_cosine:"
+                            f"{attack_id}"
+                        ),
                     )
                 ),
                 "distributional_preservation_noninferiority": (
@@ -1023,6 +1181,9 @@ def rebuild_randomization_dataset_quality_statistics(
         "paired_quality_clip_feature_records_digest": build_stable_digest(
             canonical_clip_features
         ),
+        "paired_quality_independent_semantic_feature_records_digest": (
+            build_stable_digest(canonical_independent_semantic_features)
+        ),
         "attack_prompt_distribution_records_digest": build_stable_digest(
             attack_prompt_distribution_records
         ),
@@ -1036,6 +1197,9 @@ def rebuild_randomization_dataset_quality_statistics(
         "paired_quality_clip_feature_record_count": len(
             canonical_clip_features
         ),
+        "paired_quality_independent_semantic_feature_record_count": len(
+            canonical_independent_semantic_features
+        ),
         "attack_prompt_distribution_record_count": len(
             attack_prompt_distribution_records
         ),
@@ -1043,6 +1207,9 @@ def rebuild_randomization_dataset_quality_statistics(
         "distributional_preservation_inference": distributional_inference,
         "paired_perceptual_quality_inference": paired_perceptual_inference,
         "semantic_alignment_inference": semantic_alignment_inference,
+        "mechanism_consistency_clip_inference": (
+            mechanism_consistency_clip_inference
+        ),
         "per_attack_quality_inference": per_attack_inference,
         "randomization_dataset_quality_metric_protocol_digest": (
             metric_protocol[

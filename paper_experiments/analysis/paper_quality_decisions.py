@@ -14,6 +14,9 @@ from experiments.protocol.attacks import (
     attack_config_digest,
     default_attack_configs,
 )
+from experiments.protocol.independent_semantic_quality import (
+    load_independent_semantic_quality_evaluator,
+)
 from main.core.digest import build_stable_digest
 from paper_experiments.analysis.paper_claim_decisions import build_claim_decision
 
@@ -81,6 +84,14 @@ def load_paper_quality_claim_protocol(
             rel_tol=0.0,
             abs_tol=1e-12,
         )
+        or semantic.get("metric_name") != "independent_semantic_cosine"
+        or semantic.get("evaluator_id")
+        != "independent_visual_semantic_dinov2_base"
+        or semantic.get("threshold_basis")
+        != (
+            "preregistered_unit_vector_angular_bound_equivalent_to_"
+            "maximum_l2_distance_0_1"
+        )
         or not math.isclose(
             float(
                 distribution.get(
@@ -109,6 +120,9 @@ def load_paper_quality_claim_protocol(
     ]
     resolved = {
         **payload,
+        "independent_semantic_quality_evaluator": (
+            load_independent_semantic_quality_evaluator()
+        ),
         "registered_attack_ids": [row["attack_id"] for row in attack_rows],
         "registered_attack_registry_digest": build_stable_digest(attack_rows),
     }

@@ -3608,13 +3608,20 @@ Notebook 与 repository module 的跨边界数据
 | image_sha256 | provenance | none | true | false | true | 四图嵌套图像身份中的实际文件 SHA-256。 |
 | estimand_scope | protocol | none | true | false | false | 区分 `base` 与 `registered_attack` 配对质量观察总体。 |
 | paired_ssim | metric | none | true | false | true | 同一 Prompt 和 repeat 下 source/comparison 实际持久图像的 SSIM。 |
-| clip_cosine | metric | none | true | false | true | 冻结 CLIP 图像投影 embedding 之间的 cosine。 |
+| clip_cosine | metric | none | true | false | true | 与方法条件编码器同源的冻结 CLIP 图像投影 cosine, 只作为机制一致性诊断, 不独立承担语义保持主张。 |
+| clip_evidence_role | governance | none | true | false | false | 固定为 `mechanism_consistency_diagnostic`, 防止同源 CLIP 指标进入正式语义保持决策。 |
 | clip_source_feature_digest | provenance | none | true | false | true | 配对指标引用的 source CLIP 向量稳定摘要。 |
 | clip_comparison_feature_digest | provenance | none | true | false | true | 配对指标引用的 comparison CLIP 向量稳定摘要。 |
-| paired_quality_metric_record_id | provenance | none | true | false | true | base 或逐攻击 SSIM/CLIP 配对原始记录标识。 |
-| paired_quality_metric_record_digest | provenance | none | true | false | true | 配对质量指标、图像摘要、estimand scope 和 CLIP 向量摘要的稳定摘要。 |
+| independent_semantic_cosine | metric | none | true | false | true | 不参与方法优化或检测的冻结 DINOv2 CLS 特征 cosine, 是正式语义保持决策输入。 |
+| independent_semantic_evidence_role | governance | none | true | false | false | 固定为 `independent_semantic_preservation_primary`, 标记独立语义主张证据职责。 |
+| independent_semantic_source_feature_digest | provenance | none | true | false | true | 配对指标引用的 source DINOv2 CLS 向量稳定摘要。 |
+| independent_semantic_comparison_feature_digest | provenance | none | true | false | true | 配对指标引用的 comparison DINOv2 CLS 向量稳定摘要。 |
+| independent_semantic_quality_protocol_digest | provenance | none | true | true | true | DINOv2 模型 ID、精确 revision、预处理、特征层、归一化和依赖锁的联合稳定摘要。 |
+| paired_quality_independent_semantic_feature_records_digest | provenance | none | false | true | true | 单 repeat 或9-repeat 独立语义原始特征集合的稳定摘要。 |
+| paired_quality_metric_record_id | provenance | none | true | false | true | base 或逐攻击 SSIM、诊断 CLIP 与独立语义配对原始记录标识。 |
+| paired_quality_metric_record_digest | provenance | none | true | false | true | 配对质量指标、图像摘要、estimand scope 及两套冻结特征摘要的稳定摘要。 |
 | attack_prompt_distribution_record_digest | provenance | none | true | false | true | 单一注册攻击和 Prompt 下9个 repeat 的无偏 Prompt 条件 KID 记录摘要。 |
-| attack_conditioned_quality_component_ready | governance | none | false | true | true | 单 repeat 是否完整产生 test Prompt 乘注册攻击的四图、Inception、CLIP 和配对指标证据。 |
+| attack_conditioned_quality_component_ready | governance | none | false | true | true | 单 repeat 是否完整产生 test Prompt 乘注册攻击的四图、Inception、诊断 CLIP、独立 DINOv2 和配对指标证据。 |
 | attack_conditioned_quality_statistics_ready | governance | none | false | true | true | 9-repeat 聚合是否完成逐攻击 Prompt bootstrap 与跨攻击质量决策。 |
 | gpu_operator_preflight_ready | governance | none | false | true | true | 单 Prompt 真实 CUDA 方法算子、数值门禁、三图保持、Q/K 归因和 PRG 固定向量是否全部通过。 |
 | gpu_resource_budget_ready | governance | none | false | true | true | 已登记 GPU 资源上限是否覆盖显存、单 Prompt 时间和估计总 GPU 小时。该字段不改变方法算子结论。 |
@@ -3622,5 +3629,8 @@ Notebook 与 repository module 的跨边界数据
 | known_answer_report_digest | provenance | none | false | true | true | 当前平台重建公开 PRG uniform/Gaussian 固定向量报告的稳定摘要。 |
 | gpu_operator_preflight_report_digest | provenance | none | false | true | true | 不含资源预算判定的方法算子资格化报告摘要。 |
 | gpu_resource_budget_report_digest | provenance | none | false | true | true | 独立资源预算报告摘要。 |
+| qualification_binding_digest | provenance | none | false | true | true | 精确 Git commit、依赖 profile 与完整锁、SD3.5/VAE/CLIP revision、Prompt 输入及真实运行文件摘要的联合稳定摘要。 |
+| runtime_artifact_sha256 | provenance | none | false | true | true | 单 Prompt runtime、更新、检测、图像和 manifest 文件的逐文件 SHA-256 映射。 |
+| registered_over_wrong_key_content_score_gain | metric | none | false | true | true | 同一 watermarked 图像上注册密钥内容分数减 wrong-key 内容分数的单 Prompt 归因增益, 资格化要求严格大于0。 |
 
 `result_status`, `paper_claim_support` 和 `baseline_result_source` 不属于同一层的替代字段. 前两者位于 baseline 来源注册层, 分别表示结果可用状态和来源注册项的论文支持状态; `baseline_result_source` 位于正式结果记录层, 表示具体证据文件或结果包. 两层状态必须交叉一致, 但不得删除或合并字段.

@@ -16,6 +16,7 @@
     "source_path": "clean_image"
   },
   "clip_image_similarity": {
+    "evidence_role": "mechanism_consistency_diagnostic",
     "feature_dtype": "float32",
     "feature_normalization": "l2",
     "metric": "cosine_similarity_between_projected_image_embeddings",
@@ -24,6 +25,11 @@
     "model_usage_role": "semantic_condition_encoder",
     "preprocessing": "transformers_clip_image_processor_from_same_revision",
     "vision_output": "CLIPVisionModelWithProjection.image_embeds"
+  },
+  "independent_semantic_similarity": {
+    "evaluator_config_path": "configs/independent_semantic_quality_evaluator.json",
+    "evidence_role": "independent_semantic_preservation_primary",
+    "metric": "cosine_similarity_between_l2_normalized_cls_embeddings"
   },
   "distributional_quality": {
     "attack_conditioned_population": "attacked_clean_vs_attacked_watermarked_within_prompt_across_registered_repeats",
@@ -49,7 +55,8 @@
     "watermark_quality_under_attack": "incremental_watermark_effect_after_matched_attack"
   },
   "metric_estimands": {
-    "clip_cosine": "mean_prompt_level_image_to_image_cosine",
+    "clip_cosine": "mechanism_consistency_diagnostic_only",
+    "independent_semantic_cosine": "mean_prompt_level_image_to_image_cosine",
     "paired_ssim": "mean_prompt_level_pairwise_ssim",
     "prompt_conditional_kid": "mean_prompt_level_unbiased_polynomial_mmd"
   },

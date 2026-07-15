@@ -86,6 +86,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--resource-observation")
     parser.add_argument("--registered-budget")
+    parser.add_argument("--qualification-binding", required=True)
     parser.add_argument("--output")
     return parser.parse_args()
 
@@ -110,6 +111,9 @@ def main() -> int:
         if args.registered_budget
         else None
     )
+    qualification_binding = _read_json(
+        _resolve_input(root, args.qualification_binding)
+    )
     report = build_gpu_method_qualification_report(
         runtime_result=runtime_result,
         update_records=update_records,
@@ -118,6 +122,7 @@ def main() -> int:
         known_answer_path=_resolve_input(root, args.known_answer),
         resource_observation=resource_observation,
         registered_budget=registered_budget,
+        qualification_binding=qualification_binding,
     )
     output = (
         _resolve_output(root, args.output)

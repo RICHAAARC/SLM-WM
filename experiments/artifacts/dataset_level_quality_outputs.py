@@ -52,6 +52,10 @@ from experiments.artifacts.paired_quality_outputs import (
     validate_formal_clip_feature_rows,
     validate_paired_quality_metric_records,
 )
+from experiments.artifacts.independent_semantic_quality_outputs import (
+    extract_independent_semantic_feature_rows,
+    validate_independent_semantic_feature_rows,
+)
 from experiments.runtime import repository_environment
 from experiments.runtime.scientific_execution_binding import (
     validate_scientific_execution_binding,
@@ -1408,6 +1412,8 @@ def write_dataset_level_quality_outputs(
     inception_batch_size: int = 32,
     clip_device_name: str | None = None,
     clip_batch_size: int = 32,
+    independent_semantic_device_name: str | None = None,
+    independent_semantic_batch_size: int = 32,
 ) -> dict[str, Any]:
     """写出正式 Inception FID / KID records、metrics、summary 和 manifest。
 
@@ -1641,6 +1647,10 @@ def write_dataset_level_quality_outputs(
     paired_quality_clip_feature_records_path = (
         attack_quality_output_dir / "paired_quality_clip_feature_records.jsonl"
     )
+    paired_quality_independent_semantic_feature_records_path = (
+        attack_quality_output_dir
+        / "paired_quality_independent_semantic_feature_records.jsonl"
+    )
     paired_quality_metric_records_path = (
         attack_quality_output_dir / "paired_quality_metric_records.jsonl"
     )
@@ -1696,10 +1706,48 @@ def write_dataset_level_quality_outputs(
                 ],
             )
         )
+    paired_quality_independent_semantic_feature_rows = read_formal_feature_rows(
+        paired_quality_independent_semantic_feature_records_path
+    )
+    if (
+        auto_extract_formal_features
+        and all_paired_quality_records
+        and not paired_quality_independent_semantic_feature_rows
+    ):
+        paired_quality_independent_semantic_feature_rows = (
+            extract_independent_semantic_feature_rows(
+                records=all_paired_quality_records,
+                root_path=root_path,
+                image_search_roots=all_image_search_roots,
+                output_path=(
+                    paired_quality_independent_semantic_feature_records_path
+                ),
+                device_name=independent_semantic_device_name,
+                batch_size=independent_semantic_batch_size,
+            )
+        )
+    if paired_quality_independent_semantic_feature_rows:
+        paired_quality_independent_semantic_feature_rows = list(
+            validate_independent_semantic_feature_rows(
+                paired_quality_independent_semantic_feature_rows,
+                expected_record_ids=(
+                    record.dataset_quality_record_id
+                    for record in all_paired_quality_records
+                ),
+                expected_code_version=formal_execution_run_lock[
+                    "formal_execution_commit"
+                ],
+            )
+        )
+    if (
+        paired_quality_clip_feature_rows
+        and paired_quality_independent_semantic_feature_rows
+    ):
         paired_quality_metric_records = build_paired_quality_metric_records(
             records,
             attack_quality_pair_records,
             paired_quality_clip_feature_rows,
+            paired_quality_independent_semantic_feature_rows,
             randomization_repeat_id=paper_run.randomization_repeat_id,
             root_path=root_path,
             image_search_roots=all_image_search_roots,
@@ -1726,6 +1774,13 @@ def write_dataset_level_quality_outputs(
     )
     paired_quality_clip_feature_records_path.write_text(
         "".join(json_line(row) for row in paired_quality_clip_feature_rows),
+        encoding="utf-8",
+    )
+    paired_quality_independent_semantic_feature_records_path.write_text(
+        "".join(
+            json_line(row)
+            for row in paired_quality_independent_semantic_feature_rows
+        ),
         encoding="utf-8",
     )
     paired_quality_metric_records_path.write_text(
@@ -1756,6 +1811,8 @@ def write_dataset_level_quality_outputs(
         and len(paired_quality_metric_records)
         == expected_prompt_count + expected_attack_quality_record_count
         and len(paired_quality_clip_feature_rows)
+        == 2 * (expected_prompt_count + expected_attack_quality_record_count)
+        and len(paired_quality_independent_semantic_feature_rows)
         == 2 * (expected_prompt_count + expected_attack_quality_record_count)
     )
 
@@ -1850,6 +1907,12 @@ def write_dataset_level_quality_outputs(
             paired_quality_clip_feature_records_path,
             root_path,
         ),
+        "paired_quality_independent_semantic_feature_records_path": (
+            relative_or_absolute(
+                paired_quality_independent_semantic_feature_records_path,
+                root_path,
+            )
+        ),
         "paired_quality_metric_records_path": relative_or_absolute(
             paired_quality_metric_records_path,
             root_path,
@@ -1868,6 +1931,9 @@ def write_dataset_level_quality_outputs(
         ),
         "paired_quality_clip_feature_record_count": len(
             paired_quality_clip_feature_rows
+        ),
+        "paired_quality_independent_semantic_feature_record_count": len(
+            paired_quality_independent_semantic_feature_rows
         ),
         "paired_quality_metric_record_count": len(
             paired_quality_metric_records
@@ -1980,6 +2046,7 @@ def write_dataset_level_quality_outputs(
             attack_quality_pair_records_path,
             attack_quality_inception_feature_records_path,
             paired_quality_clip_feature_records_path,
+            paired_quality_independent_semantic_feature_records_path,
             paired_quality_metric_records_path,
             metrics_path,
             summary_path,
@@ -2030,6 +2097,11 @@ def write_dataset_level_quality_outputs(
             ),
             "paired_quality_clip_feature_records_digest": build_stable_digest(
                 paired_quality_clip_feature_rows
+            ),
+            "paired_quality_independent_semantic_feature_records_digest": (
+                build_stable_digest(
+                    paired_quality_independent_semantic_feature_rows
+                )
             ),
             "paired_quality_metric_records_digest": build_stable_digest(
                 paired_quality_metric_records
@@ -2091,6 +2163,7 @@ def package_dataset_level_quality_outputs(
             "attack_conditioned_quality/attack_conditioned_quality_pair_records.jsonl",
             "attack_conditioned_quality/attack_conditioned_quality_inception_feature_records.jsonl",
             "attack_conditioned_quality/paired_quality_clip_feature_records.jsonl",
+            "attack_conditioned_quality/paired_quality_independent_semantic_feature_records.jsonl",
             "attack_conditioned_quality/paired_quality_metric_records.jsonl",
             "manifest.local.json",
         )
@@ -2178,6 +2251,10 @@ def package_dataset_level_quality_outputs(
     packaged_clip_rows = read_formal_feature_rows(
         attack_quality_dir / "paired_quality_clip_feature_records.jsonl"
     )
+    packaged_independent_semantic_rows = read_formal_feature_rows(
+        attack_quality_dir
+        / "paired_quality_independent_semantic_feature_records.jsonl"
+    )
     packaged_paired_metric_rows = read_jsonl_rows(
         attack_quality_dir / "paired_quality_metric_records.jsonl"
     )
@@ -2236,6 +2313,19 @@ def package_dataset_level_quality_outputs(
             expected_code_version=str(manifest.get("code_version", "")),
         )
     )
+    packaged_independent_semantic_rows = list(
+        validate_independent_semantic_feature_rows(
+            packaged_independent_semantic_rows,
+            expected_record_ids=(
+                record.dataset_quality_record_id
+                for record in (
+                    *packaged_quality_records,
+                    *packaged_attack_quality_pairs,
+                )
+            ),
+            expected_code_version=str(manifest.get("code_version", "")),
+        )
+    )
     packaged_paired_metric_rows = list(
         validate_paired_quality_metric_records(
             packaged_paired_metric_rows,
@@ -2257,6 +2347,8 @@ def package_dataset_level_quality_outputs(
             == expected_prompt_count + len(expected_attack_keys),
             len(packaged_clip_rows)
             == 2 * (expected_prompt_count + len(expected_attack_keys)),
+            len(packaged_independent_semantic_rows)
+            == 2 * (expected_prompt_count + len(expected_attack_keys)),
             summary.get("attack_conditioned_quality_component_ready") is True,
             manifest_config.get("attack_conditioned_quality_component_ready")
             is True,
@@ -2272,6 +2364,10 @@ def package_dataset_level_quality_outputs(
             == build_stable_digest(packaged_attack_inception_rows),
             manifest_config.get("paired_quality_clip_feature_records_digest")
             == build_stable_digest(packaged_clip_rows),
+            manifest_config.get(
+                "paired_quality_independent_semantic_feature_records_digest"
+            )
+            == build_stable_digest(packaged_independent_semantic_rows),
             manifest_config.get("paired_quality_metric_records_digest")
             == build_stable_digest(packaged_paired_metric_rows),
         )

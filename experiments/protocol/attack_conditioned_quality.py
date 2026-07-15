@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Any
 
 from experiments.protocol.attacks import attack_config_digest, default_attack_configs
+from experiments.protocol.independent_semantic_quality import (
+    load_independent_semantic_quality_evaluator,
+)
 from experiments.runtime.scientific_unit_provenance import (
     validate_scientific_unit_provenance,
 )
@@ -101,10 +104,17 @@ def load_attack_conditioned_quality_estimand(
     base_pairing = payload.get("base_pairing")
     attack_pairing = payload.get("attack_pairing")
     clip_similarity = payload.get("clip_image_similarity")
+    independent_similarity = payload.get("independent_semantic_similarity")
     distribution = payload.get("distributional_quality")
     if not all(
         isinstance(value, dict)
-        for value in (base_pairing, attack_pairing, clip_similarity, distribution)
+        for value in (
+            base_pairing,
+            attack_pairing,
+            clip_similarity,
+            independent_similarity,
+            distribution,
+        )
     ):
         raise AttackConditionedQualityError("四图质量 estimand 组件必须是对象")
     if (
@@ -127,13 +137,21 @@ def load_attack_conditioned_quality_estimand(
         != "3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268"
         or clip_similarity.get("vision_output")
         != "CLIPVisionModelWithProjection.image_embeds"
+        or clip_similarity.get("evidence_role")
+        != "mechanism_consistency_diagnostic"
+        or independent_similarity.get("evidence_role")
+        != "independent_semantic_preservation_primary"
+        or independent_similarity.get("evaluator_config_path")
+        != "configs/independent_semantic_quality_evaluator.json"
         or distribution.get("primary_estimand")
         != "prompt_conditional_kid_mean"
         or distribution.get("primary_sampling_unit") != "prompt"
     ):
         raise AttackConditionedQualityError("四图质量 estimand 的冻结含义发生漂移")
     resolved = dict(payload)
-    resolved["quality_estimand_protocol_digest"] = build_stable_digest(payload)
+    independent_evaluator = load_independent_semantic_quality_evaluator()
+    resolved["independent_semantic_quality_evaluator"] = independent_evaluator
+    resolved["quality_estimand_protocol_digest"] = build_stable_digest(resolved)
     resolved["quality_estimand_id"] = (
         "attack_conditioned_quality_estimand_"
         f"{resolved['quality_estimand_protocol_digest'][:16]}"

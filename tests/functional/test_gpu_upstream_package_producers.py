@@ -47,6 +47,11 @@ from experiments.protocol.attacks import (
     attack_config_digest,
     default_attack_configs,
 )
+from experiments.protocol.independent_semantic_quality import (
+    INDEPENDENT_SEMANTIC_FEATURE_BACKEND,
+    INDEPENDENT_SEMANTIC_FEATURE_DIMENSION,
+    load_independent_semantic_quality_evaluator,
+)
 from experiments.protocol.paper_run_config import build_paper_run_config
 from experiments.protocol.formal_randomization import (
     formal_generation_seed,
@@ -1101,8 +1106,24 @@ def _prepare_dataset_quality(root: Path) -> Path:
 
     all_pair_rows = [*quality_records, *attack_pair_rows]
     clip_feature_rows: list[dict[str, object]] = []
+    independent_semantic_feature_rows: list[dict[str, object]] = []
     paired_metric_rows: list[dict[str, object]] = []
     clip_vector = [1.0] + [0.0] * (FORMAL_CLIP_FEATURE_DIMENSION - 1)
+    independent_semantic_vector = [1.0] + [0.0] * (
+        INDEPENDENT_SEMANTIC_FEATURE_DIMENSION - 1
+    )
+    independent_protocol = load_independent_semantic_quality_evaluator()
+    independent_provenance = build_test_scientific_unit_provenance(
+        "independent_semantic_fixture_batch",
+        build_stable_digest({"independent_semantic_fixture": 1}),
+        formal_execution_lock=FORMAL_EXECUTION_LOCK,
+        dependency_profile_digest=independent_protocol[
+            "dependency_profile_digest"
+        ],
+        complete_hash_lock_digest=independent_protocol[
+            "complete_hash_lock_digest"
+        ],
+    )
     for pair in all_pair_rows:
         record_id = str(pair["dataset_quality_record_id"])
         for role, path_field, digest_field in (
@@ -1130,6 +1151,35 @@ def _prepare_dataset_quality(root: Path) -> Path:
                         "quality_estimand_protocol_digest"
                     ],
                     "scientific_unit_provenance": batch_provenance,
+                    "supports_paper_claim": False,
+                }
+            )
+            independent_semantic_feature_rows.append(
+                {
+                    "dataset_quality_record_id": record_id,
+                    "dataset_quality_image_role": role,
+                    "feature_backend": INDEPENDENT_SEMANTIC_FEATURE_BACKEND,
+                    "feature_extractor_id": (
+                        f"{independent_protocol['model_contract']['model_id']}@"
+                        f"{independent_protocol['model_contract']['model_revision']}"
+                    ),
+                    "feature_dimension": (
+                        INDEPENDENT_SEMANTIC_FEATURE_DIMENSION
+                    ),
+                    "feature_layer": "last_hidden_state_cls_token",
+                    "feature_normalization": "l2",
+                    "image_path": pair[path_field],
+                    "image_digest": pair[digest_field],
+                    "feature_vector": independent_semantic_vector,
+                    "feature_vector_digest": build_stable_digest(
+                        independent_semantic_vector
+                    ),
+                    "independent_semantic_quality_protocol_digest": (
+                        independent_protocol[
+                            "independent_semantic_quality_protocol_digest"
+                        ]
+                    ),
+                    "scientific_unit_provenance": independent_provenance,
                     "supports_paper_claim": False,
                 }
             )
@@ -1162,9 +1212,25 @@ def _prepare_dataset_quality(root: Path) -> Path:
             "comparison_image_digest": pair["comparison_image_digest"],
             "paired_ssim": 1.0,
             "clip_cosine": 1.0,
+            "clip_evidence_role": "mechanism_consistency_diagnostic",
             "clip_source_feature_digest": build_stable_digest(clip_vector),
             "clip_comparison_feature_digest": build_stable_digest(
                 clip_vector
+            ),
+            "independent_semantic_cosine": 1.0,
+            "independent_semantic_evidence_role": (
+                "independent_semantic_preservation_primary"
+            ),
+            "independent_semantic_source_feature_digest": (
+                build_stable_digest(independent_semantic_vector)
+            ),
+            "independent_semantic_comparison_feature_digest": (
+                build_stable_digest(independent_semantic_vector)
+            ),
+            "independent_semantic_quality_protocol_digest": (
+                independent_protocol[
+                    "independent_semantic_quality_protocol_digest"
+                ]
             ),
             "quality_estimand_protocol_digest": estimand[
                 "quality_estimand_protocol_digest"
@@ -1199,6 +1265,11 @@ def _prepare_dataset_quality(root: Path) -> Path:
     _write_jsonl(
         attack_quality_dir / "paired_quality_clip_feature_records.jsonl",
         clip_feature_rows,
+    )
+    _write_jsonl(
+        attack_quality_dir
+        / "paired_quality_independent_semantic_feature_records.jsonl",
+        independent_semantic_feature_rows,
     )
     _write_jsonl(
         attack_quality_dir / "paired_quality_metric_records.jsonl",
@@ -1331,6 +1402,8 @@ def _prepare_dataset_quality(root: Path) -> Path:
                     / "attack_conditioned_quality_inception_feature_records.jsonl",
                     attack_quality_dir
                     / "paired_quality_clip_feature_records.jsonl",
+                    attack_quality_dir
+                    / "paired_quality_independent_semantic_feature_records.jsonl",
                     attack_quality_dir / "paired_quality_metric_records.jsonl",
                 )
             ],
@@ -1357,6 +1430,9 @@ def _prepare_dataset_quality(root: Path) -> Path:
                 "paired_quality_clip_feature_records_digest": (
                     build_stable_digest(clip_feature_rows)
                 ),
+                "paired_quality_independent_semantic_feature_records_digest": (
+                    build_stable_digest(independent_semantic_feature_rows)
+                ),
                 "paired_quality_metric_records_digest": build_stable_digest(
                     paired_metric_rows
                 ),
@@ -1378,6 +1454,9 @@ def _prepare_dataset_quality(root: Path) -> Path:
                     ),
                     "paired_quality_clip_feature_records_digest": (
                         build_stable_digest(clip_feature_rows)
+                    ),
+                    "paired_quality_independent_semantic_feature_records_digest": (
+                        build_stable_digest(independent_semantic_feature_rows)
                     ),
                     "paired_quality_metric_records_digest": (
                         build_stable_digest(paired_metric_rows)

@@ -36,6 +36,9 @@ from paper_experiments.analysis.paper_quality_decisions import (
     QUALITY_SUBCLAIM_IDS,
     load_paper_quality_claim_protocol,
 )
+from paper_experiments.analysis.paper_profile_protocol_isomorphism import (
+    registered_artifact_contract,
+)
 from paper_experiments.runners.closure_package_selection import (
     normalize_clean_code_version,
 )
@@ -62,6 +65,23 @@ class _ClosureArtifactSpec:
     file_names: tuple[str, ...]
 
 
+def _registered_closure_artifact(
+    *,
+    artifact_id: str,
+    module_name: str,
+    ready_field: str,
+) -> tuple[str, ...]:
+    """复验闭合 writer 身份并从唯一登记表取得精确文件清单."""
+
+    contract = registered_artifact_contract(artifact_id)
+    if (
+        contract["writer_module"] != module_name
+        or contract["ready_field"] != ready_field
+    ):
+        raise RuntimeError("结果闭合 writer 身份与正式产物登记不一致")
+    return tuple(contract["file_names"])
+
+
 _CLOSURE_ARTIFACT_SPECS = (
     _ClosureArtifactSpec(
         module_name=(
@@ -71,15 +91,10 @@ _CLOSURE_ARTIFACT_SPECS = (
         artifact_id="randomization_detection_statistics_manifest",
         ready_field="randomization_detection_statistics_ready",
         summary_file_name="randomization_detection_statistics_summary.json",
-        file_names=(
-            "prompt_cluster_detection_records.jsonl",
-            "method_detection_operating_points.csv",
-            "method_attack_detection_metrics.csv",
-            "slm_wrong_key_detection_metric.csv",
-            "per_attack_superiority_table.csv",
-            "randomization_detection_statistics_summary.json",
-            "randomization_detection_statistics_report.json",
-            "manifest.local.json",
+        file_names=_registered_closure_artifact(
+            artifact_id="randomization_detection_statistics_manifest",
+            module_name="paper_experiments.runners.randomization_detection_statistics",
+            ready_field="randomization_detection_statistics_ready",
         ),
     ),
     _ClosureArtifactSpec(
@@ -90,14 +105,10 @@ _CLOSURE_ARTIFACT_SPECS = (
         artifact_id="randomization_paired_superiority_manifest",
         ready_field="randomization_paired_statistics_ready",
         summary_file_name="paired_superiority_summary.json",
-        file_names=(
-            "method_repeat_threshold_records.jsonl",
-            "paired_outcomes.jsonl",
-            "quality_matching_records.jsonl",
-            "paired_superiority_table.csv",
-            "paired_superiority_summary.json",
-            "randomization_paired_superiority_report.json",
-            "manifest.local.json",
+        file_names=_registered_closure_artifact(
+            artifact_id="randomization_paired_superiority_manifest",
+            module_name="paper_experiments.runners.randomization_paired_superiority",
+            ready_field="randomization_paired_statistics_ready",
         ),
     ),
     _ClosureArtifactSpec(
@@ -106,13 +117,10 @@ _CLOSURE_ARTIFACT_SPECS = (
         artifact_id="randomization_dataset_quality_manifest",
         ready_field="randomization_dataset_quality_statistics_ready",
         summary_file_name="randomization_dataset_quality_summary.json",
-        file_names=(
-            "fid_kid_metrics.csv",
-            "quality_feature_membership.jsonl",
-            "prompt_distributional_quality_records.jsonl",
-            "randomization_dataset_quality_summary.json",
-            "randomization_dataset_quality_report.json",
-            "manifest.local.json",
+        file_names=_registered_closure_artifact(
+            artifact_id="randomization_dataset_quality_manifest",
+            module_name="paper_experiments.runners.randomization_dataset_quality",
+            ready_field="randomization_dataset_quality_statistics_ready",
         ),
     ),
     _ClosureArtifactSpec(
@@ -123,11 +131,10 @@ _CLOSURE_ARTIFACT_SPECS = (
         artifact_id="randomization_ablation_necessity_manifest",
         ready_field="randomization_aggregate_statistics_ready",
         summary_file_name="mechanism_necessity_summary.json",
-        file_names=(
-            "mechanism_necessity_statistics.csv",
-            "mechanism_necessity_summary.json",
-            "randomization_ablation_necessity_report.json",
-            "manifest.local.json",
+        file_names=_registered_closure_artifact(
+            artifact_id="randomization_ablation_necessity_manifest",
+            module_name="paper_experiments.runners.randomization_ablation_necessity",
+            ready_field="randomization_aggregate_statistics_ready",
         ),
     ),
     _ClosureArtifactSpec(
@@ -142,12 +149,10 @@ _CLOSURE_ARTIFACT_SPECS = (
         ),
         ready_field="parameter_sensitivity_aggregate_ready",
         summary_file_name="parameter_sensitivity_aggregate_summary.json",
-        file_names=(
-            "parameter_sensitivity_repeat_metrics.csv",
-            "parameter_sensitivity_aggregate_metrics.csv",
-            "parameter_sensitivity_aggregate_summary.json",
-            "parameter_sensitivity_source_report.json",
-            "manifest.local.json",
+        file_names=_registered_closure_artifact(
+            artifact_id="randomization_branch_risk_parameter_sensitivity_manifest",
+            module_name="paper_experiments.runners.randomization_parameter_sensitivity",
+            ready_field="parameter_sensitivity_aggregate_ready",
         ),
     ),
 )

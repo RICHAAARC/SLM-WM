@@ -1,0 +1,51 @@
+{
+  "dependency_contract": {
+    "complete_hash_lock_path": "configs/dependency_profiles/sd35_method_runtime_gpu_lock.txt",
+    "dependency_profile_id": "sd35_method_runtime_gpu",
+    "required_direct_dependencies": {
+      "Pillow": "11.3.0",
+      "torch": "2.11.0+cu128",
+      "transformers": "5.12.1"
+    }
+  },
+  "evaluator_id": "independent_visual_semantic_dinov2_base",
+  "feature_contract": {
+    "feature_dimension": 768,
+    "feature_dtype": "float32",
+    "feature_layer": "last_hidden_state_cls_token",
+    "normalization": "l2",
+    "similarity_metric": "cosine_similarity"
+  },
+  "independence_contract": {
+    "method_condition_encoder_family": "clip_contrastive_image_text",
+    "optimization_or_detection_usage": "forbidden",
+    "quality_evaluator_family": "dinov2_self_supervised_vision_transformer",
+    "quality_evidence_role": "independent_semantic_preservation_primary"
+  },
+  "model_contract": {
+    "model_class": "Dinov2Model",
+    "model_family": "dinov2_self_supervised_vision_transformer",
+    "model_id": "facebook/dinov2-base",
+    "model_revision": "f9e44c814b77203eaa57a6bdbbd535f21ede1415"
+  },
+  "preprocessing_contract": {
+    "center_crop_height": 224,
+    "center_crop_width": 224,
+    "color_mode": "RGB",
+    "image_mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "image_processor_class": "BitImageProcessor",
+    "image_std": [
+      0.229,
+      0.224,
+      0.225
+    ],
+    "interpolation": "bicubic",
+    "rescale_factor": 0.00392156862745098,
+    "resize_shortest_edge": 256
+  },
+  "protocol_schema": "independent_semantic_quality_evaluator_v1"
+}

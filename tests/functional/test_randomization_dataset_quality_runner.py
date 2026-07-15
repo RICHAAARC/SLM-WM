@@ -210,6 +210,7 @@ class _Workspace:
             "attack_quality_pair_record": 0,
             "attack_quality_inception_feature_record": 0,
             "paired_quality_clip_feature_record": 2 * 70,
+            "paired_quality_independent_semantic_feature_record": 2 * 70,
             "paired_quality_metric_record": 70,
         }
         return tuple({} for _ in range(record_counts[source.record_role]))
@@ -278,6 +279,9 @@ def _statistics(
         "attack_quality_feature_records_digest": build_stable_digest(()),
         "paired_quality_clip_feature_records_digest": build_stable_digest(
             {"clip_features": 2 * 9 * 70}
+        ),
+        "paired_quality_independent_semantic_feature_records_digest": (
+            build_stable_digest({"independent_semantic_features": 2 * 9 * 70})
         ),
         "randomization_dataset_quality_summary_digest": build_stable_digest(
             {"summary": 1}

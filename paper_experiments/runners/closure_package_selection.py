@@ -694,6 +694,8 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
             QUALITY_PREFIX
             + "attack_conditioned_quality/paired_quality_clip_feature_records.jsonl",
             QUALITY_PREFIX
+            + "attack_conditioned_quality/paired_quality_independent_semantic_feature_records.jsonl",
+            QUALITY_PREFIX
             + "attack_conditioned_quality/paired_quality_metric_records.jsonl",
             QUALITY_SUMMARY,
             QUALITY_MANIFEST,

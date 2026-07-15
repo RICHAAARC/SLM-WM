@@ -49,6 +49,7 @@
         "fid_kid_metrics.csv",
         "quality_feature_membership.jsonl",
         "prompt_distributional_quality_records.jsonl",
+        "attack_prompt_distributional_quality_records.jsonl",
         "randomization_dataset_quality_summary.json",
         "randomization_dataset_quality_report.json",
         "manifest.local.json"

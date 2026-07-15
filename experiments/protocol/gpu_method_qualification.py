@@ -18,6 +18,13 @@ from experiments.runners.image_only_dataset_runtime import (
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
+    semantic_watermark_runtime_config_digest,
+)
+from experiments.protocol.detection_key_identity import (
+    REGISTERED_WATERMARK_KEY_ROLE,
+    REGISTERED_WRONG_KEY_ROLE,
+    build_detection_key_plan_record,
+    validate_detection_key_identity_record,
 )
 from experiments.runtime.scientific_unit_provenance import (
     validate_scientific_unit_provenance,
@@ -35,6 +42,141 @@ GPU_METHOD_QUALIFICATION_SCHEMA = "gpu_method_qualification_report_v1"
 GPU_OPERATOR_FACT_SCHEMA = "gpu_operator_preflight_fact_v1"
 GPU_RESOURCE_BUDGET_SCHEMA = "gpu_resource_budget_decision_v1"
 COMPLETE_FEATURE_WIDTH = 716
+
+
+def _registered_and_wrong_key_attribution_ready(
+    detection_records: Sequence[Mapping[str, Any]],
+    config: SemanticWatermarkRuntimeConfig,
+) -> tuple[bool, dict[str, Any]]:
+    """复验同一水印图像上的注册密钥与 wrong-key 归因身份."""
+
+    plan = build_detection_key_plan_record(config.key_material)
+    positive = [
+        row
+        for row in detection_records
+        if row.get("sample_role") == "positive_source"
+        and not row.get("attack_id")
+    ]
+    wrong_key = [
+        row
+        for row in detection_records
+        if row.get("sample_role") == "wrong_key_negative"
+        and not row.get("attack_id")
+    ]
+    try:
+        positive_identity = validate_detection_key_identity_record(
+            positive[0], plan
+        )
+        wrong_key_identity = validate_detection_key_identity_record(
+            wrong_key[0], plan
+        )
+    except (IndexError, KeyError, TypeError, ValueError):
+        positive_identity = {}
+        wrong_key_identity = {}
+    positive_score = positive[0].get("content_score") if positive else None
+    wrong_key_score = wrong_key[0].get("content_score") if wrong_key else None
+    score_gain = (
+        float(positive_score) - float(wrong_key_score)
+        if isinstance(positive_score, (int, float))
+        and not isinstance(positive_score, bool)
+        and math.isfinite(float(positive_score))
+        and isinstance(wrong_key_score, (int, float))
+        and not isinstance(wrong_key_score, bool)
+        and math.isfinite(float(wrong_key_score))
+        else math.nan
+    )
+    ready = bool(
+        len(positive) == len(wrong_key) == 1
+        and positive_identity.get("detection_key_role")
+        == REGISTERED_WATERMARK_KEY_ROLE
+        and wrong_key_identity.get("detection_key_role")
+        == REGISTERED_WRONG_KEY_ROLE
+        and positive_identity.get("detection_key_material_digest_random")
+        != wrong_key_identity.get("detection_key_material_digest_random")
+        and positive[0].get("source_image_digest")
+        == wrong_key[0].get("source_image_digest")
+        and positive[0].get("evaluated_image_digest")
+        == wrong_key[0].get("evaluated_image_digest")
+        and math.isfinite(score_gain)
+        and score_gain > 0.0
+    )
+    return ready, {
+        "detection_key_plan_digest_random": plan[
+            "detection_key_plan_digest_random"
+        ],
+        "registered_key_identity": positive_identity,
+        "wrong_key_identity": wrong_key_identity,
+        "shared_watermarked_image_ready": bool(
+            positive and wrong_key
+            and positive[0].get("evaluated_image_digest")
+            == wrong_key[0].get("evaluated_image_digest")
+        ),
+        "registered_key_content_score": positive_score,
+        "wrong_key_content_score": wrong_key_score,
+        "registered_over_wrong_key_content_score_gain": score_gain,
+    }
+
+
+def _qualification_binding_ready(
+    binding: Mapping[str, Any] | None,
+    runtime_result: Mapping[str, Any],
+    config: SemanticWatermarkRuntimeConfig,
+    execution_environment: Mapping[str, Any],
+) -> tuple[bool, dict[str, Any]]:
+    """复验提交、依赖、模型 revision、Prompt 与运行输入摘要绑定."""
+
+    resolved = dict(binding or {})
+    metadata = runtime_result.get("metadata")
+    metadata = metadata if isinstance(metadata, Mapping) else {}
+    diffusion_source = metadata.get("diffusion_model_source")
+    diffusion_source = (
+        diffusion_source if isinstance(diffusion_source, Mapping) else {}
+    )
+    vision_source = metadata.get("vision_model_source")
+    vision_source = vision_source if isinstance(vision_source, Mapping) else {}
+    input_summary = resolved.get("input_summary")
+    input_summary = input_summary if isinstance(input_summary, Mapping) else {}
+    model_revisions = resolved.get("model_revisions")
+    model_revisions = (
+        model_revisions if isinstance(model_revisions, Mapping) else {}
+    )
+    digest_payload = {
+        field_name: value
+        for field_name, value in resolved.items()
+        if field_name != "qualification_binding_digest"
+    }
+    ready = bool(
+        len(str(resolved.get("code_version", ""))) == 40
+        and resolved.get("code_version")
+        == execution_environment.get("formal_execution_commit")
+        and resolved.get("dependency_profile_id")
+        == execution_environment.get("dependency_profile_id")
+        == "sd35_method_runtime_gpu"
+        and resolved.get("dependency_profile_digest")
+        == execution_environment.get("dependency_profile_digest")
+        and resolved.get("complete_hash_lock_digest")
+        == execution_environment.get("complete_hash_lock_digest")
+        and model_revisions.get("sd35_model_id") == config.model_id
+        and model_revisions.get("sd35_model_revision") == config.model_revision
+        and model_revisions.get("vae_model_id") == config.model_id
+        and model_revisions.get("vae_model_revision") == config.model_revision
+        and model_revisions.get("vae_class_name") == config.vae_class_name
+        and model_revisions.get("vision_model_id") == config.vision_model_id
+        and model_revisions.get("vision_model_revision")
+        == config.vision_model_revision
+        and diffusion_source.get("repository_id") == config.model_id
+        and diffusion_source.get("revision") == config.model_revision
+        and vision_source.get("repository_id") == config.vision_model_id
+        and vision_source.get("revision") == config.vision_model_revision
+        and input_summary.get("prompt_id") == config.prompt_id
+        and input_summary.get("prompt_digest")
+        == build_stable_digest({"prompt": config.prompt})
+        and input_summary.get("method_runtime_config_digest")
+        == semantic_watermark_runtime_config_digest(config)
+        and resolved.get("qualification_binding_digest")
+        == build_stable_digest(digest_payload)
+    )
+    return ready, resolved
 
 
 def _read_json_mapping(path: Path) -> dict[str, Any]:
@@ -231,6 +373,7 @@ def build_gpu_operator_preflight_report(
     detection_records: Sequence[Mapping[str, Any]],
     config: SemanticWatermarkRuntimeConfig,
     known_answer_path: str | Path,
+    qualification_binding: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """验证单 Prompt 方法机制真实性, 不消费资源预算阈值."""
 
@@ -306,8 +449,22 @@ def build_gpu_operator_preflight_report(
         and execution_environment.get("cuda_available") is True
         and int(execution_environment.get("visible_cuda_device_count", 0)) > 0
     )
+    binding_ready, resolved_binding = _qualification_binding_ready(
+        qualification_binding,
+        result,
+        config,
+        execution_environment,
+    )
+    key_attribution_ready, key_attribution_evidence = (
+        _registered_and_wrong_key_attribution_ready(detections, config)
+    )
     known_answer = rebuild_keyed_prg_known_answer_report(known_answer_path)
     facts = (
+        _operator_fact(
+            "exact_commit_dependency_model_and_input_binding",
+            binding_ready,
+            qualification_binding=resolved_binding,
+        ),
         _operator_fact(
             "registered_sd35_qk_layers_exist_on_real_cuda",
             real_cuda_ready and update_qk_ready,
@@ -359,6 +516,11 @@ def build_gpu_operator_preflight_report(
             _final_image_attention_observability_ready(result, config),
         ),
         _operator_fact(
+            "registered_key_and_wrong_key_attribution",
+            key_attribution_ready,
+            **key_attribution_evidence,
+        ),
+        _operator_fact(
             "scientific_content_binding",
             _scientific_content_binding_record_ready(result),
         ),
@@ -381,6 +543,7 @@ def build_gpu_operator_preflight_report(
         "gpu_operator_preflight_schema": "gpu_operator_preflight_report_v1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "run_id": result.get("run_id"),
+        "qualification_binding": resolved_binding,
         "operator_facts": list(facts),
         "known_answer_report": known_answer,
         "gpu_operator_preflight_ready": ready,
@@ -467,6 +630,7 @@ def build_gpu_method_qualification_report(
     known_answer_path: str | Path,
     resource_observation: Mapping[str, Any] | None = None,
     registered_budget: Mapping[str, Any] | None = None,
+    qualification_binding: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """组合方法和资源报告, 同时保持两个布尔门禁相互独立."""
 
@@ -476,6 +640,7 @@ def build_gpu_method_qualification_report(
         detection_records,
         config,
         known_answer_path,
+        qualification_binding,
     )
     resource = build_gpu_resource_budget_report(
         resource_observation,
