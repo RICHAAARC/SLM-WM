@@ -4,6 +4,8 @@
 
 `paper_claim_registry.json` 冻结5项论文主张、必要主张集合、可选主张集合和唯一三态决策枚举。当前 `parameter_robustness` 是可选主张, 不得无条件否决固定参数下的必要结论；旧 `supports_paper_claim` 只能由必要主张集合的重算结果派生。
 
+`paper_quality_claim_protocol.json` 冻结感知质量、语义对齐和分布保持三类非劣效语义。Prompt 是唯一总体重采样单位, 9个注册 repeat 嵌套在每个 Prompt 内；clean-watermarked FID 仅作为描述性分布位移, Prompt 条件 KID 及其 Prompt 聚类 bootstrap 区间是主要分布证据。配置中的界限在新的正式运行前提交, 不允许由结果回灌修改。
+
 `core_method_dependency_identity.json` 只定义最小核心方法包的可安装边界: Python `>=3.11`、`torch>=2.11,<2.12`、`setuptools.build_meta` 构建后端以及唯一 `main` 包根。PyTorch 范围与正式 SD3.5 GPU 锁中的2.11系列一致, 具体 CPU 或 CUDA wheel 由安装环境负责选择。该身份不替代、引用或放宽论文实验层的六个完整 wheel 哈希锁。
 
 ## 论文 prompt 配置

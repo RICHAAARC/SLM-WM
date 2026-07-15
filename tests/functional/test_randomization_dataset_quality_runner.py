@@ -21,6 +21,9 @@ from main.core.digest import build_stable_digest
 from paper_experiments.analysis.randomization_dataset_quality import (
     RandomizationDatasetQualityStatistics,
 )
+from paper_experiments.analysis.paper_quality_decisions import (
+    build_quality_preservation_decisions,
+)
 from paper_experiments.runners.randomization_aggregate_provenance import (
     RandomizationAggregateProvenance,
 )
@@ -208,6 +211,23 @@ def _statistics(
             ("kid_std", 0.001),
         )
     )
+    prompt_distribution_records = (
+        {
+            "prompt_id": "probe_prompt_000",
+            "quality_metric_name": "prompt_conditional_kid",
+            "quality_metric_value": 0.0,
+        },
+    )
+    quality_decisions = build_quality_preservation_decisions(
+        distributional_inference={
+            "confidence_interval_low": 0.0,
+            "confidence_interval_high": 0.0,
+        },
+        evidence_artifact_id="randomization_dataset_quality_manifest",
+    )
+    quality_decision = quality_decisions[
+        "quality_preservation_claim_decision"
+    ]
     summary = {
         "aggregate_quality_pair_count": 9 * 70,
         "quality_feature_membership_digest": build_stable_digest(memberships),
@@ -218,15 +238,20 @@ def _statistics(
             build_stable_digest({"metric_protocol": 1})
         ),
         "fid_kid_metric_rows_digest": build_stable_digest(metric_rows),
+        "prompt_distribution_records_digest": build_stable_digest(
+            prompt_distribution_records
+        ),
         "randomization_dataset_quality_summary_digest": build_stable_digest(
             {"summary": 1}
         ),
         "randomization_dataset_quality_statistics_ready": True,
-        "conclusion_decision": "measured_evidence_component",
-        "supports_paper_claim": False,
+        **quality_decisions,
+        "conclusion_decision": quality_decision["decision"],
+        "supports_paper_claim": quality_decision["scientific_support"] is True,
     }
     return RandomizationDatasetQualityStatistics(
         membership_records=memberships,
+        prompt_distribution_records=prompt_distribution_records,
         metric_rows=metric_rows,
         summary=summary,
     )
@@ -377,6 +402,7 @@ def _result() -> runner.RandomizationDatasetQualityResult:
     }
     return runner.RandomizationDatasetQualityResult(
         membership_records=statistics.membership_records,
+        prompt_distribution_records=statistics.prompt_distribution_records,
         metric_rows=statistics.metric_rows,
         summary=statistics.summary,
         report=report,
@@ -406,6 +432,7 @@ def test_writer_publishes_minimal_quality_directory_transactionally(
     assert {path.name for path in output_dir.iterdir()} == {
         "fid_kid_metrics.csv",
         "quality_feature_membership.jsonl",
+        "prompt_distributional_quality_records.jsonl",
         "randomization_dataset_quality_summary.json",
         "randomization_dataset_quality_report.json",
         "manifest.local.json",

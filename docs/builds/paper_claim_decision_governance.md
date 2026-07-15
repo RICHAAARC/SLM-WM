@@ -49,6 +49,8 @@ evidence_incomplete
 
 阶段1只建立决策结构, 不把已有 FID/KID 测量自动提升为质量保持结论。因此在质量非劣效统计协议接入前, `quality_preservation` 必须为 `evidence_incomplete`; 这不等价于实验已经测得质量不支持。完整结果包仍允许归档该状态, 因为归档闭合与科学支持是两个独立判定。
 
+阶段2已由 `configs/paper_quality_claim_protocol.json` 和 `paper_experiments/analysis/paper_quality_decisions.py` 接入质量结论协议。随机化质量 writer 现在输出 Prompt 条件 KID 记录、Prompt 聚类区间、三类质量子主张、逐攻击主张和跨攻击主张。当前感知、语义与逐攻击质量原子尚未进入该聚合输入, 因而总体质量主张仍按真实缺口保持 `evidence_incomplete`, 而不是沿用旧 `measured_evidence_component` 状态。
+
 ## 四、运行流程就绪边界
 
 运行流程闭合与科学结论必须独立：

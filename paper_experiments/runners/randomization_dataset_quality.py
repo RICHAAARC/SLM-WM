@@ -69,9 +69,10 @@ class RandomizationDatasetQualityRunnerError(ValueError):
 
 @dataclass(frozen=True)
 class RandomizationDatasetQualityResult:
-    """保存跨重复成员关系, 正式指标, 摘要和来源报告."""
+    """保存跨重复成员、Prompt 分布统计、正式指标、摘要和来源报告。"""
 
     membership_records: tuple[Mapping[str, Any], ...]
+    prompt_distribution_records: tuple[Mapping[str, Any], ...]
     metric_rows: tuple[Mapping[str, Any], ...]
     summary: Mapping[str, Any]
     report: Mapping[str, Any]
@@ -344,17 +345,24 @@ def _rebuild_randomization_dataset_quality(
         "fid_kid_metric_rows_digest": statistics.summary[
             "fid_kid_metric_rows_digest"
         ],
+        "prompt_distribution_records_digest": statistics.summary[
+            "prompt_distribution_records_digest"
+        ],
         "randomization_dataset_quality_summary_digest": statistics.summary[
             "randomization_dataset_quality_summary_digest"
         ],
         "randomization_dataset_quality_statistics_ready": True,
-        "supports_paper_claim": False,
+        "conclusion_decision": statistics.summary["conclusion_decision"],
+        "supports_paper_claim": statistics.summary["supports_paper_claim"],
     }
     report["randomization_dataset_quality_report_digest"] = (
         build_stable_digest(report)
     )
     return RandomizationDatasetQualityResult(
         membership_records=statistics.membership_records,
+        prompt_distribution_records=(
+            statistics.prompt_distribution_records
+        ),
         metric_rows=statistics.metric_rows,
         summary=statistics.summary,
         report=report,
@@ -444,6 +452,9 @@ def write_randomization_dataset_quality_outputs(
         membership_path = (
             temporary_directory / "quality_feature_membership.jsonl"
         )
+        prompt_distribution_path = (
+            temporary_directory / "prompt_distributional_quality_records.jsonl"
+        )
         summary_path = (
             temporary_directory / "randomization_dataset_quality_summary.json"
         )
@@ -464,6 +475,14 @@ def write_randomization_dataset_quality_outputs(
                 json.dumps(dict(record), ensure_ascii=False, sort_keys=True)
                 + "\n"
                 for record in result.membership_records
+            ),
+            encoding="utf-8",
+        )
+        prompt_distribution_path.write_text(
+            "".join(
+                json.dumps(dict(record), ensure_ascii=False, sort_keys=True)
+                + "\n"
+                for record in result.prompt_distribution_records
             ),
             encoding="utf-8",
         )
@@ -490,6 +509,7 @@ def write_randomization_dataset_quality_outputs(
         data_paths = (
             metrics_path,
             membership_path,
+            prompt_distribution_path,
             summary_path,
             report_path,
         )
@@ -550,6 +570,12 @@ def write_randomization_dataset_quality_outputs(
                 "fid_kid_metric_rows_digest": result.summary[
                     "fid_kid_metric_rows_digest"
                 ],
+                "prompt_distribution_records_digest": result.summary[
+                    "prompt_distribution_records_digest"
+                ],
+                "paper_quality_claim_protocol_digest": result.summary[
+                    "paper_quality_claim_protocol"
+                ]["paper_quality_claim_protocol_digest"],
                 "randomization_dataset_quality_summary_digest": (
                     result.summary[
                         "randomization_dataset_quality_summary_digest"
@@ -573,7 +599,21 @@ def write_randomization_dataset_quality_outputs(
                 "conclusion_decision": result.summary[
                     "conclusion_decision"
                 ],
-                "supports_paper_claim": False,
+                "quality_subclaim_decisions": result.summary[
+                    "quality_subclaim_decisions"
+                ],
+                "per_attack_quality_decisions": result.summary[
+                    "per_attack_quality_decisions"
+                ],
+                "cross_attack_quality_decision": result.summary[
+                    "cross_attack_quality_decision"
+                ],
+                "quality_preservation_claim_decision": result.summary[
+                    "quality_preservation_claim_decision"
+                ],
+                "supports_paper_claim": result.summary[
+                    "supports_paper_claim"
+                ],
             },
         ).to_dict()
         manifest_path.write_text(

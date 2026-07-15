@@ -563,6 +563,27 @@ def _unbiased_polynomial_mmd_exact(source_features: np.ndarray, comparison_featu
     return float(source_term + comparison_term - 2.0 * cross_term)
 
 
+def unbiased_polynomial_mmd_exact(
+    source_features: Any,
+    comparison_features: Any,
+) -> float:
+    """公开复用正式 KID 核的完整无偏 MMD 原语。"""
+
+    source = np.asarray(source_features, dtype=np.float64)
+    comparison = np.asarray(comparison_features, dtype=np.float64)
+    if (
+        source.ndim != 2
+        or comparison.ndim != 2
+        or source.shape[0] < 2
+        or comparison.shape[0] < 2
+        or source.shape[1] != comparison.shape[1]
+        or not np.all(np.isfinite(source))
+        or not np.all(np.isfinite(comparison))
+    ):
+        raise ValueError("完整无偏 MMD 要求两侧至少2行同维有限特征")
+    return _unbiased_polynomial_mmd_exact(source, comparison)
+
+
 def _torch_unbiased_polynomial_mmd_exact(
     source_features: np.ndarray,
     comparison_features: np.ndarray,

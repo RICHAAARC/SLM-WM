@@ -10,10 +10,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
+import numpy as np
+
 from experiments.protocol.dataset_quality import (
     FORMAL_DATASET_QUALITY_METRIC_NAMES,
     FORMAL_FEATURE_BACKEND,
     formal_dataset_quality_metric_protocol,
+    unbiased_polynomial_mmd_exact,
 )
 from experiments.protocol.formal_randomization import (
     formal_randomization_repeat_ids,
@@ -29,13 +32,18 @@ from paper_experiments.analysis.formal_record_statistics import (
     FormalRecordStatisticsError,
     rebuild_formal_fid_kid_metric_rows_from_feature_records,
 )
+from paper_experiments.analysis.paper_quality_decisions import (
+    build_prompt_cluster_mean_inference,
+    build_quality_preservation_decisions,
+    load_paper_quality_claim_protocol,
+)
 
 
 RANDOMIZATION_DATASET_QUALITY_SUMMARY_SCHEMA = (
     "randomization_dataset_quality_summary"
 )
 RANDOMIZATION_DATASET_QUALITY_METRIC_PROTOCOL_SCHEMA = (
-    "registered_repeat_joint_inception_distribution"
+    "prompt_conditioned_distributional_quality"
 )
 RANDOMIZATION_DATASET_QUALITY_MEMBERSHIP_FIELDNAMES = (
     "randomization_repeat_id",
@@ -53,15 +61,16 @@ class RandomizationDatasetQualityError(ValueError):
 
 @dataclass(frozen=True)
 class RandomizationDatasetQualityStatistics:
-    """保存规范成员关系, FID/KID 三行指标和重建摘要."""
+    """保存规范成员关系、分布统计、FID/KID 和质量决策摘要。"""
 
     membership_records: tuple[Mapping[str, Any], ...]
+    prompt_distribution_records: tuple[Mapping[str, Any], ...]
     metric_rows: tuple[Mapping[str, Any], ...]
     summary: Mapping[str, Any]
 
 
 def randomization_dataset_quality_metric_protocol() -> dict[str, Any]:
-    """冻结9重复联合特征总体与实际 KID 子集大小."""
+    """冻结描述性总体指标与 Prompt 条件 KID 主推断的不同职责。"""
 
     base_protocol = formal_dataset_quality_metric_protocol()
     repeat_count = len(formal_randomization_repeat_ids())
@@ -70,6 +79,7 @@ def randomization_dataset_quality_metric_protocol() -> dict[str, Any]:
         for run_name, prompt_count in RUN_EXPECTED_PROMPT_COUNTS.items()
     }
     kid_subset_size = int(base_protocol["kid_subset_size"])
+    quality_claim_protocol = load_paper_quality_claim_protocol()
     payload = {
         "protocol_schema": (
             RANDOMIZATION_DATASET_QUALITY_METRIC_PROTOCOL_SCHEMA
@@ -82,8 +92,22 @@ def randomization_dataset_quality_metric_protocol() -> dict[str, Any]:
             "joint_raw_feature_rows_across_registered_repeats"
         ),
         "prompt_weighting_rule": (
-            "equal_prompt_multiplicity_from_exact_repeat_cartesian_product"
+            "each_prompt_is_one_primary_unit_with_registered_repeats_nested"
         ),
+        "primary_sampling_unit": "prompt",
+        "nested_sampling_unit": (
+            "registered_randomization_repeat_within_prompt"
+        ),
+        "primary_distributional_preservation_metric": (
+            "prompt_conditional_kid_mean_with_prompt_cluster_bootstrap_ci"
+        ),
+        "joint_fid_kid_evidence_role": "descriptive_distribution_shift",
+        "clean_watermarked_interpretation": (
+            "distributional_preservation_only_not_real_reference_quality"
+        ),
+        "paper_quality_claim_protocol_digest": quality_claim_protocol[
+            "paper_quality_claim_protocol_digest"
+        ],
         "aggregate_sample_pair_count_by_paper_run": (
             sample_pair_count_by_run
         ),
@@ -96,6 +120,82 @@ def randomization_dataset_quality_metric_protocol() -> dict[str, Any]:
         build_stable_digest(payload)
     )
     return payload
+
+
+def _prompt_conditional_kid_records(
+    feature_records: tuple[Mapping[str, Any], ...],
+    membership_records: tuple[Mapping[str, Any], ...],
+    *,
+    expected_prompt_ids: tuple[str, ...],
+) -> tuple[dict[str, Any], ...]:
+    """对每个 Prompt 内的9个注册 repeat 独立计算无偏 KID。"""
+
+    feature_by_key = {
+        (
+            str(record["dataset_quality_record_id"]),
+            str(record["dataset_quality_image_role"]),
+        ): record
+        for record in feature_records
+    }
+    memberships_by_prompt: dict[str, list[Mapping[str, Any]]] = {
+        prompt_id: [] for prompt_id in expected_prompt_ids
+    }
+    for membership in membership_records:
+        memberships_by_prompt[str(membership["prompt_id"])].append(membership)
+    repeat_count = len(formal_randomization_repeat_ids())
+    rows: list[dict[str, Any]] = []
+    for prompt_id in expected_prompt_ids:
+        memberships = memberships_by_prompt[prompt_id]
+        if len(memberships) != repeat_count:
+            raise RandomizationDatasetQualityError(
+                "Prompt 条件 KID 未精确覆盖全部注册 repeat"
+            )
+        source_features = np.asarray(
+            [
+                feature_by_key[
+                    (str(record["dataset_quality_record_id"]), "source")
+                ]["feature_vector"]
+                for record in memberships
+            ],
+            dtype=np.float64,
+        )
+        comparison_features = np.asarray(
+            [
+                feature_by_key[
+                    (str(record["dataset_quality_record_id"]), "comparison")
+                ]["feature_vector"]
+                for record in memberships
+            ],
+            dtype=np.float64,
+        )
+        try:
+            value = unbiased_polynomial_mmd_exact(
+                source_features,
+                comparison_features,
+            )
+        except (TypeError, ValueError) as exc:
+            raise RandomizationDatasetQualityError(
+                "Prompt 条件 KID 特征不是同维有限数值"
+            ) from exc
+        core = {
+            "prompt_id": prompt_id,
+            "randomization_repeat_count": repeat_count,
+            "primary_sampling_unit": "prompt",
+            "nested_sampling_unit": (
+                "registered_randomization_repeat_within_prompt"
+            ),
+            "quality_metric_name": "prompt_conditional_kid",
+            "quality_metric_value": value,
+            "metric_status": "measured",
+            "supports_paper_claim": False,
+        }
+        rows.append(
+            {
+                **core,
+                "prompt_distribution_record_digest": build_stable_digest(core),
+            }
+        )
+    return tuple(rows)
 
 
 def _is_sha256(value: Any) -> bool:
@@ -274,6 +374,25 @@ def rebuild_randomization_dataset_quality_statistics(
         feature_records,
         membership_records=canonical_membership,
     )
+    prompt_distribution_records = _prompt_conditional_kid_records(
+        canonical_features,
+        canonical_membership,
+        expected_prompt_ids=prompt_ids,
+    )
+    distributional_inference = build_prompt_cluster_mean_inference(
+        {
+            str(record["prompt_id"]): float(record["quality_metric_value"])
+            for record in prompt_distribution_records
+        },
+        analysis_id="distributional_preservation_prompt_conditional_kid",
+    )
+    quality_decisions = build_quality_preservation_decisions(
+        distributional_inference=distributional_inference,
+        evidence_artifact_id="randomization_dataset_quality_manifest",
+    )
+    quality_preservation_decision = quality_decisions[
+        "quality_preservation_claim_decision"
+    ]
     aggregate_pair_count = (
         len(formal_randomization_repeat_ids()) * expected_prompt_count
     )
@@ -326,6 +445,10 @@ def rebuild_randomization_dataset_quality_statistics(
         "quality_feature_records_digest": build_stable_digest(
             canonical_features
         ),
+        "prompt_distribution_records_digest": build_stable_digest(
+            prompt_distribution_records
+        ),
+        "distributional_preservation_inference": distributional_inference,
         "randomization_dataset_quality_metric_protocol_digest": (
             metric_protocol[
                 "randomization_dataset_quality_metric_protocol_digest"
@@ -335,14 +458,18 @@ def rebuild_randomization_dataset_quality_statistics(
         "quality_metric_names": list(FORMAL_DATASET_QUALITY_METRIC_NAMES),
         "quality_metric_status": "measured",
         "randomization_dataset_quality_statistics_ready": True,
-        "conclusion_decision": "measured_evidence_component",
-        "supports_paper_claim": False,
+        **quality_decisions,
+        "conclusion_decision": quality_preservation_decision["decision"],
+        "supports_paper_claim": (
+            quality_preservation_decision["scientific_support"] is True
+        ),
     }
     summary["randomization_dataset_quality_summary_digest"] = (
         build_stable_digest(summary)
     )
     return RandomizationDatasetQualityStatistics(
         membership_records=canonical_membership,
+        prompt_distribution_records=prompt_distribution_records,
         metric_rows=tuple(dict(row) for row in metric_rows),
         summary=summary,
     )

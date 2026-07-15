@@ -2655,6 +2655,38 @@ Notebook 与 repository module 的跨边界数据
 | registered_claim_set_decision | governance | none | true | true | true | 必要主张集合按缺失优先、其次否定、最后支持规则派生的唯一三态决策。 |
 | registered_claim_set_supported | governance | none | true | true | true | `required_claims` 中全部主张均为 supported 时派生的集合级支持状态。 |
 | claim_decision_bundle_ready | governance | none | false | true | true | 完整结果包 validator 是否已从单项决策重算并确认全部集合级与兼容字段。 |
+| protocol_schema | protocol | none | true | true | false | 质量结论等受治理协议对象的版本化 schema。 |
+| attack_conclusion_rule | protocol | none | false | true | false | 质量结论必须分别生成逐攻击和跨攻击决策的组合规则。 |
+| primary_sampling_unit | protocol | none | true | true | false | 论文统计推断的主要总体采样单位, 质量协议固定为 Prompt。 |
+| nested_sampling_unit | protocol | none | true | true | false | 主要采样单位内部的嵌套随机化单位, 当前为 Prompt 内的注册 repeat。 |
+| paired_perceptual_quality_noninferiority | protocol | none | false | true | false | 配对感知质量非劣效的指标和冻结区间下界配置。 |
+| semantic_alignment_noninferiority | protocol | none | false | true | false | 语义对齐非劣效的指标和冻结区间下界配置。 |
+| distributional_preservation_noninferiority | protocol | none | false | true | false | clean-watermarked 分布保持的主要指标、解释边界和冻结区间上界配置。 |
+| minimum_lower_confidence_bound | metric | none | false | true | false | 感知或语义非劣效允许支持主张的冻结区间下界。 |
+| noninferiority_loss_margin_from_identity | metric | none | false | true | true | 相对恒等图像配对分数1.0允许的冻结损失幅度。 |
+| maximum_prompt_conditional_kid_upper_confidence_bound | metric | none | false | true | false | Prompt 条件 KID 均值允许支持分布保持的冻结区间上界。 |
+| clean_watermarked_comparison_interpretation | governance | none | false | true | false | clean 与 watermarked 生成图像间 FID/KID 只解释为分布保持。 |
+| common_reference_delta_required_when_available | governance | none | false | true | false | 存在共同参考分布时是否强制使用 watermarked-reference 减 clean-reference 的差值。 |
+| fid_evidence_role | governance | none | false | true | false | `probe_paper` 小样本条件下 FID 的描述性证据角色。 |
+| generation_quality_against_real_reference_allowed_without_reference | governance | none | false | true | false | 缺少共同真实参考分布时是否允许声明相对真实分布的生成质量, 固定为 false。 |
+| primary_metric | protocol | none | true | true | false | 当前子主张的主要统计指标标识。 |
+| registered_attack_ids | protocol | none | true | true | true | 质量协议从正式攻击注册表解析的完整攻击标识集合。 |
+| registered_attack_registry_digest | provenance | none | true | true | true | 正式攻击标识和配置摘要集合的稳定摘要。 |
+| paper_quality_claim_protocol | protocol | none | false | true | true | 绑定非劣效界限、Prompt 推断和攻击集合的完整质量结论协议。 |
+| paper_quality_claim_protocol_digest | provenance | none | true | true | true | 完整质量结论协议的稳定摘要。 |
+| analysis_id | protocol | none | true | true | false | Prompt 聚类推断所服务的稳定分析标识。 |
+| prompt_values_digest | provenance | none | false | true | true | 规范排序的 Prompt 级标量观测集合摘要。 |
+| estimate | metric | none | true | true | true | Prompt 级总体估计值。 |
+| confidence_interval_low | metric | none | true | true | true | Prompt 聚类 bootstrap 双侧区间下界。 |
+| confidence_interval_high | metric | none | true | true | true | Prompt 聚类 bootstrap 双侧区间上界。 |
+| prompt_cluster_inference_digest | provenance | none | true | true | true | Prompt 聚类估计、区间和随机协议的稳定摘要。 |
+| quality_subclaim_decisions | governance | none | false | true | true | 感知、语义与分布保持三类质量子主张的独立三态决策。 |
+| per_attack_quality_decisions | governance | none | false | true | true | 以正式攻击 ID 为键保存的逐攻击质量三态决策。 |
+| cross_attack_quality_decision | governance | none | false | true | true | 只能由完整逐攻击质量决策集合派生的跨攻击三态结论。 |
+| quality_preservation_claim_decision | governance | none | false | true | true | 三类质量子主张和跨攻击决策共同派生的总体质量保持决策。 |
+| distributional_preservation_inference | artifact | none | false | true | true | Prompt 条件 KID 的 Prompt 聚类均值与区间记录。 |
+| prompt_distribution_record_digest | provenance | none | true | false | true | 单个 Prompt 内9个 repeat 条件 KID 记录的稳定摘要。 |
+| prompt_distribution_records_digest | provenance | none | false | true | true | 完整 Prompt 条件 KID 记录集合的稳定摘要。 |
 | probe_workflow_closed | governance | none | true | false | false | `probe_paper` 是否真实执行全部正式步骤并形成完整受治理产物, 不表达科学效果。 |
 | protocol_isomorphism_ready | governance | none | true | false | false | 三个论文 profile 删除允许变化的规模字段后是否具有相同协议语义。 |
 | artifact_contract_isomorphic | governance | none | true | false | false | 三个论文 profile 是否要求相同产物 schema、gate 角色和主张决策结构。 |

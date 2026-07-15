@@ -11,6 +11,9 @@ from zipfile import ZipFile
 import pytest
 
 from main.core.digest import build_stable_digest
+from paper_experiments.analysis.paper_quality_decisions import (
+    build_quality_preservation_decisions,
+)
 from scripts import paper_result_closure as closure
 from scripts import run_gpu_server_result_closure as server_closure
 
@@ -88,13 +91,26 @@ def _component_summary(
         )
         return payload
     if artifact_id == "randomization_dataset_quality_manifest":
+        quality_decisions = build_quality_preservation_decisions(
+            distributional_inference={
+                "confidence_interval_low": 0.0,
+                "confidence_interval_high": 0.0,
+            },
+            evidence_artifact_id="randomization_dataset_quality_manifest",
+        )
+        quality_decision = quality_decisions[
+            "quality_preservation_claim_decision"
+        ]
         payload = {
             "paper_claim_scale": PAPER_RUN_NAME,
             "target_fpr": TARGET_FPR,
             "randomization_dataset_quality_statistics_ready": True,
             "quality_metric_status": "measured",
-            "conclusion_decision": "measured_evidence_component",
-            "supports_paper_claim": False,
+            **quality_decisions,
+            "conclusion_decision": quality_decision["decision"],
+            "supports_paper_claim": (
+                quality_decision["scientific_support"] is True
+            ),
         }
         payload["randomization_dataset_quality_summary_digest"] = (
             build_stable_digest(payload)
@@ -210,6 +226,13 @@ def _write_rebuilt_artifacts(
             digest_field = "randomization_dataset_quality_summary_digest"
             config[digest_field] = summary[digest_field]
             metadata["conclusion_decision"] = summary["conclusion_decision"]
+            for field_name in (
+                "quality_subclaim_decisions",
+                "per_attack_quality_decisions",
+                "cross_attack_quality_decision",
+                "quality_preservation_claim_decision",
+            ):
+                metadata[field_name] = summary[field_name]
         elif (
             spec.artifact_id
             == "randomization_branch_risk_parameter_sensitivity_manifest"

@@ -4556,7 +4556,7 @@ def _build_result_closure_claim_decisions(
                 evidence_artifact_ids=("dataset_level_quality_manifest",),
                 evidence_blockers=(
                     *workflow_blockers,
-                    "quality_noninferiority_decision_protocol_not_registered",
+                    "randomization_quality_decision_not_bound_to_legacy_closure_input",
                 ),
             ),
             "mechanism_necessity": governed_decision(

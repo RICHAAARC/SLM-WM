@@ -217,7 +217,16 @@ def test_exact9_quality_preserves_measured_zero_difference_result(
     result = _rebuild(prompt_ids, memberships, features, monkeypatch)
 
     assert result.summary["randomization_dataset_quality_statistics_ready"] is True
-    assert result.summary["conclusion_decision"] == "measured_evidence_component"
+    assert result.summary["conclusion_decision"] == "evidence_incomplete"
+    assert result.summary["quality_subclaim_decisions"][
+        "distributional_preservation_noninferiority"
+    ]["decision"] == "supported"
+    assert result.summary["quality_subclaim_decisions"][
+        "paired_perceptual_quality_noninferiority"
+    ]["decision"] == "evidence_incomplete"
+    assert result.summary["quality_subclaim_decisions"][
+        "semantic_alignment_noninferiority"
+    ]["decision"] == "evidence_incomplete"
     assert result.summary["supports_paper_claim"] is False
     metric_by_name = {
         row["quality_metric_name"]: row["quality_metric_value"]

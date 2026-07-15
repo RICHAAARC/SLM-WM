@@ -29,7 +29,12 @@ from main.core.digest import build_stable_digest
 from paper_experiments.analysis.paper_claim_decisions import (
     build_claim_decision,
     build_claim_decision_bundle,
+    validate_claim_decision,
     validate_claim_decision_bundle,
+)
+from paper_experiments.analysis.paper_quality_decisions import (
+    QUALITY_SUBCLAIM_IDS,
+    load_paper_quality_claim_protocol,
 )
 from paper_experiments.runners.closure_package_selection import (
     normalize_clean_code_version,
@@ -104,6 +109,7 @@ _CLOSURE_ARTIFACT_SPECS = (
         file_names=(
             "fid_kid_metrics.csv",
             "quality_feature_membership.jsonl",
+            "prompt_distributional_quality_records.jsonl",
             "randomization_dataset_quality_summary.json",
             "randomization_dataset_quality_report.json",
             "manifest.local.json",
@@ -549,7 +555,7 @@ def _derive_dataset_quality_component(
     *,
     artifact_id: str,
 ) -> dict[str, Any]:
-    """确认 FID/KID 是完整测量分量, 但不把它误作优势判定."""
+    """复验三类质量、逐攻击与总体质量决策, 不把测量自动当作支持。"""
 
     _require_summary_run_identity(
         summary,
@@ -568,16 +574,70 @@ def _derive_dataset_quality_component(
         (
             "randomization_dataset_quality_statistics_ready",
             "conclusion_decision",
+            "quality_subclaim_decisions",
+            "per_attack_quality_decisions",
+            "cross_attack_quality_decision",
+            "quality_preservation_claim_decision",
             "supports_paper_claim",
         ),
         artifact_id=artifact_id,
+    )
+    try:
+        quality_decision = validate_claim_decision(
+            summary.get("quality_preservation_claim_decision", {})
+        )
+        quality_subclaim_values = summary.get("quality_subclaim_decisions", {})
+        per_attack_values = summary.get("per_attack_quality_decisions", {})
+        if (
+            not isinstance(quality_subclaim_values, Mapping)
+            or set(quality_subclaim_values) != set(QUALITY_SUBCLAIM_IDS)
+            or not isinstance(per_attack_values, Mapping)
+        ):
+            raise ValueError("质量子主张或逐攻击映射不完整")
+        quality_subclaims = {
+            claim_id: validate_claim_decision(quality_subclaim_values[claim_id])
+            for claim_id in QUALITY_SUBCLAIM_IDS
+        }
+        quality_protocol = load_paper_quality_claim_protocol()
+        if (
+            summary.get("paper_quality_claim_protocol") != quality_protocol
+            or set(per_attack_values)
+            != set(quality_protocol["registered_attack_ids"])
+        ):
+            raise ValueError("质量协议或逐攻击集合发生漂移")
+        per_attack_decisions = {
+            attack_id: validate_claim_decision(per_attack_values[attack_id])
+            for attack_id in quality_protocol["registered_attack_ids"]
+        }
+        cross_attack_decision = validate_claim_decision(
+            summary.get("cross_attack_quality_decision", {})
+        )
+    except ValueError as exc:
+        raise RuntimeError(f"{artifact_id} 质量主张决策无法复验") from exc
+    required_quality_decisions = [
+        *quality_subclaims.values(),
+        cross_attack_decision,
+    ]
+    expected_quality_complete = all(
+        decision["evidence_complete"] for decision in required_quality_decisions
+    )
+    expected_quality_support = (
+        all(
+            decision["scientific_support"] is True
+            for decision in required_quality_decisions
+        )
+        if expected_quality_complete
+        else None
     )
     if not all(
         (
             summary.get("randomization_dataset_quality_statistics_ready") is True,
             summary.get("quality_metric_status") == "measured",
-            summary.get("conclusion_decision") == "measured_evidence_component",
-            summary.get("supports_paper_claim") is False,
+            summary.get("conclusion_decision") == quality_decision["decision"],
+            summary.get("supports_paper_claim")
+            is (quality_decision["scientific_support"] is True),
+            quality_decision["evidence_complete"] is expected_quality_complete,
+            quality_decision["scientific_support"] is expected_quality_support,
         )
     ):
         raise RuntimeError(f"{artifact_id} FID/KID 测量分量未完整重建")
@@ -585,7 +645,15 @@ def _derive_dataset_quality_component(
         "component_role": "dataset_quality_measurement",
         "component_evidence_ready": True,
         "contributes_to_central_claim_gate": False,
-        "component_decision": "measured_evidence_component",
+        "component_decision": quality_decision["decision"],
+        "quality_subclaim_decisions": summary["quality_subclaim_decisions"],
+        "per_attack_quality_decisions": summary[
+            "per_attack_quality_decisions"
+        ],
+        "cross_attack_quality_decision": summary[
+            "cross_attack_quality_decision"
+        ],
+        "quality_preservation_claim_decision": quality_decision,
     }
 
 
@@ -878,20 +946,10 @@ def _write_closure_gate(
                     ),
                 ),
             ),
-            "quality_preservation": build_claim_decision(
-                "quality_preservation",
-                evidence_complete=False,
-                scientific_support=None,
-                evidence_artifact_ids=(
-                    str(
-                        records_by_role["dataset_quality_measurement"][
-                            "artifact_id"
-                        ]
-                    ),
-                ),
-                evidence_blockers=(
-                    "quality_noninferiority_decision_protocol_not_registered",
-                ),
+            "quality_preservation": dict(
+                records_by_role["dataset_quality_measurement"][
+                    "quality_preservation_claim_decision"
+                ]
             ),
             "mechanism_necessity": build_claim_decision(
                 "mechanism_necessity",

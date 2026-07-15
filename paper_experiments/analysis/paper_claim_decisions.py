@@ -138,6 +138,12 @@ def _validate_claim_decision(record: Mapping[str, Any]) -> dict[str, Any]:
     return rebuilt
 
 
+def validate_claim_decision(record: Mapping[str, Any]) -> dict[str, Any]:
+    """公开复验一个主张决策, 供独立 writer 与 gate 共用。"""
+
+    return _validate_claim_decision(record)
+
+
 def build_claim_decision_bundle(
     claim_decisions: Mapping[str, Mapping[str, Any]],
     *,
