@@ -26,6 +26,11 @@ from experiments.protocol.paper_run_config import (
 )
 from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
+from paper_experiments.analysis.paper_claim_decisions import (
+    build_claim_decision,
+    build_claim_decision_bundle,
+    validate_claim_decision_bundle,
+)
 from paper_experiments.runners.closure_package_selection import (
     normalize_clean_code_version,
 )
@@ -840,9 +845,84 @@ def _write_closure_gate(
     }
     if measurement_component_roles != required_measurement_component_roles:
         raise RuntimeError("论文必要测量证据组件集合不完整")
-    supports_paper_claim = all(claim_gate_records.values())
-    conclusion_decision = (
-        "supported" if supports_paper_claim else "measured_not_supported"
+    records_by_role = {
+        str(record["component_role"]): record for record in artifact_records
+    }
+    claim_decision_bundle = build_claim_decision_bundle(
+        {
+            "fixed_fpr_detection": build_claim_decision(
+                "fixed_fpr_detection",
+                evidence_complete=True,
+                scientific_support=claim_gate_records[
+                    "fixed_fpr_negative_population_gate"
+                ],
+                evidence_artifact_ids=(
+                    str(
+                        records_by_role[
+                            "fixed_fpr_negative_population_gate"
+                        ]["artifact_id"]
+                    ),
+                ),
+            ),
+            "baseline_superiority": build_claim_decision(
+                "baseline_superiority",
+                evidence_complete=True,
+                scientific_support=claim_gate_records[
+                    "paired_quality_matched_superiority_gate"
+                ],
+                evidence_artifact_ids=(
+                    str(
+                        records_by_role[
+                            "paired_quality_matched_superiority_gate"
+                        ]["artifact_id"]
+                    ),
+                ),
+            ),
+            "quality_preservation": build_claim_decision(
+                "quality_preservation",
+                evidence_complete=False,
+                scientific_support=None,
+                evidence_artifact_ids=(
+                    str(
+                        records_by_role["dataset_quality_measurement"][
+                            "artifact_id"
+                        ]
+                    ),
+                ),
+                evidence_blockers=(
+                    "quality_noninferiority_decision_protocol_not_registered",
+                ),
+            ),
+            "mechanism_necessity": build_claim_decision(
+                "mechanism_necessity",
+                evidence_complete=True,
+                scientific_support=claim_gate_records[
+                    "mechanism_necessity_gate"
+                ],
+                evidence_artifact_ids=(
+                    str(
+                        records_by_role["mechanism_necessity_gate"][
+                            "artifact_id"
+                        ]
+                    ),
+                ),
+            ),
+            "parameter_robustness": build_claim_decision(
+                "parameter_robustness",
+                evidence_complete=False,
+                scientific_support=None,
+                evidence_artifact_ids=(
+                    str(
+                        records_by_role[
+                            "single_model_parameter_sensitivity"
+                        ]["artifact_id"]
+                    ),
+                ),
+                evidence_blockers=(
+                    "parameter_robustness_decision_protocol_not_registered",
+                ),
+            ),
+        }
     )
     paper_run_name = str(source.payload["paper_run_name"])
     output_dir = root_path / "outputs" / "paper_result_closure" / paper_run_name
@@ -866,8 +946,7 @@ def _write_closure_gate(
         ),
         "statistics_rebuilt_from_aggregate": True,
         "paper_result_evidence_ready": True,
-        "conclusion_decision": conclusion_decision,
-        "supports_paper_claim": supports_paper_claim,
+        **claim_decision_bundle,
     }
     report = {
         **report_core,
@@ -900,8 +979,7 @@ def _write_closure_gate(
         "metadata": {
             "paper_result_evidence_ready": True,
             "report_sha256": _file_sha256(report_path),
-            "conclusion_decision": conclusion_decision,
-            "supports_paper_claim": supports_paper_claim,
+            **claim_decision_bundle,
         },
     }
     manifest_without_digest = {
@@ -940,16 +1018,17 @@ def _write_complete_archive(
 
     paper_run_name = str(source.payload["paper_run_name"])
     gate_report = _read_json_object(gate_report_path)
+    try:
+        claim_decision_bundle = validate_claim_decision_bundle(gate_report)
+    except ValueError as exc:
+        raise RuntimeError("论文结果闭合报告主张决策无法复验") from exc
     if (
         gate_report.get("paper_result_evidence_ready") is not True
-        or not isinstance(gate_report.get("supports_paper_claim"), bool)
         or gate_report.get("paper_run_name") != paper_run_name
         or float(gate_report.get("target_fpr", -1.0))
         != float(source.payload["target_fpr"])
     ):
         raise RuntimeError("论文结果闭合报告尚未形成可归档判定")
-    supports_paper_claim = bool(gate_report["supports_paper_claim"])
-    conclusion_decision = str(gate_report.get("conclusion_decision", ""))
     source_paths: list[Path] = []
     for spec in _CLOSURE_ARTIFACT_SPECS:
         source_paths.extend(_expected_artifact_paths(root_path, spec, paper_run_name))
@@ -976,8 +1055,7 @@ def _write_complete_archive(
             for member_name, (_path, digest) in sorted(member_payloads.items())
         },
         "paper_result_evidence_ready": True,
-        "conclusion_decision": conclusion_decision,
-        "supports_paper_claim": supports_paper_claim,
+        **claim_decision_bundle,
     }
     archive_manifest = {
         **archive_manifest_core,
@@ -1098,8 +1176,7 @@ def run_paper_result_closure_commands(
         "paper_result_evidence_ready": gate_report["paper_result_evidence_ready"],
         "archive_path": archive_path.as_posix(),
         "archive_sha256": _file_sha256(archive_path),
-        "conclusion_decision": gate_report["conclusion_decision"],
-        "supports_paper_claim": gate_report["supports_paper_claim"],
+        **validate_claim_decision_bundle(gate_report),
     }
 
 

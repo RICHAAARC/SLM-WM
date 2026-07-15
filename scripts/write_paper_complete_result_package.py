@@ -31,6 +31,10 @@ from experiments.runtime.dependency_profiles import (
 )
 from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
+from paper_experiments.analysis.paper_claim_decisions import (
+    ClaimDecisionGovernanceError,
+    validate_claim_decision_bundle,
+)
 from paper_experiments.analysis.result_closure_gate import build_source_file_sha256_map
 from paper_experiments.analysis.result_analysis_payload import (
     build_governed_paper_payload_path_map,
@@ -718,6 +722,12 @@ def build_result_closure_gate_status(
     manifest_path = gate_dir / "manifest.local.json"
     report = read_json(report_path)
     manifest = read_json(manifest_path)
+    try:
+        claim_decision_bundle = validate_claim_decision_bundle(report)
+        claim_decision_bundle_ready = True
+    except ClaimDecisionGovernanceError:
+        claim_decision_bundle = {}
+        claim_decision_bundle_ready = False
     report_relative = relative_or_absolute(report_path, root_path)
     manifest_relative = relative_or_absolute(manifest_path, root_path)
     output_paths_value = manifest.get("output_paths", ())
@@ -861,7 +871,7 @@ def build_result_closure_gate_status(
         and report.get("closure_decision") == "pass"
         and report.get("evidence_closure_allowed") is True
         and report.get("blocked_check_count") == 0
-        and report.get("supports_paper_claim") is True
+        and claim_decision_bundle_ready
         and source_map_shape_ready
         and source_files_ready
         and closure_source_file_digest_ready
@@ -885,6 +895,8 @@ def build_result_closure_gate_status(
         "current_repository_code_version_ready": current_repository_code_version_ready,
         "result_closure_ready": report_ready and manifest_ready,
         "closure_decision": report.get("closure_decision", ""),
+        "claim_decision_bundle_ready": claim_decision_bundle_ready,
+        **claim_decision_bundle,
     }
 
 
@@ -921,7 +933,6 @@ def build_readiness_summary(
         )
     )
     entry_list = tuple(entries)
-    run_claim_ready = common_protocol_summary.get("paper_run_claim_ready") is True
     resolved_randomization_aggregate_status = dict(
         randomization_aggregate_status
     )
@@ -936,6 +947,9 @@ def build_readiness_summary(
             )
         ),
     )
+    run_claim_ready = (
+        result_closure_gate_status.get("registered_claim_set_supported") is True
+    )
     dependency_lock_status = build_dependency_lock_status(
         root_path,
         archive_entries=entry_list,
@@ -944,7 +958,6 @@ def build_readiness_summary(
         not missing_dirs
         and not manifestless_dirs
         and bool(entry_list)
-        and run_claim_ready
         and resolved_randomization_aggregate_status.get(
             "randomization_aggregate_ready"
         )
@@ -980,7 +993,7 @@ def build_readiness_summary(
         "paper_run_complete_result_package_ready": package_ready,
         "paper_run_claim_ready": run_claim_ready,
         "paper_run_claim_type": common_protocol_summary.get("paper_run_claim_type", ""),
-        "supports_paper_claim": package_ready and run_claim_ready,
+        "supports_paper_claim": run_claim_ready,
     }
 
 

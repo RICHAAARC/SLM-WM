@@ -45,6 +45,10 @@ evidence_incomplete
 
 `registered_claim_set_supported` 只能由预登记 `required_claims` 的三态决策派生。兼容字段 `supports_paper_claim` 暂时保留, 但只能等于对应登记主张集合的派生结果, 不得由 writer 或 manifest 自行写成原始事实。
 
+冻结登记表位于 `configs/paper_claim_registry.json`, 集中构造与 validator 位于 `paper_experiments/analysis/paper_claim_decisions.py`。当前必要主张为 fixed-FPR 检测、baseline 优势、质量保持和机制必要性。`parameter_robustness` 当前登记为可选主张, 因而单模型内部敏感性证据不完整或未支持不会否决固定参数下的必要主张集合。
+
+阶段1只建立决策结构, 不把已有 FID/KID 测量自动提升为质量保持结论。因此在质量非劣效统计协议接入前, `quality_preservation` 必须为 `evidence_incomplete`; 这不等价于实验已经测得质量不支持。完整结果包仍允许归档该状态, 因为归档闭合与科学支持是两个独立判定。
+
 ## 四、运行流程就绪边界
 
 运行流程闭合与科学结论必须独立：

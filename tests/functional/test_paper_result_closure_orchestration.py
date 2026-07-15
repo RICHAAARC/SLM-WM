@@ -376,8 +376,20 @@ def test_run_rebuilds_gates_and_archives_governed_outputs(
     archive_path = Path(result["archive_path"])
     assert len(executed) == 5
     assert result["paper_result_evidence_ready"] is True
-    assert result["conclusion_decision"] == "supported"
-    assert result["supports_paper_claim"] is True
+    assert result["conclusion_decision"] == "evidence_incomplete"
+    assert result["supports_paper_claim"] is False
+    assert result["claim_decisions"]["fixed_fpr_detection"]["decision"] == (
+        "supported"
+    )
+    assert result["claim_decisions"]["baseline_superiority"]["decision"] == (
+        "supported"
+    )
+    assert result["claim_decisions"]["quality_preservation"]["decision"] == (
+        "evidence_incomplete"
+    )
+    assert result["claim_decisions"]["mechanism_necessity"]["decision"] == (
+        "supported"
+    )
     assert archive_path.is_file()
     with ZipFile(archive_path) as archive:
         names = set(archive.namelist())
@@ -389,7 +401,10 @@ def test_run_rebuilds_gates_and_archives_governed_outputs(
     assert "inputs/randomization_aggregate_provenance.zip" in names
     assert "paper_complete_result_archive_manifest.json" in names
     assert archive_manifest["paper_result_evidence_ready"] is True
-    assert archive_manifest["supports_paper_claim"] is True
+    assert archive_manifest["supports_paper_claim"] is False
+    assert archive_manifest["registered_claim_set_decision"] == (
+        "evidence_incomplete"
+    )
     assert (
         f"outputs/paper_result_closure/{PAPER_RUN_NAME}/"
         "paper_result_closure_gate_report.json"
@@ -428,8 +443,16 @@ def test_gate_separates_reconstructable_evidence_from_unsupported_claim(
 
     assert report["paper_result_evidence_ready"] is True
     assert report["supports_paper_claim"] is False
-    assert report["conclusion_decision"] == "measured_not_supported"
+    assert report["conclusion_decision"] == "evidence_incomplete"
     assert report["unsupported_claim_gate_roles"] == [expected_role]
+    claim_by_role = {
+        "fixed_fpr_negative_population_gate": "fixed_fpr_detection",
+        "paired_quality_matched_superiority_gate": "baseline_superiority",
+        "mechanism_necessity_gate": "mechanism_necessity",
+    }
+    assert report["claim_decisions"][claim_by_role[expected_role]]["decision"] == (
+        "measured_not_supported"
+    )
 
 
 @pytest.mark.quick
@@ -453,7 +476,13 @@ def test_dataset_quality_measurement_does_not_vote_against_central_claim(
     )
     assert quality_record["supports_paper_claim"] is False
     assert quality_record["contributes_to_central_claim_gate"] is False
-    assert report["supports_paper_claim"] is True
+    assert report["supports_paper_claim"] is False
+    assert report["claim_decisions"]["quality_preservation"]["decision"] == (
+        "evidence_incomplete"
+    )
+    assert report["claim_decisions"]["quality_preservation"][
+        "scientific_support"
+    ] is None
 
 
 @pytest.mark.quick

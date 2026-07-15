@@ -300,7 +300,7 @@ Notebook 与 repository module 的跨边界数据
 | trace_source | runtime | none | false | false | false | latent trace 的来源后端。 |
 | capture_id | runtime | none | true | false | false | attention capture record 的稳定标识。 |
 | capture_backend | runtime | none | true | false | false | attention capture record 的捕获后端。 |
-| supports_paper_claim | governance | none | true | false | false | 记录或摘要是否允许支持正式论文 claim。 |
+| supports_paper_claim | governance | none | true | false | true | 兼容结论字段; 在论文结论产物中只能由 `registered_claim_set_supported` 派生, 组件级 false 仍只表示该组件不得单独投票。 |
 | config_digests | artifact | none | false | false | false | runtime manifest 中记录的配置摘要集合。 |
 | generation_record_count | runtime | none | false | false | false | runtime summary 中 generation record 数量。 |
 | latent_trace_record_count | runtime | none | false | false | false | runtime summary 中 latent trace record 数量。 |
@@ -1713,7 +1713,7 @@ Notebook 与 repository module 的跨边界数据
 | strict_formal_result_ready | governance | none | true | false | false | 单条共同协议结果记录是否已经通过正式真实测量证据门禁。|
 | nonformal_evidence_rejection_policy | governance | none | false | false | false | 非正式证据进入共同协议结果导入时的拒绝策略。|
 | paper_run_complete_result_package_ready | governance | none | false | false | false | 当前论文运行层级完整结果包是否已经覆盖所有必需输出目录并完成归档。|
-| paper_run_claim_ready | governance | none | false | false | false | 当前论文运行层级的正式主张是否已经通过共同协议、证据覆盖和优势性门禁。|
+| paper_run_claim_ready | governance | none | false | false | true | 完整结果包中的兼容字段, 只能等于经过复验的 `registered_claim_set_supported`, 不表示打包流程就绪。|
 | prompt_split_digest | artifact | none | false | false | false | 共同协议使用的 prompt split 稳定摘要。|
 | attack_matrix_digest | artifact | none | false | false | false | 共同协议使用的攻击矩阵稳定摘要。|
 | fixed_fpr_protocol_digest | artifact | none | false | false | false | fixed-FPR 校准协议的稳定摘要。|
@@ -2639,12 +2639,22 @@ Notebook 与 repository module 的跨边界数据
 | paired_superiority_rows_digest | provenance | none | true | true | false | 对按主表 baseline 稳定排序的4行总体配对统计计算的稳定摘要。 |
 | method_repeat_threshold_digest_map | provenance | none | true | true | false | 精确9个 repeat 到 SLM-WM 与4个 baseline 独立 fixed-FPR 阈值摘要的规范映射。 |
 | method_repeat_threshold_map_digest | provenance | none | true | true | false | 对完整45项 method-repeat 阈值摘要映射计算的稳定摘要。 |
-| conclusion_decision | governance | none | true | true | false | 当前统计结论状态; 精确9重复合并主表只有全样本与质量匹配优势均通过时为 supported, 否则为 measured_not_supported。 |
+| conclusion_decision | governance | none | true | true | true | 兼容三态结论字段, 只能等于 `registered_claim_set_decision`, 不得把证据缺失写成 measured_not_supported。 |
 | claim_decisions | governance | none | true | true | false | 以预登记主张标识为键保存各项论文主张三态决策的映射, 不保存未经重建的人工结论。 |
+| registered_claim_ids | governance | none | true | true | false | 冻结主张登记表中全部必要与可选论文主张的稳定顺序集合。 |
 | required_claims | governance | none | true | true | false | 当前论文结论必须满足的预登记主张标识集合。 |
+| optional_claims | governance | none | true | true | false | 已登记但不参与集合级否决的主张集合; 当前仅包含单模型内部参数稳定性。 |
 | evidence_complete | governance | none | true | true | false | 当前主张所需原子记录、统计和 provenance 是否完整可审计。 |
 | scientific_support | governance | none | true | true | false | 在证据完整前提下, 当前主张是否满足预登记科学判据。 |
-| registered_claim_set_supported | governance | none | true | true | false | `required_claims` 中全部主张均为 supported 时派生的集合级支持状态。 |
+| evidence_artifact_ids | provenance | none | true | true | false | 单项主张决策实际引用的受治理产物标识集合。 |
+| evidence_blockers | governance | none | true | true | false | `evidence_incomplete` 主张缺少的协议或证据原因; 完整证据必须为空。 |
+| claim_decision_digest | provenance | none | true | true | true | 单项主张的完整性、科学判定、三态、证据引用与缺失原因的稳定摘要。 |
+| paper_claim_registry_digest | provenance | none | true | true | true | 冻结论文主张登记表完整正文的稳定摘要。 |
+| registered_claim_set_evidence_complete | governance | none | true | true | true | `required_claims` 的证据是否全部完整; 可选主张不得改变该值。 |
+| registered_claim_set_scientific_support | governance | none | true | true | true | 必要主张证据完整时的集合科学判定; 证据不完整时必须为空。 |
+| registered_claim_set_decision | governance | none | true | true | true | 必要主张集合按缺失优先、其次否定、最后支持规则派生的唯一三态决策。 |
+| registered_claim_set_supported | governance | none | true | true | true | `required_claims` 中全部主张均为 supported 时派生的集合级支持状态。 |
+| claim_decision_bundle_ready | governance | none | false | true | true | 完整结果包 validator 是否已从单项决策重算并确认全部集合级与兼容字段。 |
 | probe_workflow_closed | governance | none | true | false | false | `probe_paper` 是否真实执行全部正式步骤并形成完整受治理产物, 不表达科学效果。 |
 | protocol_isomorphism_ready | governance | none | true | false | false | 三个论文 profile 删除允许变化的规模字段后是否具有相同协议语义。 |
 | artifact_contract_isomorphic | governance | none | true | false | false | 三个论文 profile 是否要求相同产物 schema、gate 角色和主张决策结构。 |

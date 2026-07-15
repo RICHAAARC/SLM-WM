@@ -2,6 +2,8 @@
 
 此目录保存论文运行配置、prompt 配置和运行环境约束记录。
 
+`paper_claim_registry.json` 冻结5项论文主张、必要主张集合、可选主张集合和唯一三态决策枚举。当前 `parameter_robustness` 是可选主张, 不得无条件否决固定参数下的必要结论；旧 `supports_paper_claim` 只能由必要主张集合的重算结果派生。
+
 `core_method_dependency_identity.json` 只定义最小核心方法包的可安装边界: Python `>=3.11`、`torch>=2.11,<2.12`、`setuptools.build_meta` 构建后端以及唯一 `main` 包根。PyTorch 范围与正式 SD3.5 GPU 锁中的2.11系列一致, 具体 CPU 或 CUDA wheel 由安装环境负责选择。该身份不替代、引用或放宽论文实验层的六个完整 wheel 哈希锁。
 
 ## 论文 prompt 配置

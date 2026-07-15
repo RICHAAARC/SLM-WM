@@ -3702,6 +3702,20 @@ def test_result_closure_gate_passes_only_when_all_semantic_evidence_is_ready() -
     assert report["evidence_closure_allowed"] is True
     assert report["closure_decision"] == "pass"
     assert report["blocked_check_count"] == 0
+    assert report["registered_claim_set_decision"] == "evidence_incomplete"
+    assert report["supports_paper_claim"] is False
+    assert report["claim_decisions"]["fixed_fpr_detection"]["decision"] == (
+        "supported"
+    )
+    assert report["claim_decisions"]["baseline_superiority"]["decision"] == (
+        "supported"
+    )
+    assert report["claim_decisions"]["quality_preservation"]["decision"] == (
+        "evidence_incomplete"
+    )
+    assert report["claim_decisions"]["mechanism_necessity"]["decision"] == (
+        "supported"
+    )
     assert all(row["check_status"] == "pass" for row in checks)
     assert bundle.result_analysis_summary["superiority_claim_ready_count"] == 0
     assert bundle.result_analysis_summary["universal_per_attack_superiority_claim_ready"] is False

@@ -92,6 +92,10 @@ from paper_experiments.analysis.formal_record_statistics import (
     rebuild_and_validate_dataset_quality_feature_identity,
     rebuild_and_validate_formal_fid_kid_metrics,
 )
+from paper_experiments.analysis.paper_claim_decisions import (
+    build_claim_decision,
+    build_claim_decision_bundle,
+)
 from paper_experiments.analysis.paper_evidence_audit import (
     AuditInputBundle,
     build_evidence_audit_manifest_config,
@@ -4479,6 +4483,107 @@ def build_result_closure_gate_checks(bundle: ResultClosureGateInput) -> list[dic
     ]
 
 
+def _build_result_closure_claim_decisions(
+    bundle: ResultClosureGateInput,
+    *,
+    workflow_ready: bool,
+) -> dict[str, Any]:
+    """把已复验的闭合输入映射为分主张科学决策。"""
+
+    workflow_blockers = () if workflow_ready else ("result_closure_workflow_not_ready",)
+
+    def governed_decision(
+        claim_id: str,
+        scientific_support: bool,
+        evidence_artifact_ids: tuple[str, ...],
+    ) -> dict[str, Any]:
+        if workflow_ready:
+            return build_claim_decision(
+                claim_id,
+                evidence_complete=True,
+                scientific_support=scientific_support,
+                evidence_artifact_ids=evidence_artifact_ids,
+            )
+        return build_claim_decision(
+            claim_id,
+            evidence_complete=False,
+            scientific_support=None,
+            evidence_artifact_ids=evidence_artifact_ids,
+            evidence_blockers=workflow_blockers,
+        )
+
+    return build_claim_decision_bundle(
+        {
+            "fixed_fpr_detection": governed_decision(
+                "fixed_fpr_detection",
+                _strict_bool(
+                    bundle.common_protocol_summary.get(
+                        "slm_wm_fixed_fpr_boundary_ready"
+                    )
+                )
+                and _strict_bool(
+                    bundle.evidence_audit_runtime_report.get(
+                        "raw_content_claim_ready"
+                    )
+                ),
+                (
+                    "fixed_fpr_threshold_audit_manifest",
+                    "paper_fixed_fpr_common_protocol_manifest",
+                    f"{bundle.expected_paper_claim_scale}_image_only_dataset_runtime_manifest",
+                ),
+            ),
+            "baseline_superiority": governed_decision(
+                "baseline_superiority",
+                _strict_bool(
+                    bundle.paired_superiority_summary.get(
+                        "overall_paired_superiority_ready"
+                    )
+                )
+                and _strict_bool(
+                    bundle.paired_superiority_summary.get(
+                        "overall_quality_matched_superiority_ready"
+                    )
+                ),
+                (
+                    "primary_baseline_evidence_manifest",
+                    "paired_superiority_analysis_manifest",
+                ),
+            ),
+            "quality_preservation": build_claim_decision(
+                "quality_preservation",
+                evidence_complete=False,
+                scientific_support=None,
+                evidence_artifact_ids=("dataset_level_quality_manifest",),
+                evidence_blockers=(
+                    *workflow_blockers,
+                    "quality_noninferiority_decision_protocol_not_registered",
+                ),
+            ),
+            "mechanism_necessity": governed_decision(
+                "mechanism_necessity",
+                _strict_bool(
+                    bundle.ablation_summary.get(
+                        "all_mechanism_necessity_components_supported"
+                    )
+                ),
+                ("formal_mechanism_ablation_manifest",),
+            ),
+            "parameter_robustness": build_claim_decision(
+                "parameter_robustness",
+                evidence_complete=False,
+                scientific_support=None,
+                evidence_artifact_ids=(
+                    "randomization_branch_risk_parameter_sensitivity_manifest",
+                ),
+                evidence_blockers=(
+                    *workflow_blockers,
+                    "parameter_robustness_evidence_not_bound_to_closure_input",
+                ),
+            ),
+        }
+    )
+
+
 def build_result_closure_gate_report(
     bundle: ResultClosureGateInput,
     checks: Iterable[Mapping[str, Any]],
@@ -4610,6 +4715,10 @@ def build_result_closure_gate_report(
         "submission_readiness_digest": build_stable_digest(bundle.submission_readiness_report),
         "entry_review_digest": build_stable_digest(bundle.entry_review_report),
     }
+    claim_decision_bundle = _build_result_closure_claim_decisions(
+        bundle,
+        workflow_ready=ready,
+    )
     return {
         "construction_unit_name": "paper_result_closure_gate",
         "paper_claim_scale": bundle.expected_paper_claim_scale,
@@ -4635,5 +4744,5 @@ def build_result_closure_gate_report(
         "evidence_closure_allowed": ready,
         "result_closure_ready": ready,
         "closure_decision": "pass" if ready else "blocked",
-        "supports_paper_claim": ready,
+        **claim_decision_bundle,
     }
