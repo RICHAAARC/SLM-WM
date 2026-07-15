@@ -2640,6 +2640,15 @@ Notebook 与 repository module 的跨边界数据
 | method_repeat_threshold_digest_map | provenance | none | true | true | false | 精确9个 repeat 到 SLM-WM 与4个 baseline 独立 fixed-FPR 阈值摘要的规范映射。 |
 | method_repeat_threshold_map_digest | provenance | none | true | true | false | 对完整45项 method-repeat 阈值摘要映射计算的稳定摘要。 |
 | conclusion_decision | governance | none | true | true | false | 当前统计结论状态; 精确9重复合并主表只有全样本与质量匹配优势均通过时为 supported, 否则为 measured_not_supported。 |
+| claim_decisions | governance | none | true | true | false | 以预登记主张标识为键保存各项论文主张三态决策的映射, 不保存未经重建的人工结论。 |
+| required_claims | governance | none | true | true | false | 当前论文结论必须满足的预登记主张标识集合。 |
+| evidence_complete | governance | none | true | true | false | 当前主张所需原子记录、统计和 provenance 是否完整可审计。 |
+| scientific_support | governance | none | true | true | false | 在证据完整前提下, 当前主张是否满足预登记科学判据。 |
+| registered_claim_set_supported | governance | none | true | true | false | `required_claims` 中全部主张均为 supported 时派生的集合级支持状态。 |
+| probe_workflow_closed | governance | none | true | false | false | `probe_paper` 是否真实执行全部正式步骤并形成完整受治理产物, 不表达科学效果。 |
+| protocol_isomorphism_ready | governance | none | true | false | false | 三个论文 profile 删除允许变化的规模字段后是否具有相同协议语义。 |
+| artifact_contract_isomorphic | governance | none | true | false | false | 三个论文 profile 是否要求相同产物 schema、gate 角色和主张决策结构。 |
+| workflow_transfer_ready | governance | none | true | false | false | `probe_workflow_closed`、协议同构和产物契约同构共同派生的流程迁移状态, 不表达 pilot/full 科学结论。 |
 | paired_prompt_counts | metric | none | true | true | false | 配对优势 summary 中4个主表 baseline 的唯一 Prompt 数量集合。 |
 | paired_attack_counts | metric | none | true | true | false | 配对优势 summary 中4个主表 baseline 的攻击条件数量集合。 |
 | paired_outcome_count | metric | none | true | true | false | 4个主表 baseline 的全部 Prompt x attack 配对结果总数。 |

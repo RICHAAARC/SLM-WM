@@ -562,13 +562,19 @@ def _formal_detection_record(record: dict[str, object]) -> dict[str, object]:
         "metadata": {
             **dict(record.get("metadata", {})),
             "rescue_margin_low": -0.2,
+            "attention_geometry_enabled": True,
+            "image_alignment_enabled": True,
+            "stable_pair_weight_identity_ready": False,
         },
-        "aligned_content_score": None,
+        "aligned_content_score": float(record["content_score"]),
         "attention_geometry_score": 0.0,
+        "raw_attention_geometry_score": 0.0,
         "registration_confidence": 0.0,
         "attention_sync_score": 0.0,
         "geometry_reliable": False,
-        "alignment": None,
+        "alignment": {
+            "registration_geometry_reliable": False,
+        },
     })
 
 

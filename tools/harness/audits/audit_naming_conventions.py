@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.harness.lib.file_scanner import should_skip_path
+from tools.harness.lib.file_scanner import iter_governed_paths
 from tools.harness.lib.json_report import build_report, exit_with_report
 from tools.harness.lib.naming_rules import (
     has_reserved_progress_marker,
@@ -30,10 +30,8 @@ def run_audit(root: str | Path) -> dict:
     root_path = Path(root)
     violations = []
     checked_paths = []
-    for path in root_path.rglob("*"):
+    for path in iter_governed_paths(root_path):
         relative = path.relative_to(root_path)
-        if should_skip_path(relative):
-            continue
         checked_paths.append(str(relative))
         if path.is_dir():
             if not is_allowed_directory_name(path.name):

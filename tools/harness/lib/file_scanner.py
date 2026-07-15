@@ -41,6 +41,8 @@ BINARY_SUFFIXES = {
 DEFAULT_GOVERNED_SCAN_ROOTS = (
     "AGENTS.md",
     "README.md",
+    ".gitattributes",
+    ".gitignore",
     "pyproject.toml",
     ".codex",
     "configs",
@@ -50,6 +52,7 @@ DEFAULT_GOVERNED_SCAN_ROOTS = (
     "tests",
     "scripts",
     "experiments",
+    "paper_experiments",
     "paper_workflow",
     "external_baseline",
 )
@@ -98,15 +101,34 @@ def iter_text_files(root: str | Path) -> Iterator[Path]:
         yield path
 
 
-def iter_governed_text_files(root: str | Path) -> Iterator[Path]:
-    """按默认受治理根目录遍历文本文件。"""
+def iter_governed_paths(root: str | Path) -> Iterator[Path]:
+    """遍历项目契约明确登记的受治理路径。
+
+    该函数采用正向根目录登记, 使未跟踪的新项目文件仍接受审计, 同时把
+    `.claude/`、`.gitnexus/` 和 `CLAUDE.md` 等外部工具元数据留在项目命名
+    契约之外。新增正式项目根目录时必须同步扩展登记和约束测试, 不能通过
+    临时排除具体违规文件绕过审计。
+    """
 
     root_path = Path(root)
     for relative_root in DEFAULT_GOVERNED_SCAN_ROOTS:
         candidate = root_path / relative_root
-        if not candidate.exists() or should_skip_path(candidate):
+        if not candidate.exists() or should_skip_path(relative_root):
             continue
-        if candidate.is_file():
-            yield candidate
-        else:
-            yield from iter_text_files(candidate)
+        yield candidate
+        if not candidate.is_dir():
+            continue
+        for path in candidate.rglob("*"):
+            relative = path.relative_to(root_path)
+            if should_skip_path(relative):
+                continue
+            yield path
+
+
+def iter_governed_text_files(root: str | Path) -> Iterator[Path]:
+    """按默认受治理根目录遍历文本文件。"""
+
+    for path in iter_governed_paths(root):
+        if not path.is_file() or path.suffix.lower() in BINARY_SUFFIXES:
+            continue
+        yield path
