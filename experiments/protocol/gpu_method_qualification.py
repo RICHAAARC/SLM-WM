@@ -26,6 +26,9 @@ from experiments.protocol.detection_key_identity import (
     build_detection_key_plan_record,
     validate_detection_key_identity_record,
 )
+from experiments.protocol.gpu_method_qualification_schema import (
+    GPU_METHOD_QUALIFICATION_SCHEMA,
+)
 from experiments.runtime.scientific_unit_provenance import (
     validate_scientific_unit_provenance,
 )
@@ -38,7 +41,6 @@ from main.core.keyed_prg import (
 )
 
 
-GPU_METHOD_QUALIFICATION_SCHEMA = "gpu_method_qualification_report_v1"
 GPU_OPERATOR_FACT_SCHEMA = "gpu_operator_preflight_fact_v1"
 GPU_RESOURCE_BUDGET_SCHEMA = "gpu_resource_budget_decision_v1"
 COMPLETE_FEATURE_WIDTH = 716

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -30,3 +32,42 @@ def test_gpu_qualification_is_server_entrypoint_not_notebook_implementation() ->
         assert "build_gpu_method_qualification_report" not in notebook_text
         assert "gpu_operator_preflight_ready" not in notebook_text
         assert "gpu_resource_budget_ready" not in notebook_text
+
+
+def test_formal_host_owns_fresh_host_qualification_entrypoint() -> None:
+    """fresh-host 公开入口必须先进入父编排, 不得直接加载科学方法."""
+
+    root = Path.cwd()
+    host_source = (root / "scripts/run_formal_workflow_host.py").read_text(
+        encoding="utf-8"
+    )
+    formal_entry_source = (root / "scripts/formal_workflow_entry.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'subparsers.add_parser("qualification")' in host_source
+    assert "run_gpu_method_qualification_host_workflow" in formal_entry_source
+    assert (
+        "scripts/run_formal_workflow_host.py"
+        in PROFILES["paper_experiment_execution_package"].required_entrypoints
+    )
+
+
+def test_orchestrator_qualification_import_does_not_load_gpu_runtime() -> None:
+    """CPU 父解释器导入资格化编排时不得提前导入 torch 或科学 runner."""
+
+    root = Path.cwd().resolve()
+    code = (
+        "import sys; "
+        f"sys.path.insert(0, {str(root)!r}); "
+        "import scripts.gpu_method_qualification_host_workflow; "
+        "assert 'torch' not in sys.modules; "
+        "assert 'experiments.protocol.gpu_method_qualification' not in sys.modules"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", code],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr

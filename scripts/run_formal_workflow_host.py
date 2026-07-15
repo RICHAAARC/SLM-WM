@@ -400,7 +400,7 @@ def build_child_command(
             )
         if arguments.persistent_output_dir:
             command.extend(["--persistent-output-dir", arguments.persistent_output_dir])
-    else:
+    elif arguments.operation == "repeat_evidence":
         command.extend(
             [
                 "--package-search-root",
@@ -409,6 +409,23 @@ def build_child_command(
                 arguments.randomization_repeat_id,
             ]
         )
+    elif arguments.operation == "qualification":
+        command.extend(
+            [
+                "--prompt-id",
+                arguments.prompt_id,
+                "--known-answer",
+                arguments.known_answer,
+                "--qualification-output-root",
+                arguments.qualification_output_root,
+            ]
+        )
+        if arguments.registered_budget:
+            command.extend(
+                ["--registered-budget", arguments.registered_budget]
+            )
+    else:
+        raise FormalWorkflowHostError("未知的正式宿主操作")
     return command
 
 
@@ -445,7 +462,7 @@ def launch_formal_workflow(arguments: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """构造 GPU workflow 与单 repeat 证据打包共用的宿主入口参数."""
+    """构造 GPU workflow、资格化与单 repeat 打包共用的宿主入口."""
 
     parser = argparse.ArgumentParser(
         description="从固定 uv wheel 创建精确 workflow_orchestrator 并执行论文入口."
@@ -484,6 +501,22 @@ def build_parser() -> argparse.ArgumentParser:
     repeat_evidence.add_argument("--package-search-root", required=True)
     repeat_evidence.add_argument("--randomization-repeat-id", required=True)
     repeat_evidence.add_argument("--result-path", required=True)
+    qualification = subparsers.add_parser("qualification")
+    qualification.add_argument(
+        "--paper-run-name",
+        required=True,
+        choices=("probe_paper", "pilot_paper", "full_paper"),
+    )
+    qualification.add_argument("--prompt-id", required=True)
+    qualification.set_defaults(
+        known_answer="configs/keyed_prg_cross_platform_known_answer.json"
+    )
+    qualification.add_argument("--registered-budget", default="")
+    qualification.add_argument(
+        "--qualification-output-root",
+        default="outputs/gpu_method_qualification",
+    )
+    qualification.add_argument("--result-path", required=True)
     return parser
 
 

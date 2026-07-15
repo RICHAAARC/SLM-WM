@@ -142,6 +142,7 @@ def test_gpu_qualification_binding_covers_commit_models_dependency_and_prompt() 
 def test_gpu_qualification_entry_uses_real_writer_and_operator_exit_gate(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     operator_ready: bool,
     expected_exit_code: int,
 ) -> None:
@@ -221,6 +222,7 @@ def test_gpu_qualification_entry_uses_real_writer_and_operator_exit_gate(
         lambda **_kwargs: {
             "gpu_operator_preflight_ready": operator_ready,
             "gpu_resource_budget_ready": False,
+            "qualification_report_digest": "d" * 64,
             "supports_paper_claim": False,
         },
     )
@@ -261,3 +263,10 @@ def test_gpu_qualification_entry_uses_real_writer_and_operator_exit_gate(
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["supports_paper_claim"] is False
     assert report["gpu_resource_budget_ready"] is False
+    invocation = json.loads(capsys.readouterr().out)
+    assert invocation["report_schema"] == (
+        "gpu_method_qualification_invocation_result_v1"
+    )
+    assert invocation["gpu_method_qualification_report_digest"] == "d" * 64
+    assert invocation["gpu_operator_preflight_ready"] is operator_ready
+    assert invocation["supports_paper_claim"] is False

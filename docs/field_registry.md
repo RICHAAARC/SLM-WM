@@ -3625,6 +3625,10 @@ Notebook 与 repository module 的跨边界数据
 | attack_conditioned_quality_statistics_ready | governance | none | false | true | true | 9-repeat 聚合是否完成逐攻击 Prompt bootstrap 与跨攻击质量决策。 |
 | gpu_operator_preflight_ready | governance | none | false | true | true | 单 Prompt 真实 CUDA 方法算子、数值门禁、三图保持、Q/K 归因和 PRG 固定向量是否全部通过。 |
 | gpu_resource_budget_ready | governance | none | false | true | true | 已登记 GPU 资源上限是否覆盖显存、单 Prompt 时间和估计总 GPU 小时。该字段不改变方法算子结论。 |
+| qualification_report_digest | provenance | none | false | true | true | 移除自身摘要字段后对 GPU 方法资格化报告规范内容计算的稳定摘要。 |
+| gpu_method_qualification_report_path | artifact | none | false | true | true | fresh-host 父编排复验通过的 GPU 方法资格化报告仓库相对路径。 |
+| gpu_method_qualification_report_sha256 | provenance | none | false | true | true | fresh-host 父编排从科学子进程取得并重新计算的 GPU 方法资格化报告文件 SHA-256。 |
+| gpu_method_qualification_report_digest | provenance | none | false | true | true | fresh-host 父编排复验后登记的 GPU 方法资格化报告规范内容稳定摘要。 |
 | resource_budget_evaluation_status | governance | none | false | true | true | 资源预算比较为 `pass`、`fail` 或缺少观测/上限时的未评估状态。 |
 | known_answer_report_digest | provenance | none | false | true | true | 当前平台重建公开 PRG uniform/Gaussian 固定向量报告的稳定摘要。 |
 | gpu_operator_preflight_report_digest | provenance | none | false | true | true | 不含资源预算判定的方法算子资格化报告摘要。 |

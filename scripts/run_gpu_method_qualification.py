@@ -21,6 +21,9 @@ from experiments.protocol.formal_randomization import formal_randomization_repea
 from experiments.protocol.gpu_method_qualification import (
     build_gpu_method_qualification_report,
 )
+from experiments.protocol.gpu_method_qualification_schema import (
+    GPU_METHOD_QUALIFICATION_INVOCATION_RESULT_SCHEMA,
+)
 from experiments.protocol.paper_run_config import (
     RUN_EXPECTED_PROMPT_COUNTS,
     build_paper_run_config,
@@ -295,7 +298,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    print(report_path)
+    invocation_result = {
+        "report_schema": GPU_METHOD_QUALIFICATION_INVOCATION_RESULT_SCHEMA,
+        "schema_version": 1,
+        "gpu_method_qualification_report_path": report_path.relative_to(
+            root
+        ).as_posix(),
+        "gpu_method_qualification_report_sha256": _file_sha256(report_path),
+        "gpu_method_qualification_report_digest": report[
+            "qualification_report_digest"
+        ],
+        "gpu_operator_preflight_ready": report[
+            "gpu_operator_preflight_ready"
+        ],
+        "gpu_resource_budget_ready": report["gpu_resource_budget_ready"],
+        "supports_paper_claim": False,
+    }
+    print(json.dumps(invocation_result, ensure_ascii=False, sort_keys=True))
     return 0 if report["gpu_operator_preflight_ready"] else 1
 
 

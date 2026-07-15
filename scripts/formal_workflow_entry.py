@@ -35,6 +35,10 @@ from scripts.run_gpu_server_workflow import (  # noqa: E402
     _require_workflow_orchestrator_environment,
     run_workflow,
 )
+from scripts.gpu_method_qualification_host_workflow import (  # noqa: E402
+    QUALIFICATION_WORKFLOW_NAME,
+    run_gpu_method_qualification_host_workflow,
+)
 
 
 ORCHESTRATOR_PROFILE_ID = "workflow_orchestrator"
@@ -127,6 +131,8 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
     execution_lock = publish_formal_execution_lock(
         build_formal_execution_lock(root, arguments.repository_commit)
     )
+    decision = "pass"
+    failure_reasons: list[str] = []
     if arguments.operation == "gpu":
         result = _gpu_result(arguments, root)
         workflow_name = arguments.workflow
@@ -145,7 +151,7 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             raise RuntimeError("GPU workflow 返回的 repeat 身份与请求不一致")
         randomization_scope = str(result.get("randomization_scope", ""))
         resolved_repeat_id = str(result.get("randomization_repeat_id", ""))
-    else:
+    elif arguments.operation == "repeat_evidence":
         orchestrator_environment = _require_workflow_orchestrator_environment(root)
         os.environ["SLM_WM_PAPER_RUN_NAME"] = arguments.paper_run_name
         os.environ["SLM_WM_RANDOMIZATION_REPEAT_ID"] = (
@@ -171,6 +177,37 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
         archive_record = result
         randomization_scope = "active_repeat_component"
         resolved_repeat_id = paper_run.randomization_repeat_id
+    else:
+        orchestrator_environment = _require_workflow_orchestrator_environment(root)
+        os.environ["SLM_WM_PAPER_RUN_NAME"] = arguments.paper_run_name
+        result = run_gpu_method_qualification_host_workflow(
+            root=root,
+            repository_commit=arguments.repository_commit,
+            paper_run_name=arguments.paper_run_name,
+            prompt_id=arguments.prompt_id,
+            result_path=arguments.result_path,
+            known_answer=arguments.known_answer,
+            qualification_output_root=arguments.qualification_output_root,
+            registered_budget=(arguments.registered_budget or None),
+        )
+        workflow_name = QUALIFICATION_WORKFLOW_NAME
+        workflow_summary = result.get("workflow_summary", {})
+        workflow_environment = result.get("workflow_environment", {})
+        archive_record = None
+        randomization_scope = "gpu_operator_qualification_only"
+        resolved_repeat_id = ""
+        decision = str(result.get("decision", "fail"))
+        raw_failure_reasons = result.get("failure_reasons", [])
+        failure_reasons = (
+            [str(reason) for reason in raw_failure_reasons]
+            if isinstance(raw_failure_reasons, list)
+            else ["qualification_failure_reasons_invalid"]
+        )
+        if (
+            decision not in {"pass", "fail"}
+            or result.get("supports_paper_claim") is not False
+        ):
+            raise RuntimeError("GPU 方法资格化宿主结果身份无效")
     if (
         orchestrator_environment.get("profile_id")
         != bootstrap_identity["profile_id"]
@@ -204,11 +241,12 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
         "workflow_summary": workflow_summary,
         "workflow_environment": workflow_environment,
         "archive_record": archive_record,
-        "decision": "pass",
-        "session_execution_decision": "pass",
+        "decision": decision,
+        "session_execution_decision": decision,
         "workflow_completion_state": workflow_completion_state,
         "paper_run_closed": False,
         "result_closure_ready": False,
+        "failure_reasons": failure_reasons,
         "supports_paper_claim": False,
     }
 
@@ -217,7 +255,10 @@ def build_parser() -> argparse.ArgumentParser:
     """构造精确父环境内部入口参数."""
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("operation", choices=("gpu", "repeat_evidence"))
+    parser.add_argument(
+        "operation",
+        choices=("gpu", "repeat_evidence", "qualification"),
+    )
     parser.add_argument("--root", required=True)
     parser.add_argument("--repository-commit", required=True)
     parser.add_argument("--paper-run-name", required=True)
@@ -231,6 +272,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--persistent-output-dir", default="")
     parser.add_argument("--package-search-root", default="")
     parser.add_argument("--randomization-repeat-id", default="")
+    parser.add_argument("--prompt-id", default="")
+    parser.add_argument(
+        "--known-answer",
+        default="configs/keyed_prg_cross_platform_known_answer.json",
+    )
+    parser.add_argument("--registered-budget", default="")
+    parser.add_argument(
+        "--qualification-output-root",
+        default="outputs/gpu_method_qualification",
+    )
     return parser
 
 
@@ -261,6 +312,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         ):
             raise ValueError("单 repeat 证据入口缺少 package 搜索目录或 repeat ID")
+        if arguments.operation == "qualification" and not arguments.prompt_id:
+            raise ValueError("GPU 方法资格化入口必须提供 Prompt ID")
         payload = execute(arguments)
         result_path = _write_result(root, arguments.result_path, payload)
         print(
@@ -288,13 +341,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 sort_keys=True,
             )
         )
-        return 0
+        return 0 if payload["decision"] == "pass" else 1
     except Exception as exc:
         payload = {
             "report_schema": "formal_workflow_execution_result",
             "schema_version": 1,
             "operation_kind": "exact_orchestrator_workflow_execution",
-            "workflow_name": arguments.workflow or "randomization_repeat_evidence",
+            "workflow_name": (
+                arguments.workflow
+                or (
+                    QUALIFICATION_WORKFLOW_NAME
+                    if arguments.operation == "qualification"
+                    else "randomization_repeat_evidence"
+                )
+            ),
             "paper_run_name": arguments.paper_run_name,
             "randomization_repeat_id": arguments.randomization_repeat_id,
             "profile_id": "workflow_orchestrator",

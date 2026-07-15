@@ -84,13 +84,16 @@ baseline_imported_result_ready=false
 真实单 Prompt 服务器入口为:
 
 ```text
-python scripts/run_gpu_method_qualification.py \
+python -I scripts/run_formal_workflow_host.py \
+  --repository-commit <精确40位提交> \
+  qualification \
   --paper-run-name probe_paper \
   --prompt-id <受治理 Prompt ID> \
+  --result-path outputs/gpu_method_qualification/host_result.json \
   --registered-budget <可选登记预算 JSON>
 ```
 
-该入口直接调用 `experiments.runners.semantic_watermark_runtime.write_semantic_watermark_runtime_outputs`, 不复制方法实现. 运行结束后自动读取真实更新与检测记录并调用资格化协议. 报告绑定精确 Git commit、依赖 profile 与完整锁、SD3.5/VAE/CLIP revision、Prompt 摘要及运行文件 SHA-256. 输出固定写入 `outputs/gpu_method_qualification/<run_id>/`. 进程状态码只跟随方法算子门禁, 资源预算结论在报告中独立保存. `scripts/write_gpu_method_qualification_report.py` 仅用于对已有真实记录重建报告, 且必须显式提供同一资格化绑定文件.
+宿主入口先完成 clean detached checkout、精确 `workflow_orchestrator` 和隔离 `sd35_method_runtime_gpu` 的准备与复验, 再由科学子解释器调用 `scripts/run_gpu_method_qualification.py`.科学入口直接调用 `experiments.runners.semantic_watermark_runtime.write_semantic_watermark_runtime_outputs`, 不复制方法实现.运行结束后自动读取真实更新与检测记录并调用资格化协议.父编排层重新核对隔离执行报告、资格化报告路径与文件摘要、资格化稳定摘要、Git commit、依赖 profile、Prompt 身份和子进程状态码.报告绑定 SD3.5/VAE/CLIP revision、Prompt 摘要及运行文件 SHA-256, 输出固定写入 `outputs/gpu_method_qualification/<run_id>/`.进程状态码只跟随方法算子门禁, 资源预算结论在报告中独立保存.`scripts/write_gpu_method_qualification_report.py` 仅用于对已有真实记录重建报告, 且必须显式提供同一资格化绑定文件.
 
 ## 5. 论文结论边界
 
