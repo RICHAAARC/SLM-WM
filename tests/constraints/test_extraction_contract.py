@@ -318,6 +318,10 @@ def test_paper_artifact_rebuild_package_includes_full_experiment_layer(tmp_path:
     copied_files = manifest["copied_files"]
     assert any(path.startswith("paper_experiments/") for path in copied_files)
     assert all(not path.startswith("paper_workflow/") for path in copied_files)
+    assert manifest["required_entrypoints"] == [
+        "scripts/validate_extracted_package.py",
+        "scripts/run_gpu_server_result_closure.py",
+    ]
 
 
 @pytest.mark.constraint
@@ -339,6 +343,10 @@ def test_paper_experiment_execution_package_excludes_colab_and_tests(
     assert all("/source/" not in path for path in copied_files)
     assert all(not path.startswith("tests/") for path in copied_files)
     assert "scripts/validate_extracted_package.py" in copied_files
+    assert (
+        "scripts/run_gpu_server_result_closure.py"
+        in manifest["required_entrypoints"]
+    )
     assert manifest["standalone_repository"] is True
     assert manifest["complete_dependency_locks_required"] is True
 
@@ -355,6 +363,40 @@ def test_standalone_profiles_require_complete_locks_and_real_entrypoints() -> No
         assert profile.standalone_repository is True
         assert profile.complete_dependency_locks_required is True
         assert "scripts/validate_extracted_package.py" in profile.required_entrypoints
+        assert (
+            "scripts/run_gpu_server_result_closure.py"
+            in profile.required_entrypoints
+        )
+        assert "scripts/paper_result_closure.py" not in profile.required_entrypoints
+
+
+@pytest.mark.quick
+def test_server_result_closure_entrypoint_starts_in_isolated_mode(
+    tmp_path: Path,
+) -> None:
+    """服务器结果闭合入口必须脱离开发仓库 PYTHONPATH 启动。"""
+
+    environment = dict(os.environ)
+    environment.pop("PYTHONPATH", None)
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            str(Path.cwd() / "scripts/run_gpu_server_result_closure.py"),
+            "--help",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        shell=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+    assert "--randomization-aggregate-package-path" in completed.stdout
 
 
 @pytest.mark.constraint

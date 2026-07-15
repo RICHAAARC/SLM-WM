@@ -90,7 +90,7 @@ method-faithful 与 T2SMark 的归档白名单还必须包含 `scientific_execut
 
 `scripts/paper_result_closure.py` 只在精确聚合来源通过后运行5个规范统计 Writer：检测与逐攻击统计、全样本及质量匹配配对优势、FID/KID 联合质量统计、真实重运行消融必要性统计、单模型内部风险参数敏感性统计。五者都从聚合包内的样本级原始记录或 Inception 特征重算, 不读取单 repeat 派生指标作为最终事实。任一 repeat 缺失、重复、身份漂移、运行层级/FPR 不一致或原始记录重算失败都会阻断归档。
 
-闭合入口重新读取4个 Writer 的规范 summary、manifest 和逐文件 SHA-256, 并要求它们绑定同一聚合摘要、同一 clean Git 提交、同一运行层级和对应冻结 FPR。`paper_result_evidence_ready` 表示全部统计可以从原始记录重建；`supports_paper_claim` 则由统一阴性总体 fixed-FPR、全样本及质量匹配总体优势、正式消融必要性三项门禁共同决定。FID/KID 是必须完成的质量测量分量, 但其自身不承担中心优势结论。最终 ZIP 包含不可变聚合来源、4类规范统计、闭合报告及归档 manifest。
+闭合入口重新读取5个 Writer 的规范 summary、manifest 和逐文件 SHA-256, 并要求它们绑定同一聚合摘要、同一 clean Git 提交、同一运行层级和对应冻结 FPR。`paper_result_evidence_ready` 表示全部统计可以从原始记录重建；`supports_paper_claim` 则由统一阴性总体 fixed-FPR、全样本及质量匹配总体优势、正式消融必要性三项门禁共同决定。FID/KID 与单模型内部风险参数敏感性是必须完成的证据分量, 但不参与中心优势结论投票。最终 ZIP 包含不可变聚合来源、5类规范统计、闭合报告及归档 manifest。
 
 ## 结果口径
 

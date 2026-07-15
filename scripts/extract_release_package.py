@@ -110,7 +110,7 @@ PROFILES = {
         complete_dependency_locks_required=True,
         required_entrypoints=(
             "scripts/validate_extracted_package.py",
-            "scripts/paper_result_closure.py",
+            "scripts/run_gpu_server_result_closure.py",
         ),
     ),
     "paper_experiment_execution_package": ExtractionProfile(
@@ -148,6 +148,7 @@ PROFILES = {
             "scripts/run_formal_workflow_host.py",
             "scripts/formal_workflow_entry.py",
             "scripts/run_gpu_server_workflow.py",
+            "scripts/run_gpu_server_result_closure.py",
         ),
     ),
 }

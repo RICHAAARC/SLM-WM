@@ -5,21 +5,29 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
-from experiments.protocol.paper_run_config import (
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from experiments.protocol.paper_run_config import (  # noqa: E402
     RUN_DEFAULTS,
     normalize_paper_run_name,
     validate_frozen_paper_run_target_fpr,
 )
-from experiments.runtime.repository_environment import resolve_code_version
-from paper_experiments.runners.closure_package_selection import (
+from experiments.runtime.repository_environment import (  # noqa: E402
+    resolve_code_version,
+)
+from paper_experiments.runners.closure_package_selection import (  # noqa: E402
     normalize_clean_code_version,
 )
-from paper_experiments.runners.randomization_aggregate_provenance import (
+from paper_experiments.runners.randomization_aggregate_provenance import (  # noqa: E402
     validate_randomization_aggregate_provenance,
 )
-from scripts.paper_result_closure import (
+from scripts.paper_result_closure import (  # noqa: E402
     build_paper_result_closure_commands,
     run_paper_result_closure_commands,
 )
