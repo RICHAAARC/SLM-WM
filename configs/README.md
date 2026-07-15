@@ -6,6 +6,8 @@
 
 `paper_quality_claim_protocol.json` 冻结感知质量、语义对齐和分布保持三类非劣效语义。Prompt 是唯一总体重采样单位, 9个注册 repeat 嵌套在每个 Prompt 内；clean-watermarked FID 仅作为描述性分布位移, Prompt 条件 KID 及其 Prompt 聚类 bootstrap 区间是主要分布证据。配置中的界限在新的正式运行前提交, 不允许由结果回灌修改。
 
+`paper_profile_protocol_registry.json` 冻结三个论文运行规模共用的命令依赖图、统计 writer 产物 schema、gate 角色和允许变化字段。允许变化只位于 profile 身份和 `scale_contract`；方法、攻击、baseline、数据划分原则、阈值校准原则、指标语义、随机化、命令图、gate 角色与主张决策结构全部进入规范化协议摘要。该登记只证明协议结构能否同构比较, 不保存任何科学效果结论。
+
 `core_method_dependency_identity.json` 只定义最小核心方法包的可安装边界: Python `>=3.11`、`torch>=2.11,<2.12`、`setuptools.build_meta` 构建后端以及唯一 `main` 包根。PyTorch 范围与正式 SD3.5 GPU 锁中的2.11系列一致, 具体 CPU 或 CUDA wheel 由安装环境负责选择。该身份不替代、引用或放宽论文实验层的六个完整 wheel 哈希锁。
 
 ## 论文 prompt 配置

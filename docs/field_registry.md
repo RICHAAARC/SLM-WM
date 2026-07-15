@@ -2691,6 +2691,69 @@ Notebook 与 repository module 的跨边界数据
 | protocol_isomorphism_ready | governance | none | true | false | false | 三个论文 profile 删除允许变化的规模字段后是否具有相同协议语义。 |
 | artifact_contract_isomorphic | governance | none | true | false | false | 三个论文 profile 是否要求相同产物 schema、gate 角色和主张决策结构。 |
 | workflow_transfer_ready | governance | none | true | false | false | `probe_workflow_closed`、协议同构和产物契约同构共同派生的流程迁移状态, 不表达 pilot/full 科学结论。 |
+| allowed_profile_variation_fields | protocol | none | false | false | false | profile 同构比较唯一允许忽略的身份与规模字段路径集合。 |
+| artifact_contract | artifact | none | false | false | false | 每个论文 profile 必须共享的 writer、ready 字段和文件 schema 集合。 |
+| artifact_contract_difference_paths | governance | none | false | false | false | pilot/full 产物契约相对 probe 契约的结构化差异路径。 |
+| artifact_contract_digests | provenance | none | false | false | false | 三个 profile 完整产物契约的稳定摘要映射。 |
+| assignment_block_size | protocol | none | false | false | false | 稳定 split 分配使用的连续 Prompt 块大小。 |
+| assignment_rule | protocol | none | false | false | false | Prompt 在固定块内按风险分层和摘要顺序分配 split 的规则标识。 |
+| attack_definitions | protocol | none | false | false | false | profile 规范协议中的完整正式攻击定义与攻击随机协议。 |
+| attack_records | protocol | none | true | false | false | 参与 profile 同构比较的规范攻击配置记录集合。 |
+| attack_registry_digest | provenance | none | true | false | false | 完整规范攻击记录集合的稳定摘要。 |
+| baseline_definitions | protocol | none | false | false | false | profile 规范协议中的主表 baseline 身份与输入机制定义。 |
+| calibration_ratio | protocol | none | false | false | false | calibration split 在统一 Prompt 划分中的冻结比例。 |
+| calibration_source | protocol | none | false | false | false | fixed-FPR 阈值允许使用的 calibration 样本来源角色。 |
+| claim_decision_structure | governance | none | false | false | false | profile 同构比较绑定的完整主张登记与三态决策结构。 |
+| command_dependency_edges | protocol | none | false | false | false | CPU 统计重建、闭合与完整包之间的有向命令依赖边。 |
+| consumer | protocol | none | false | false | false | 命令依赖边中消费上游产物的模块或语义节点。 |
+| core_method | protocol | none | false | false | false | profile 规范协议绑定的完整核心方法配置正文与摘要。 |
+| data_split_principle | protocol | none | false | false | false | 三个 profile 必须共享的 Prompt 分割比例、块大小和排序规则。 |
+| dataset_level_quality_minimum_count | metric | none | true | false | false | 当前 profile 数据集级质量统计要求覆盖的最小 Prompt 数量。 |
+| detection_confidence_interval_method | protocol | none | false | false | false | 检测率 Prompt 聚类区间的冻结统计方法。 |
+| detection_statistical_unit | protocol | none | false | false | false | 检测统计的主要独立单位, 当前为 Prompt 聚类。 |
+| dev_ratio | protocol | none | false | false | false | dev split 在统一 Prompt 划分中的冻结比例。 |
+| evidence_source | provenance | none | true | false | false | 某个 profile 科学状态实际来自闭合报告还是未从 probe 推断。 |
+| false_positive_bound_method | protocol | none | false | false | false | fixed-FPR 假正率上界使用的冻结统计方法。 |
+| file_names | artifact | none | false | false | false | 一个登记产物必须精确写出的文件名集合。 |
+| gate_role | governance | none | false | false | false | 统计产物在分主张结论链中的稳定门禁职责。 |
+| gate_roles | governance | none | false | false | false | 五类统计产物到五项登记主张的完整职责映射。 |
+| metric_semantics | protocol | none | false | false | false | 检测、配对优势、质量匹配和质量非劣效的完整指标解释契约。 |
+| normalized_protocol_digests | provenance | none | false | false | false | 删除规模契约后每个 profile 完整协议正文的稳定摘要映射。 |
+| paired_superiority_analysis_schema | protocol | none | false | false | false | 主方法与 baseline 配对优势所用 Prompt 聚类分析 schema。 |
+| paired_superiority_claim_p_value_method | protocol | none | false | false | false | 配对优势主张使用的预登记显著性检验方法。 |
+| paper_profile_protocol_isomorphism_report_digest | provenance | none | false | false | false | profile 同构报告除自身摘要外全部字段的稳定摘要。 |
+| paper_profile_protocol_registry_digest | provenance | none | false | false | false | profile 同构冻结登记表的稳定摘要。 |
+| primary_baseline_records | protocol | none | false | false | false | 4个主表 baseline 的规范机制与共同输入定义记录。 |
+| probe_result_closure_binding | provenance | none | false | false | false | 同构报告从 probe 闭合报告提取并复验的流程事实与分主张决策。 |
+| producer | protocol | none | false | false | false | 命令依赖边中生产受治理输入的模块或语义节点。 |
+| profile_identity_ready | governance | none | true | false | false | probe 闭合输入是否唯一声明 `probe_paper` 身份。 |
+| profile_ids | protocol | none | false | false | false | 同构登记要求比较的三个论文运行规模有序集合。 |
+| profile_record_digests | provenance | none | false | false | false | 三个 profile 未删除规模字段的完整记录摘要映射。 |
+| profile_scale_registration_ready | governance | none | false | false | false | 三个规模契约是否精确匹配 `RUN_DEFAULTS` 的冻结值。 |
+| prompt_primary_unit_count | metric | none | false | false | false | 由当前 profile Prompt 数量派生的主要统计单位数量。 |
+| protocol_contract | protocol | none | false | false | false | 删除允许变化规模字段后必须在三个 profile 间完全一致的协议正文。 |
+| protocol_difference_paths | governance | none | false | false | false | pilot/full 规范协议相对 probe 协议的结构化差异路径。 |
+| quality_matching_caliper | protocol | none | false | false | false | baseline 配对优势质量匹配使用的冻结卡钳宽度。 |
+| quality_matching_metric_name | protocol | none | false | false | false | baseline 配对优势用于质量匹配的指标名称。 |
+| quality_matching_minimum_fraction | protocol | none | false | false | false | 配对优势允许支持主张所需的最低质量匹配覆盖率。 |
+| randomization_protocol | protocol | none | false | false | false | 三个 profile 共享的 seed-key 交叉重复完整协议。 |
+| ready_field | artifact | none | false | false | false | 一个统计 writer manifest 中由闭合器复验的就绪字段。 |
+| record_count_derivation | protocol | none | false | false | false | 由 Prompt、repeat 和 split 规模派生预期记录数量的结构化说明。 |
+| registered_repeat_ids | protocol | none | false | false | false | 三个 profile 共享的9个正式随机化重复有序标识。 |
+| registered_repeat_registry_digest | provenance | none | false | false | false | 完整 seed-key 重复身份注册表的稳定摘要。 |
+| requirement_role | governance | none | false | false | false | gate 对应主张属于 required 还是 optional 的冻结角色。 |
+| requires_training | protocol | none | true | false | false | baseline 机制是否要求训练的规范布尔属性。 |
+| scale_contract | protocol | none | false | false | false | profile 身份、FPR、样本规模、统计强度和输出位置的允许变化字段。 |
+| scale_registration_difference_paths | governance | none | false | false | false | 实际规模契约相对冻结 `RUN_DEFAULTS` 的差异路径。 |
+| scientific_scope_by_profile | governance | none | false | true | false | 三个 FPR 工作点各自独立的科学结论状态与证据来源。 |
+| scientific_support_transferred_from_probe | governance | none | true | true | false | 是否把 probe 科学支持外推到当前 profile, 正式协议固定为 false。 |
+| target_fpr_ready | governance | none | true | false | false | probe 闭合输入是否精确绑定 FPR=0.1。 |
+| test_ratio | protocol | none | false | false | false | test split 在统一 Prompt 划分中的冻结比例。 |
+| threshold_calibration_principle | protocol | none | false | false | false | 三个 profile 共享的阈值来源、分区和跨 split 复用规则。 |
+| threshold_reuse_scope | protocol | none | false | false | false | 同一方法同一 repeat 从 calibration 到 test 的冻结阈值复用范围。 |
+| workflow_transfer_basis | governance | none | false | false | false | `workflow_transfer_ready` 的三个独立布尔输入。 |
+| workflow_transfer_boundary | governance | none | false | false | false | 流程迁移只证明同代码同协议可执行而不转移科学效果的边界声明。 |
+| writer_module | artifact | none | false | false | false | 生产登记统计产物的唯一 Python 模块。 |
 | paired_prompt_counts | metric | none | true | true | false | 配对优势 summary 中4个主表 baseline 的唯一 Prompt 数量集合。 |
 | paired_attack_counts | metric | none | true | true | false | 配对优势 summary 中4个主表 baseline 的攻击条件数量集合。 |
 | paired_outcome_count | metric | none | true | true | false | 4个主表 baseline 的全部 Prompt x attack 配对结果总数。 |

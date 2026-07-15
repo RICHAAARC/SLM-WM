@@ -65,6 +65,12 @@ workflow_transfer_ready = (
 
 即使 `probe_paper` 的某项主张为 `measured_not_supported`, 只要真实正式步骤执行完成、产物完整且三个 profile 协议同构, 仍可以证明相同代码和协议能够迁移到 `pilot_paper` 与 `full_paper`。该状态不得被解释为更严格 FPR 下的科学结论已经成立。
 
+阶段3已由 `configs/paper_profile_protocol_registry.json`、`paper_experiments/analysis/paper_profile_protocol_isomorphism.py` 和 `scripts/write_paper_profile_protocol_isomorphism_report.py` 实现可执行门禁。报告把每个 profile 拆成允许变化的 `scale_contract`、必须一致的 `protocol_contract` 和独立比较的 `artifact_contract`。规范化比较不会删除方法、攻击、baseline、split、阈值、指标、命令图、gate 或 claim 结构中的任何字段；这些位置任一 profile 漂移都会给出精确差异路径并阻断迁移状态。
+
+报告还单独核验当前规模值是否匹配 `RUN_DEFAULTS`。测试可以证明修改允许的规模字段不会伪造协议语义差异, 但未登记的规模值会令 `profile_scale_registration_ready=false`。正式 writer 只从 clean Git 提交与相同 `common_code_version` 的真实 probe 闭合报告构造报告, 因而不能用当前代码替旧结果补写同构证明。
+
+`scientific_scope_by_profile` 明确保存三个工作点的结论作用域。只有 `probe_paper` 读取 probe 闭合报告中的分主张集合决策；`pilot_paper` 与 `full_paper` 在没有各自结果时固定为 `evidence_incomplete` 和 `scientific_support=null`。因此 `workflow_transfer_ready=true` 只表示相同实现与协议可以继续运行, 不表示 FPR=0.01 或 FPR=0.001 的科学效果已经成立。
+
 ## 五、分层职责
 
 - `experiments/` 生产真实运行记录、攻击记录、消融记录和质量原子；
