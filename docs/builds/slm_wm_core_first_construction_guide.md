@@ -118,9 +118,9 @@
 ## 6. Colab GPU 执行顺序
 
 1. 配置当前 `SLM_WM_PAPER_RUN_NAME` 和一个权威 `SLM_WM_RANDOMIZATION_REPEAT_ID`。
-2. 运行 `paper_workflow/notebooks/semantic_watermark_image_only_run.ipynb` 生成当前 repeat 的主方法、真实攻击、正式消融和数据集质量结果。
+2. 运行 `paper_workflow/notebooks/semantic_watermark_image_only_run.ipynb` 生成当前 repeat 的主方法、真实攻击、正式消融、单模型内部风险参数敏感性和数据集质量结果。
 3. 运行 Tree-Ring、Gaussian Shading、Shallow Diffuse 三个 common-backbone Notebook 与 T2SMark 正式复现 Notebook, 全部使用同一 repeat ID。
-4. 运行 `paper_workflow/notebooks/randomization_repeat_evidence_run.ipynb`, 把当前 repeat 的7类活动随机化 leaf 封装为自包含证据组件。
+4. 运行 `paper_workflow/notebooks/randomization_repeat_evidence_run.ipynb`, 把当前 repeat 的8类活动随机化 leaf 封装为自包含证据组件。
 5. 对权威9个 repeat 分别重复第1至4步; 每个 repeat 使用独立 Drive 子目录。
 6. Tree-Ring、Gaussian Shading 与 Shallow Diffuse 的跨 repeat 不变官方原环境复现各运行一次, 留待最终聚合层选择。
 7. 下载9个单 repeat 组件和3个不变包到 CPU 汇总环境; 不在 Notebook 内执行跨重复统计或论文产物重建。

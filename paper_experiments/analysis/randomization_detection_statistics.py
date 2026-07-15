@@ -22,8 +22,8 @@ from experiments.protocol.paper_run_config import (
     normalize_paper_run_name,
     validate_frozen_paper_run_target_fpr,
 )
-from experiments.protocol.pilot_paper_fixed_fpr import (
-    PILOT_PAPER_CONFIDENCE_LEVEL,
+from experiments.protocol.paper_fixed_fpr import (
+    PAPER_CONFIDENCE_LEVEL,
     bounded_hoeffding_confidence_interval,
 )
 from experiments.protocol.splits import build_group_split_counts
@@ -626,7 +626,7 @@ def build_randomization_detection_statistics(
     paper_run_name: str,
     target_fpr: float,
     attack_registry_rows: Iterable[Mapping[str, Any]],
-    confidence_level: float = PILOT_PAPER_CONFIDENCE_LEVEL,
+    confidence_level: float = PAPER_CONFIDENCE_LEVEL,
 ) -> tuple[
     tuple[dict[str, Any], ...],
     tuple[dict[str, Any], ...],
@@ -643,14 +643,14 @@ def build_randomization_detection_statistics(
     )
     if not math.isclose(
         float(confidence_level),
-        float(PILOT_PAPER_CONFIDENCE_LEVEL),
+        float(PAPER_CONFIDENCE_LEVEL),
         rel_tol=0.0,
         abs_tol=1e-12,
     ):
         raise RandomizationDetectionStatisticsError(
             "正式检测统计必须使用冻结的单侧 Wilson 95% 置信水平"
         )
-    confidence_level = float(PILOT_PAPER_CONFIDENCE_LEVEL)
+    confidence_level = float(PAPER_CONFIDENCE_LEVEL)
     expected_prompt_count = build_group_split_counts(
         RUN_EXPECTED_PROMPT_COUNTS[run_name]
     )["test"]

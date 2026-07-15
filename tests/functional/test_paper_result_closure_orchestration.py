@@ -51,7 +51,7 @@ def _component_summary(
     paired_ready: bool,
     ablation_ready: bool,
 ) -> dict[str, object]:
-    """构造与四个正式 Writer 判定语义一致的测试摘要."""
+    """构造与五个正式 Writer 判定语义一致的测试摘要。"""
 
     if artifact_id == "randomization_detection_statistics_manifest":
         payload: dict[str, object] = {
@@ -112,6 +112,29 @@ def _component_summary(
             ),
             "supports_paper_claim": ablation_ready,
         }
+    if (
+        artifact_id
+        == "randomization_branch_risk_parameter_sensitivity_manifest"
+    ):
+        payload = {
+            "paper_claim_scale": PAPER_RUN_NAME,
+            "target_fpr": TARGET_FPR,
+            "parameter_sensitivity_aggregate_ready": True,
+            "sensitivity_setting_count": 18,
+            "randomization_repeat_count": 9,
+            "sensitivity_model_scope": (
+                "registered_primary_diffusion_model_only"
+            ),
+            "cross_model_evidence_provided": False,
+            "claim_boundary": (
+                "single_model_internal_parameter_sensitivity_only"
+            ),
+            "supports_paper_claim": True,
+        }
+        payload["parameter_sensitivity_summary_digest"] = (
+            build_stable_digest(payload)
+        )
+        return payload
     raise AssertionError(f"未知测试统计组件: {artifact_id}")
 
 
@@ -123,7 +146,7 @@ def _write_rebuilt_artifacts(
     paired_ready: bool = True,
     ablation_ready: bool = True,
 ) -> None:
-    """写出四个 Writer 应发布的最小受治理文件集合."""
+    """写出五个 Writer 应发布的最小受治理文件集合。"""
 
     for spec in closure._CLOSURE_ARTIFACT_SPECS:
         paths = closure._expected_artifact_paths(
@@ -187,6 +210,13 @@ def _write_rebuilt_artifacts(
             digest_field = "randomization_dataset_quality_summary_digest"
             config[digest_field] = summary[digest_field]
             metadata["conclusion_decision"] = summary["conclusion_decision"]
+        elif (
+            spec.artifact_id
+            == "randomization_branch_risk_parameter_sensitivity_manifest"
+        ):
+            digest_field = "parameter_sensitivity_summary_digest"
+            config[digest_field] = summary[digest_field]
+            metadata["claim_boundary"] = summary["claim_boundary"]
         else:
             config["necessity_summary_digest"] = build_stable_digest(summary)
             metadata["necessity_component_decision"] = summary[
@@ -216,7 +246,7 @@ def test_closure_command_plan_uses_one_validated_aggregate(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """四个统计 Writer 必须消费同一个已验证聚合 ZIP."""
+    """五个统计 Writer 必须消费同一个已验证聚合 ZIP。"""
 
     source = _aggregate_source(tmp_path)
     monkeypatch.setattr(
@@ -232,7 +262,7 @@ def test_closure_command_plan_uses_one_validated_aggregate(
         root=tmp_path,
     )
 
-    assert len(commands) == closure.PAPER_RESULT_CLOSURE_COMMAND_COUNT == 4
+    assert len(commands) == closure.PAPER_RESULT_CLOSURE_COMMAND_COUNT == 5
     assert all(
         command[command.index("--aggregate-package-path") + 1]
         == str(source.package_path)
@@ -344,7 +374,7 @@ def test_run_rebuilds_gates_and_archives_governed_outputs(
     )
 
     archive_path = Path(result["archive_path"])
-    assert len(executed) == 4
+    assert len(executed) == 5
     assert result["paper_result_evidence_ready"] is True
     assert result["conclusion_decision"] == "supported"
     assert result["supports_paper_claim"] is True

@@ -1372,7 +1372,7 @@ def write_t2smark_formal_reproduction_outputs(
             "official_report": official_report,
             "adapter_report": adapter_report,
             "t2smark_pair_quality_report": pair_quality_report,
-            "claim_boundary": "pilot_paper_raw_reproduction_requires_formal_import_validation_and_attack_matrix_closure",
+            "claim_boundary": "paper_run_raw_reproduction_requires_formal_import_validation_and_attack_matrix_closure",
         },
     }
     write_json(paths["summary"], summary)

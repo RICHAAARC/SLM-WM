@@ -39,19 +39,19 @@ from experiments.protocol.paper_run_config import (
 )
 from experiments.protocol.prompts import build_prompt_records
 from experiments.protocol.splits import group_prompt_ids_by_split
-from experiments.protocol.pilot_paper_fixed_fpr import (
-    PILOT_PAPER_METRIC_BOUNDS,
-    PilotPaperFixedFprConfig,
+from experiments.protocol.paper_fixed_fpr import (
+    PAPER_METRIC_BOUNDS,
+    PaperFixedFprConfig,
     bounded_hoeffding_confidence_interval,
     build_attack_matrix_digest,
     build_fixed_fpr_protocol_digest,
-    build_pilot_paper_attack_matrix_rows,
-    build_pilot_paper_prompt_split_summary,
-    build_pilot_paper_result_import_schema,
-    build_pilot_paper_result_record_set_digest,
-    build_pilot_paper_result_records_manifest_config,
+    build_paper_attack_matrix_rows,
+    build_paper_prompt_split_summary,
+    build_paper_result_import_schema,
+    build_paper_result_record_set_digest,
+    build_paper_result_records_manifest_config,
     clamp_unit_interval,
-    validate_pilot_paper_result_import_rows,
+    validate_paper_result_import_rows,
 )
 from experiments.runtime.image_metrics import measured_score_retention
 from experiments.artifacts.detection_score_curves import (
@@ -200,7 +200,7 @@ PROMPT_RECORDS = build_prompt_records(
     SCALE,
     tuple(f"a governed prompt {index}" for index in range(PROMPT_COUNT)),
 )
-PAPER_CONFIG = PilotPaperFixedFprConfig(
+PAPER_CONFIG = PaperFixedFprConfig(
     paper_run_name=SCALE,
     protocol_profile=str(RUN_DEFAULTS[SCALE]["protocol_profile"]),
     prompt_set=SCALE,
@@ -212,7 +212,7 @@ PAPER_CONFIG = PilotPaperFixedFprConfig(
     target_fpr=TARGET_FPR,
     minimum_clean_negative_count=TEST_COUNT,
 )
-PROMPT_SPLIT_SUMMARY = build_pilot_paper_prompt_split_summary(
+PROMPT_SPLIT_SUMMARY = build_paper_prompt_split_summary(
     PROMPT_RECORDS,
     PAPER_CONFIG,
 )
@@ -522,7 +522,7 @@ ATTACK_REGISTRY = canonical_attack_registry_rows(
 FORMAL_ATTACK_CONFIG_BY_ID = {
     config.attack_id: config for config in FORMAL_ATTACK_CONFIGS
 }
-ATTACK_MATRIX_ROWS = build_pilot_paper_attack_matrix_rows(
+ATTACK_MATRIX_ROWS = build_paper_attack_matrix_rows(
     default_attack_configs(),
     PAPER_CONFIG,
 )
@@ -802,16 +802,16 @@ ARTIFACT_SOURCE_PATHS = {
 }
 RESULT_ANALYSIS_PAYLOAD_PATH_MAP = {
     "main_confidence_interval_table": (
-        f"outputs/pilot_paper_result_analysis/{SCALE}/confidence_interval_table.csv"
+        f"outputs/paper_result_analysis/{SCALE}/confidence_interval_table.csv"
     ),
     "per_attack_superiority_table": (
-        f"outputs/pilot_paper_result_analysis/{SCALE}/per_attack_superiority_table.csv"
+        f"outputs/paper_result_analysis/{SCALE}/per_attack_superiority_table.csv"
     ),
     "failure_case_records": (
-        f"outputs/pilot_paper_result_analysis/{SCALE}/failure_case_records.jsonl"
+        f"outputs/paper_result_analysis/{SCALE}/failure_case_records.jsonl"
     ),
     "failure_case_figure": (
-        f"outputs/pilot_paper_result_analysis/{SCALE}/failure_case_figure.svg"
+        f"outputs/paper_result_analysis/{SCALE}/failure_case_figure.svg"
     ),
 }
 def evidence_audit_source_path_map() -> dict[str, str]:
@@ -1273,7 +1273,7 @@ def formal_result_record(
     }
     for metric_name, (count, low_name, high_name) in ci_fields.items():
         lower_bound, upper_bound = (
-            PILOT_PAPER_METRIC_BOUNDS["quality_score_mean"]
+            PAPER_METRIC_BOUNDS["quality_score_mean"]
             if metric_name == "quality_score_mean"
             else (0.0, 1.0)
         )
@@ -1337,8 +1337,8 @@ def formal_result_record(
         "supports_paper_claim": True,
     }
     digest = build_stable_digest(payload)
-    payload["pilot_paper_result_record_digest"] = digest
-    payload["pilot_paper_result_record_id"] = f"pilot_paper_result_record_{digest[:16]}"
+    payload["paper_result_record_digest"] = digest
+    payload["paper_result_record_id"] = f"paper_result_record_{digest[:16]}"
     return payload
 
 
@@ -2174,7 +2174,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
     result_analysis_per_attack_rows = tuple(
         build_per_attack_superiority_rows(result_records)
     )
-    result_record_set_digest = build_pilot_paper_result_record_set_digest(result_records)
+    result_record_set_digest = build_paper_result_record_set_digest(result_records)
     primary_evidence_records = tuple(
         primary_evidence_record(baseline_id)
         for baseline_id in ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
@@ -2490,15 +2490,15 @@ def _ready_bundle_template() -> ResultClosureGateInput:
     }
     record_summary = {
         "paper_claim_scale": SCALE,
-        "pilot_paper_result_record_count": len(result_records),
-        "pilot_paper_template_record_count": len(result_records),
-        "pilot_paper_template_covered_count": len(result_records),
-        "pilot_paper_template_missing_count": 0,
-        "accepted_pilot_paper_import_count": len(result_records),
-        "accepted_pilot_paper_claim_record_count": len(result_records),
-        "pilot_paper_template_coverage_ready": True,
-        "pilot_paper_result_import_ready": True,
-        "pilot_paper_claim_record_ready": True,
+        "paper_result_record_count": len(result_records),
+        "paper_template_record_count": len(result_records),
+        "paper_template_covered_count": len(result_records),
+        "paper_template_missing_count": 0,
+        "accepted_paper_import_count": len(result_records),
+        "accepted_paper_claim_record_count": len(result_records),
+        "paper_template_coverage_ready": True,
+        "paper_result_import_ready": True,
+        "paper_claim_record_ready": True,
         "result_record_set_digest": result_record_set_digest,
         "method_threshold_digest_map": METHOD_THRESHOLD_DIGEST_MAP,
         "randomization_aggregate_digest": aggregate_digest,
@@ -2511,10 +2511,10 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "paper_target_fpr": TARGET_FPR,
         "expected_target_fpr": TARGET_FPR,
         "paper_prompt_count": PROMPT_COUNT,
-        "pilot_paper_import_template_count": len(result_records),
-        "accepted_pilot_paper_import_count": len(result_records),
-        "accepted_pilot_paper_claim_record_count": len(result_records),
-        "pilot_paper_negative_count_minimum_required": TEST_COUNT,
+        "paper_import_template_count": len(result_records),
+        "accepted_paper_import_count": len(result_records),
+        "accepted_paper_claim_record_count": len(result_records),
+        "paper_negative_count_minimum_required": TEST_COUNT,
         "minimum_result_positive_count": TEST_COUNT,
         "minimum_result_negative_count": TEST_COUNT,
         "minimum_result_attacked_negative_count": TEST_COUNT,
@@ -2523,17 +2523,16 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "paper_run_result_duplicate_template_count": 0,
         "paper_run_allows_paper_claim": True,
         "strict_formal_evidence_required": True,
-        "pilot_paper_common_protocol_ready": True,
+        "paper_common_protocol_ready": True,
         "paper_run_workflow_validation_ready": True,
-        "pilot_paper_prompt_split_ready": True,
         "paper_prompt_split_ready": True,
         "calibration_prompt_id_digest": CALIBRATION_PROMPT_ID_DIGEST,
         "test_prompt_id_digest": TEST_PROMPT_ID_DIGEST,
-        "pilot_paper_result_import_ready": True,
-        "pilot_paper_claim_record_ready": True,
+        "paper_result_import_ready": True,
+        "paper_claim_record_ready": True,
         "paper_run_result_import_coverage_ready": True,
         "paper_run_template_registry_unique": True,
-        "pilot_paper_evidence_coverage_ready": True,
+        "paper_evidence_coverage_ready": True,
         "point_estimate_effect_direction_ready": True,
         "paired_superiority_ready": True,
         "paired_superiority_exact_set_ready": True,
@@ -2541,11 +2540,10 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "overall_quality_matched_superiority_ready": True,
         "quality_matched_exact_set_ready": True,
         "quality_matching_uses_detection_labels": False,
-        "pilot_paper_effectiveness_gate_ready": True,
+        "paper_effectiveness_gate_ready": True,
         "slm_wm_fixed_fpr_boundary_ready": True,
         "paper_run_claim_ready": True,
         "paper_run_supports_superiority_claim": True,
-        "paper_claim_ready": True,
         "result_record_set_digest": result_record_set_digest,
         "method_threshold_digest_map": METHOD_THRESHOLD_DIGEST_MAP,
         "randomization_aggregate_digest": aggregate_digest,
@@ -2602,7 +2600,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "best_baseline_method_id": "tree_ring",
         "best_baseline_mean_true_positive_rate": 5 / TEST_COUNT,
     }
-    common_schema = build_pilot_paper_result_import_schema(
+    common_schema = build_paper_result_import_schema(
         prompt_split_digest=PROMPT_SPLIT_DIGEST,
         attack_matrix_digest=ATTACK_MATRIX_DIGEST,
         fixed_fpr_protocol_digest=FIXED_FPR_PROTOCOL_DIGEST,
@@ -2678,7 +2676,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
             "confidence_level": paired_summary["confidence_level"],
         }
     )
-    result_record_validation_report = validate_pilot_paper_result_import_rows(
+    result_record_validation_report = validate_paper_result_import_rows(
         result_records,
         common_schema,
         require_existing_evidence=False,
@@ -3157,17 +3155,17 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         result_record_template_coverage=result_record_template_coverage,
         result_record_summary=record_summary,
         result_record_manifest=manifest(
-            "pilot_paper_fixed_fpr_result_records_manifest",
+            "paper_fixed_fpr_result_records_manifest",
             (
-                f"outputs/pilot_paper_fixed_fpr_results/{SCALE}/pilot_paper_result_records.jsonl",
-                f"outputs/pilot_paper_fixed_fpr_results/{SCALE}/pilot_paper_result_import_validation_report.json",
-                f"outputs/pilot_paper_fixed_fpr_results/{SCALE}/pilot_paper_result_template_coverage.csv",
-                f"outputs/pilot_paper_fixed_fpr_results/{SCALE}/pilot_paper_result_record_summary.json",
-                f"outputs/pilot_paper_fixed_fpr_results/{SCALE}/manifest.local.json",
+                f"outputs/paper_fixed_fpr_results/{SCALE}/paper_result_records.jsonl",
+                f"outputs/paper_fixed_fpr_results/{SCALE}/paper_result_import_validation_report.json",
+                f"outputs/paper_fixed_fpr_results/{SCALE}/paper_result_template_coverage.csv",
+                f"outputs/paper_fixed_fpr_results/{SCALE}/paper_result_record_summary.json",
+                f"outputs/paper_fixed_fpr_results/{SCALE}/manifest.local.json",
             ),
             record_summary,
             input_paths=tuple(METHOD_OBSERVATION_SOURCE_PATH_MAP.values()),
-            config=build_pilot_paper_result_records_manifest_config(
+            config=build_paper_result_records_manifest_config(
                 result_records=result_records,
                 method_threshold_digest_map=METHOD_THRESHOLD_DIGEST_MAP,
                 randomization_aggregate_digest=aggregate_digest,
@@ -3182,11 +3180,11 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         common_protocol_summary=common_summary,
         common_protocol_schema=common_schema,
         common_protocol_manifest=manifest(
-            "pilot_paper_fixed_fpr_common_protocol_manifest",
+            "paper_fixed_fpr_common_protocol_manifest",
             (
-                f"outputs/pilot_paper_fixed_fpr_common_protocol/{SCALE}/pilot_paper_result_import_schema.json",
-                f"outputs/pilot_paper_fixed_fpr_common_protocol/{SCALE}/pilot_paper_common_protocol_summary.json",
-                f"outputs/pilot_paper_fixed_fpr_common_protocol/{SCALE}/manifest.local.json",
+                f"outputs/paper_fixed_fpr_common_protocol/{SCALE}/paper_result_import_schema.json",
+                f"outputs/paper_fixed_fpr_common_protocol/{SCALE}/paper_common_protocol_summary.json",
+                f"outputs/paper_fixed_fpr_common_protocol/{SCALE}/manifest.local.json",
             ),
             common_summary,
             input_paths=(
@@ -3202,14 +3200,14 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         ),
         result_analysis_summary=analysis_summary,
         result_analysis_manifest=manifest(
-            "pilot_paper_result_analysis_manifest",
+            "paper_result_analysis_manifest",
             (
-                f"outputs/pilot_paper_result_analysis/{SCALE}/confidence_interval_table.csv",
-                f"outputs/pilot_paper_result_analysis/{SCALE}/per_attack_superiority_table.csv",
-                f"outputs/pilot_paper_result_analysis/{SCALE}/failure_case_records.jsonl",
-                f"outputs/pilot_paper_result_analysis/{SCALE}/failure_case_figure.svg",
-                f"outputs/pilot_paper_result_analysis/{SCALE}/result_analysis_summary.json",
-                f"outputs/pilot_paper_result_analysis/{SCALE}/manifest.local.json",
+                f"outputs/paper_result_analysis/{SCALE}/confidence_interval_table.csv",
+                f"outputs/paper_result_analysis/{SCALE}/per_attack_superiority_table.csv",
+                f"outputs/paper_result_analysis/{SCALE}/failure_case_records.jsonl",
+                f"outputs/paper_result_analysis/{SCALE}/failure_case_figure.svg",
+                f"outputs/paper_result_analysis/{SCALE}/result_analysis_summary.json",
+                f"outputs/paper_result_analysis/{SCALE}/manifest.local.json",
             ),
             analysis_summary,
             input_paths=(
@@ -3570,7 +3568,7 @@ def synchronize_result_record_evidence(
 ) -> ResultClosureGateInput:
     """同步 result record 自声明链, 用于验证原始 observation 独立复算."""
 
-    result_record_set_digest = build_pilot_paper_result_record_set_digest(
+    result_record_set_digest = build_paper_result_record_set_digest(
         records
     )
     record_summary = {
@@ -3581,7 +3579,7 @@ def synchronize_result_record_evidence(
         **bundle.common_protocol_schema,
         "result_record_set_digest": result_record_set_digest,
     }
-    validation_report = validate_pilot_paper_result_import_rows(
+    validation_report = validate_paper_result_import_rows(
         records,
         common_schema,
         require_existing_evidence=False,
@@ -3601,7 +3599,7 @@ def synchronize_result_record_evidence(
         **bundle.result_analysis_summary,
         "result_record_set_digest": result_record_set_digest,
     }
-    result_manifest_config = build_pilot_paper_result_records_manifest_config(
+    result_manifest_config = build_paper_result_records_manifest_config(
         result_records=records,
         method_threshold_digest_map=METHOD_THRESHOLD_DIGEST_MAP,
         randomization_aggregate_digest=str(
@@ -4170,14 +4168,14 @@ def test_result_closure_gate_rejects_synchronized_fpr_forgery() -> None:
         for key, value in record.items()
         if key
         not in {
-            "pilot_paper_result_record_digest",
-            "pilot_paper_result_record_id",
+            "paper_result_record_digest",
+            "paper_result_record_id",
         }
     }
     digest = build_stable_digest(payload)
-    record["pilot_paper_result_record_digest"] = digest
-    record["pilot_paper_result_record_id"] = (
-        f"pilot_paper_result_record_{digest[:16]}"
+    record["paper_result_record_digest"] = digest
+    record["paper_result_record_id"] = (
+        f"paper_result_record_{digest[:16]}"
     )
     blocked_bundle = synchronize_result_record_evidence(
         bundle,
@@ -4216,14 +4214,14 @@ def test_result_closure_gate_rejects_synchronized_quality_forgery() -> None:
         for key, value in record.items()
         if key
         not in {
-            "pilot_paper_result_record_digest",
-            "pilot_paper_result_record_id",
+            "paper_result_record_digest",
+            "paper_result_record_id",
         }
     }
     digest = build_stable_digest(payload)
-    record["pilot_paper_result_record_digest"] = digest
-    record["pilot_paper_result_record_id"] = (
-        f"pilot_paper_result_record_{digest[:16]}"
+    record["paper_result_record_digest"] = digest
+    record["paper_result_record_id"] = (
+        f"paper_result_record_{digest[:16]}"
     )
     blocked_bundle = synchronize_result_record_evidence(
         bundle,
@@ -4261,14 +4259,14 @@ def test_result_closure_gate_rejects_quality_ci_with_three_group_denominator() -
         for key, value in record.items()
         if key
         not in {
-            "pilot_paper_result_record_digest",
-            "pilot_paper_result_record_id",
+            "paper_result_record_digest",
+            "paper_result_record_id",
         }
     }
     digest = build_stable_digest(payload)
-    record["pilot_paper_result_record_digest"] = digest
-    record["pilot_paper_result_record_id"] = (
-        f"pilot_paper_result_record_{digest[:16]}"
+    record["paper_result_record_digest"] = digest
+    record["paper_result_record_id"] = (
+        f"paper_result_record_{digest[:16]}"
     )
     blocked_bundle = synchronize_result_record_evidence(
         bundle,
@@ -4304,14 +4302,14 @@ def test_result_closure_gate_rejects_synchronized_unit_range_ssim_ci() -> None:
         for key, value in record.items()
         if key
         not in {
-            "pilot_paper_result_record_digest",
-            "pilot_paper_result_record_id",
+            "paper_result_record_digest",
+            "paper_result_record_id",
         }
     }
     digest = build_stable_digest(payload)
-    record["pilot_paper_result_record_digest"] = digest
-    record["pilot_paper_result_record_id"] = (
-        f"pilot_paper_result_record_{digest[:16]}"
+    record["paper_result_record_digest"] = digest
+    record["paper_result_record_id"] = (
+        f"paper_result_record_{digest[:16]}"
     )
     blocked_bundle = synchronize_result_record_evidence(
         bundle,
@@ -4339,14 +4337,14 @@ def test_result_closure_gate_rejects_synchronized_confidence_level_forgery() -> 
         for key, value in record.items()
         if key
         not in {
-            "pilot_paper_result_record_digest",
-            "pilot_paper_result_record_id",
+            "paper_result_record_digest",
+            "paper_result_record_id",
         }
     }
     digest = build_stable_digest(payload)
-    record["pilot_paper_result_record_digest"] = digest
-    record["pilot_paper_result_record_id"] = (
-        f"pilot_paper_result_record_{digest[:16]}"
+    record["paper_result_record_digest"] = digest
+    record["paper_result_record_id"] = (
+        f"paper_result_record_{digest[:16]}"
     )
     blocked_bundle = synchronize_result_record_evidence(
         bundle,
@@ -4355,7 +4353,7 @@ def test_result_closure_gate_rejects_synchronized_confidence_level_forgery() -> 
 
     assert (
         blocked_bundle.result_record_validation_report[
-            "pilot_paper_result_import_ready"
+            "paper_result_import_ready"
         ]
         is False
     )
@@ -4495,14 +4493,14 @@ def test_result_closure_gate_rejects_result_source_digest_forgery() -> None:
         for key, value in records[0].items()
         if key
         not in {
-            "pilot_paper_result_record_digest",
-            "pilot_paper_result_record_id",
+            "paper_result_record_digest",
+            "paper_result_record_id",
         }
     }
     digest = build_stable_digest(payload)
-    records[0]["pilot_paper_result_record_digest"] = digest
-    records[0]["pilot_paper_result_record_id"] = (
-        f"pilot_paper_result_record_{digest[:16]}"
+    records[0]["paper_result_record_digest"] = digest
+    records[0]["paper_result_record_id"] = (
+        f"paper_result_record_{digest[:16]}"
     )
     blocked_bundle = synchronize_result_record_evidence(
         bundle,
@@ -4776,14 +4774,14 @@ def test_result_closure_gate_rejects_paired_result_rate_mismatch() -> None:
             for key, value in baseline_record.items()
             if key
             not in {
-                "pilot_paper_result_record_digest",
-                "pilot_paper_result_record_id",
+                "paper_result_record_digest",
+                "paper_result_record_id",
             }
         }
     )
-    baseline_record["pilot_paper_result_record_digest"] = digest
-    baseline_record["pilot_paper_result_record_id"] = (
-        f"pilot_paper_result_record_{digest[:16]}"
+    baseline_record["paper_result_record_digest"] = digest
+    baseline_record["paper_result_record_id"] = (
+        f"paper_result_record_{digest[:16]}"
     )
     blocked_bundle = replace(bundle, result_records=tuple(records))
 
@@ -4949,11 +4947,11 @@ def test_result_closure_gate_blocks_mixed_scope_and_entry_review_denial() -> Non
     mixed_digest_payload = {
         key: value
         for key, value in mixed_record.items()
-        if key not in {"pilot_paper_result_record_digest", "pilot_paper_result_record_id"}
+        if key not in {"paper_result_record_digest", "paper_result_record_id"}
     }
     mixed_digest = build_stable_digest(mixed_digest_payload)
-    mixed_record["pilot_paper_result_record_digest"] = mixed_digest
-    mixed_record["pilot_paper_result_record_id"] = f"pilot_paper_result_record_{mixed_digest[:16]}"
+    mixed_record["paper_result_record_digest"] = mixed_digest
+    mixed_record["paper_result_record_id"] = f"paper_result_record_{mixed_digest[:16]}"
     denied_entry = {**bundle.entry_review_report, "evidence_closure_allowed": False}
     incomplete_primary_evidence = {
         **bundle.primary_baseline_evidence_summary,
@@ -4989,11 +4987,11 @@ def test_result_closure_gate_rejects_per_method_threshold_digest_mismatch() -> N
     payload = {
         key: value
         for key, value in tree_ring.items()
-        if key not in {"pilot_paper_result_record_digest", "pilot_paper_result_record_id"}
+        if key not in {"paper_result_record_digest", "paper_result_record_id"}
     }
     digest = build_stable_digest(payload)
-    tree_ring["pilot_paper_result_record_digest"] = digest
-    tree_ring["pilot_paper_result_record_id"] = f"pilot_paper_result_record_{digest[:16]}"
+    tree_ring["paper_result_record_digest"] = digest
+    tree_ring["paper_result_record_id"] = f"paper_result_record_{digest[:16]}"
     blocked_bundle = replace(bundle, result_records=tuple(records))
 
     report = build_result_closure_gate_report(
@@ -5095,12 +5093,12 @@ def test_result_closure_gate_rejects_record_without_aggregate_digest() -> None:
     records = [dict(record) for record in bundle.result_records]
     record = records[0]
     record.pop("randomization_aggregate_digest")
-    record.pop("pilot_paper_result_record_digest")
-    record.pop("pilot_paper_result_record_id")
+    record.pop("paper_result_record_digest")
+    record.pop("paper_result_record_id")
     record_digest = build_stable_digest(record)
-    record["pilot_paper_result_record_digest"] = record_digest
-    record["pilot_paper_result_record_id"] = (
-        f"pilot_paper_result_record_{record_digest[:16]}"
+    record["paper_result_record_digest"] = record_digest
+    record["paper_result_record_id"] = (
+        f"paper_result_record_{record_digest[:16]}"
     )
     blocked_bundle = replace(bundle, result_records=tuple(records))
 

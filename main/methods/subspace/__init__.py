@@ -12,6 +12,7 @@ from main.methods.subspace.jacobian_nullspace import (
     solve_psd_conjugate_gradient,
     solve_jacobian_null_space,
 )
+from main.methods.subspace.semantic_projection import solve_semantic_branch_subspace
 
 __all__ = [
     "ExactJacobianLinearization",
@@ -24,4 +25,5 @@ __all__ = [
     "recompute_jacobian_null_space_result_digest",
     "solve_psd_conjugate_gradient",
     "solve_jacobian_null_space",
+    "solve_semantic_branch_subspace",
 ]

@@ -8,7 +8,7 @@
 | 密钥随机原语 | `main/core/keyed_prg.py`、`main/core/normal_quantile_table.py` | 通过版本化 SHA-256 大端计数器连续比特流和冻结 Q20 中点逆 CDF float32 表生成内容模板与 Jacobian 候选方向, 并通过独立53位开区间 uniform 路径生成注意力关系符号 |
 | Tensor 内容身份 | `main/core/digest.py` | 通过版本化 dtype、shape 与连续原始字节 SHA-256 绑定风险、基底、分支更新和 Q/K 原子 |
 | 真实 Jacobian Null Space | `main/methods/subspace/jacobian_nullspace.py` | 通过完整特征 JVP/VJP、显式风险算子和无阻尼 PSD-CG 求解 rank-4 latent Null Space |
-| 语义与手工结构统计 | `experiments/runtime/diffusion/semantic_features.py` | 以512维完整归一化 CLIP embedding 和204维 RGB 统计/梯度/8x8池化向量定义716维 Jacobian，并提供有限更新与最终成图复验 |
+| 语义与手工结构统计 | `main/methods/semantic/runtime.py` | 以512维完整归一化 CLIP embedding 和204维 RGB 统计/梯度/8x8池化向量定义716维 Jacobian，并提供有限更新与最终成图复验 |
 | LF 与尾部载体 | `main/methods/carrier/keyed_tensor.py` | 通过版本化 SHA-256 大端计数器比特流和冻结 Q20 中点逆 CDF float32 表构造检测端可重建模板, 并在嵌入端投影到安全子空间 |
 | 真实注意力梯度 | `main/methods/geometry/differentiable_attention.py` | 从 Transformer `to_q`/`to_k` 得到真实 attention, 构造有身份摘要的稳定 token pair 权重并对 latent 求梯度 |
 | 几何恢复 | `main/methods/geometry/attention_alignment.py` | 使用同一 pair 权重联合规范拉回 $W A_{\mathrm{obs}} W^\top$、观测前推 $V S_K V^\top$、双向覆盖惩罚和攻击无关的分层局部搜索恢复图像参考系 |

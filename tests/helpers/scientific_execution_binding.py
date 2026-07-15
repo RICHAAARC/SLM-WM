@@ -376,14 +376,24 @@ def write_test_scientific_execution_binding(
             )
         ]
         if execution_route == "semantic_watermark_ablation_session":
-            command_specs.append(
+            command_specs.extend(
                 (
-                    "runtime_rerun_ablation",
-                    [
-                        recorded_python_path,
-                        "-m",
-                        "experiments.ablations.mechanism_ablation_workload",
-                    ],
+                    (
+                        "runtime_rerun_ablation",
+                        [
+                            recorded_python_path,
+                            "-m",
+                            "experiments.ablations.mechanism_ablation_workload",
+                        ],
+                    ),
+                    (
+                        "branch_risk_parameter_sensitivity",
+                        [
+                            recorded_python_path,
+                            "-m",
+                            "experiments.ablations.branch_risk_sensitivity_workload",
+                        ],
+                    ),
                 )
             )
         artifact_specs = {
@@ -399,13 +409,22 @@ def write_test_scientific_execution_binding(
                 f"outputs/formal_mechanism_ablation/{paper_run_name}/ablation_component_summary.json",
                 f"outputs/formal_mechanism_ablation/{paper_run_name}/manifest.local.json",
             ),
+            "branch_risk_parameter_sensitivity": (
+                f"outputs/formal_branch_risk_sensitivity/{paper_run_name}/parameter_sensitivity_summary.json",
+                f"outputs/formal_branch_risk_sensitivity/{paper_run_name}/manifest.local.json",
+            ),
         }
         artifact_roles = [
             "image_only_dataset_runtime",
             "dataset_level_quality",
         ]
         if execution_route == "semantic_watermark_ablation_session":
-            artifact_roles.append("runtime_rerun_ablation")
+            artifact_roles.extend(
+                (
+                    "runtime_rerun_ablation",
+                    "branch_risk_parameter_sensitivity",
+                )
+            )
         artifact_records = []
         for role in artifact_roles:
             summary_relative, manifest_relative = artifact_specs[role]
@@ -438,6 +457,10 @@ def write_test_scientific_execution_binding(
                     execution_route == "semantic_watermark_ablation_session"
                 ),
                 "packaging_deferred": True,
+                "session_execution_decision": "pass",
+                "workflow_completion_state": "repeat_component_complete",
+                "paper_run_closed": False,
+                "result_closure_ready": False,
                 "python_executable": recorded_python_path,
                 "artifact_validation_mode": (
                     "completed_or_revalidated_in_current_session"

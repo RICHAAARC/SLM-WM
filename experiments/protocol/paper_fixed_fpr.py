@@ -28,6 +28,7 @@ from experiments.protocol.formal_randomization import (
 from experiments.protocol.paper_run_config import (
     FULL_PAPER_RUN_NAME,
     PaperRunConfig,
+    PILOT_PAPER_RUN_NAME,
     PROBE_PAPER_RUN_NAME,
     RUN_DEFAULTS,
     RUN_EXPECTED_PROMPT_COUNTS,
@@ -38,46 +39,41 @@ from experiments.protocol.prompts import PromptProtocolRecord
 from experiments.protocol.splits import apply_split_assignments, build_group_split_counts
 from main.core.digest import build_stable_digest
 
-PILOT_PAPER_PROMPT_SET = "pilot_paper"
-PILOT_PAPER_PROMPT_FILE = "configs/paper_main_pilot_paper_prompts.txt"
-PILOT_PAPER_PROMPT_PROTOCOL_NAME = "paper_main_pilot_paper_prompt_protocol"
-PILOT_PAPER_RESULT_PROTOCOL_NAME = "pilot_paper_fixed_fpr_common_protocol"
-PILOT_PAPER_RESULT_SCOPE = "pilot_paper_common_protocol"
-PILOT_PAPER_CLAIM_BOUNDARY = "pilot_claim"
-FULL_PAPER_CLAIM_BOUNDARY = "full_paper_claim_requires_full_paper_sample_scale"
-PROBE_PAPER_WORKFLOW_BOUNDARY = (
-    "probe_paper_uses_same_formal_protocol_with_smaller_sample_only"
+PAPER_RUN_CLAIM_BOUNDARY = (
+    "paper_claim_requires_current_run_complete_sample_scale"
+)
+PAPER_RUN_WORKFLOW_BOUNDARY = (
+    "paper_runs_share_formal_protocol_and_differ_only_in_statistical_scale"
 )
 PAPER_RUN_CLAIM_SCOPES = {
     PROBE_PAPER_RUN_NAME: "probe_claim",
-    PILOT_PAPER_PROMPT_SET: "pilot_claim",
+    PILOT_PAPER_RUN_NAME: "pilot_claim",
     FULL_PAPER_RUN_NAME: "full_claim",
 }
 PROBE_PAPER_FIXED_FPR = float(RUN_DEFAULTS[PROBE_PAPER_RUN_NAME]["target_fpr"])
-PILOT_PAPER_FIXED_FPR = float(RUN_DEFAULTS[PILOT_PAPER_PROMPT_SET]["target_fpr"])
+PILOT_PAPER_FIXED_FPR = float(RUN_DEFAULTS[PILOT_PAPER_RUN_NAME]["target_fpr"])
 FULL_PAPER_FIXED_FPR = float(RUN_DEFAULTS[FULL_PAPER_RUN_NAME]["target_fpr"])
 PAPER_RUN_FIXED_FPR = {
     PROBE_PAPER_RUN_NAME: PROBE_PAPER_FIXED_FPR,
-    PILOT_PAPER_PROMPT_SET: PILOT_PAPER_FIXED_FPR,
+    PILOT_PAPER_RUN_NAME: PILOT_PAPER_FIXED_FPR,
     FULL_PAPER_RUN_NAME: FULL_PAPER_FIXED_FPR,
 }
-PILOT_PAPER_CONFIDENCE_INTERVAL_METHOD = "bounded_hoeffding"
-PILOT_PAPER_CONFIDENCE_LEVEL = 0.95
-PILOT_PAPER_PAIRED_BOOTSTRAP_RESAMPLE_COUNT = 100_000
-PILOT_PAPER_PAIRED_BOOTSTRAP_ANALYSIS_SCHEMA = "paired_prompt_cluster_bootstrap"
-PILOT_PAPER_PAIRED_BOOTSTRAP_BIT_GENERATOR = "PCG64"
-PILOT_PAPER_PAIRED_BOOTSTRAP_QUANTILE_METHOD = "linear"
-PILOT_PAPER_PAIRED_CLAIM_P_VALUE_METHOD = "bounded_hoeffding_prompt_cluster_mean"
-PILOT_PAPER_PAIRED_SHARP_NULL_DIAGNOSTIC_METHOD = (
+PAPER_CONFIDENCE_INTERVAL_METHOD = "bounded_hoeffding"
+PAPER_CONFIDENCE_LEVEL = 0.95
+PAPER_PAIRED_BOOTSTRAP_RESAMPLE_COUNT = 100_000
+PAPER_PAIRED_BOOTSTRAP_ANALYSIS_SCHEMA = "paired_prompt_cluster_bootstrap"
+PAPER_PAIRED_BOOTSTRAP_BIT_GENERATOR = "PCG64"
+PAPER_PAIRED_BOOTSTRAP_QUANTILE_METHOD = "linear"
+PAPER_PAIRED_CLAIM_P_VALUE_METHOD = "bounded_hoeffding_prompt_cluster_mean"
+PAPER_PAIRED_SHARP_NULL_DIAGNOSTIC_METHOD = (
     "exact_prompt_cluster_sign_flip_dp"
 )
-PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT = 340
-PILOT_PAPER_METHOD_IDS = ("slm_wm_current", "tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
-PILOT_PAPER_PRIMARY_METHOD_ID = "slm_wm_current"
-PILOT_PAPER_PRIMARY_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
-PILOT_PAPER_ATTACK_RESOURCE_PROFILES = ("full_main", "full_extra")
+PAPER_METHOD_IDS = ("slm_wm_current", "tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
+PAPER_PRIMARY_METHOD_ID = "slm_wm_current"
+PAPER_PRIMARY_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
+PAPER_ATTACK_RESOURCE_PROFILES = ("full_main", "full_extra")
 
-PILOT_PAPER_REQUIRED_METRIC_FIELDS = (
+PAPER_REQUIRED_METRIC_FIELDS = (
     "positive_count",
     "negative_count",
     "attacked_negative_count",
@@ -102,7 +98,7 @@ PILOT_PAPER_REQUIRED_METRIC_FIELDS = (
     "score_retention_ci_low",
     "score_retention_ci_high",
 )
-PILOT_PAPER_REQUIRED_SOURCE_FIELDS = (
+PAPER_REQUIRED_SOURCE_FIELDS = (
     "attack_id",
     "attack_config_digest",
     "result_protocol_name",
@@ -118,18 +114,18 @@ PILOT_PAPER_REQUIRED_SOURCE_FIELDS = (
     "baseline_result_source_digest",
     "evidence_paths",
 )
-PILOT_PAPER_RATE_FIELDS = (
+PAPER_RATE_FIELDS = (
     "true_positive_rate",
     "false_positive_rate",
     "clean_false_positive_rate",
     "attacked_false_positive_rate",
 )
-PILOT_PAPER_METRIC_BOUNDS = {
-    **{field_name: (0.0, 1.0) for field_name in PILOT_PAPER_RATE_FIELDS},
+PAPER_METRIC_BOUNDS = {
+    **{field_name: (0.0, 1.0) for field_name in PAPER_RATE_FIELDS},
     "quality_score_mean": (-1.0, 1.0),
     "score_retention_mean": (0.0, 1.0),
 }
-PILOT_PAPER_CI_FIELD_GROUPS = (
+PAPER_CI_FIELD_GROUPS = (
     ("true_positive_rate_ci_low", "true_positive_rate", "true_positive_rate_ci_high"),
     ("false_positive_rate_ci_low", "false_positive_rate", "false_positive_rate_ci_high"),
     ("clean_false_positive_rate_ci_low", "clean_false_positive_rate", "clean_false_positive_rate_ci_high"),
@@ -141,7 +137,7 @@ PILOT_PAPER_CI_FIELD_GROUPS = (
         "score_retention_ci_high",
     ),
 )
-PILOT_PAPER_CI_COUNT_FIELDS = {
+PAPER_CI_COUNT_FIELDS = {
     "true_positive_rate": "positive_count",
     "false_positive_rate": "negative_count",
     "clean_false_positive_rate": "negative_count",
@@ -218,7 +214,7 @@ def bounded_hoeffding_confidence_interval(
     )
 
 
-def canonical_pilot_paper_result_records(
+def canonical_paper_result_records(
     rows: Iterable[Mapping[str, Any]],
 ) -> tuple[dict[str, Any], ...]:
     """把论文结果记录规范化为与输入文件行序无关的稳定顺序.
@@ -243,15 +239,15 @@ def canonical_pilot_paper_result_records(
     )
 
 
-def build_pilot_paper_result_record_set_digest(
+def build_paper_result_record_set_digest(
     rows: Iterable[Mapping[str, Any]],
 ) -> str:
     """计算正式结果记录稳定有序集合的 SHA-256 摘要."""
 
-    return build_stable_digest(list(canonical_pilot_paper_result_records(rows)))
+    return build_stable_digest(list(canonical_paper_result_records(rows)))
 
 
-def build_pilot_paper_result_records_manifest_config(
+def build_paper_result_records_manifest_config(
     *,
     result_records: Iterable[Mapping[str, Any]],
     method_threshold_digest_map: Mapping[str, str],
@@ -268,7 +264,7 @@ def build_pilot_paper_result_records_manifest_config(
     使 manifest 的 config digest 能由落盘 records、报告和覆盖表精确重建.
     """
 
-    result_record_set_digest = build_pilot_paper_result_record_set_digest(
+    result_record_set_digest = build_paper_result_record_set_digest(
         result_records
     )
     return {
@@ -327,7 +323,7 @@ _DEFAULT_RANDOMIZATION_PROTOCOL_DIGEST = str(
 
 
 @dataclass(frozen=True)
-class PilotPaperFixedFprConfig:
+class PaperFixedFprConfig:
     """集中描述论文运行级 fixed-FPR 共同协议配置。
 
     该对象属于通用工程写法: 把 prompt set、固定 FPR、置信区间方法和
@@ -344,8 +340,8 @@ class PilotPaperFixedFprConfig:
     result_claim_scope: str
     target_fpr: float
     minimum_clean_negative_count: int
-    confidence_interval_method: str = PILOT_PAPER_CONFIDENCE_INTERVAL_METHOD
-    confidence_level: float = PILOT_PAPER_CONFIDENCE_LEVEL
+    confidence_interval_method: str = PAPER_CONFIDENCE_INTERVAL_METHOD
+    confidence_level: float = PAPER_CONFIDENCE_LEVEL
     randomization_repeat_id: str = DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID
     generation_seed_index: int = _DEFAULT_RANDOMIZATION_REPEAT.generation_seed_index
     generation_seed_offset: int = _DEFAULT_RANDOMIZATION_REPEAT.generation_seed_offset
@@ -353,7 +349,7 @@ class PilotPaperFixedFprConfig:
     formal_randomization_protocol_digest: str = (
         _DEFAULT_RANDOMIZATION_PROTOCOL_DIGEST
     )
-    attack_resource_profiles: tuple[str, ...] = PILOT_PAPER_ATTACK_RESOURCE_PROFILES
+    attack_resource_profiles: tuple[str, ...] = PAPER_ATTACK_RESOURCE_PROFILES
 
     def __post_init__(self) -> None:
         """集中校验不可恢复的协议边界。"""
@@ -386,7 +382,7 @@ class PilotPaperFixedFprConfig:
             self.paper_run_name
         ):
             raise ValueError("result_claim_scope 与论文运行层级不一致")
-        if self.confidence_interval_method != PILOT_PAPER_CONFIDENCE_INTERVAL_METHOD:
+        if self.confidence_interval_method != PAPER_CONFIDENCE_INTERVAL_METHOD:
             raise ValueError("confidence_interval_method 必须为 bounded_hoeffding")
         if not 0.0 < self.confidence_level < 1.0:
             raise ValueError("confidence_level 必须位于 (0, 1)")
@@ -420,10 +416,10 @@ class PilotPaperFixedFprConfig:
 
 def build_paper_fixed_fpr_config_from_paper_run(
     paper_run: PaperRunConfig,
-) -> PilotPaperFixedFprConfig:
+) -> PaperFixedFprConfig:
     """复用已验证论文运行配置构造 fixed-FPR 共同协议配置."""
 
-    return PilotPaperFixedFprConfig(
+    return PaperFixedFprConfig(
         paper_run_name=paper_run.run_name,
         protocol_profile=paper_run.protocol_profile,
         prompt_set=paper_run.prompt_set,
@@ -444,7 +440,7 @@ def build_paper_fixed_fpr_config_from_paper_run(
     )
 
 
-def build_paper_fixed_fpr_config(root: str | Path = ".") -> PilotPaperFixedFprConfig:
+def build_paper_fixed_fpr_config(root: str | Path = ".") -> PaperFixedFprConfig:
     """按统一论文运行配置构造 fixed-FPR 共同协议配置。"""
 
     return build_paper_fixed_fpr_config_from_paper_run(
@@ -453,8 +449,8 @@ def build_paper_fixed_fpr_config(root: str | Path = ".") -> PilotPaperFixedFprCo
 
 
 @dataclass(frozen=True)
-class PilotPaperImportIssue:
-    """记录 pilot_paper 结果导入 schema 校验中的单个问题。"""
+class PaperImportIssue:
+    """记录当前论文运行层级结果导入 schema 校验中的单个问题。"""
 
     row_index: int
     method_id: str
@@ -508,10 +504,10 @@ def _list_field(row: Mapping[str, Any], field_name: str) -> tuple[str, ...]:
     return ()
 
 
-def _issue(row_index: int, row: Mapping[str, Any], field_name: str, reason: str) -> PilotPaperImportIssue:
+def _issue(row_index: int, row: Mapping[str, Any], field_name: str, reason: str) -> PaperImportIssue:
     """构造统一 schema issue。"""
 
-    return PilotPaperImportIssue(
+    return PaperImportIssue(
         row_index=row_index,
         method_id=_str_field(row, "method_id"),
         field_name=field_name,
@@ -543,20 +539,20 @@ def _stable_records_for_prompt_split(records: Iterable[PromptProtocolRecord]) ->
     ]
 
 
-def build_pilot_paper_prompt_split_summary(
+def build_paper_prompt_split_summary(
     prompt_records: Iterable[PromptProtocolRecord],
-    config: PilotPaperFixedFprConfig,
+    config: PaperFixedFprConfig,
 ) -> dict[str, Any]:
-    """构建 pilot_paper prompt split 摘要。
+    """构建当前论文运行层级的 prompt split 摘要。
 
-    此处设计的主要考虑在于: pilot_paper 共同协议必须冻结同一个 prompt split
-    digest, 后续 proposed method 与全部 baseline 只能引用该 digest, 不能各自
-    重新划分样本。
+    此处设计的主要考虑在于: 三个论文运行层级必须使用同一套划分规则,
+    proposed method 与全部 baseline 只能引用当前层级冻结的 digest, 不能各自
+    重新划分样本。该实现属于可复用的共同协议层, 不绑定具体层级名称。
     """
 
     resolved_config = config
-    pilot_paper_records = tuple(record for record in prompt_records if record.prompt_set == resolved_config.prompt_set)
-    assigned_records = apply_split_assignments(pilot_paper_records)
+    paper_run_records = tuple(record for record in prompt_records if record.prompt_set == resolved_config.prompt_set)
+    assigned_records = apply_split_assignments(paper_run_records)
     split_counts = dict(sorted(Counter(record.split for record in assigned_records).items()))
     risk_profile_counts = dict(sorted(Counter(record.risk_profile for record in assigned_records).items()))
     split_record_payload = _stable_records_for_prompt_split(assigned_records)
@@ -580,15 +576,15 @@ def build_pilot_paper_prompt_split_summary(
         "prompt_set": resolved_config.prompt_set,
         "prompt_file": resolved_config.prompt_file,
         "prompt_protocol_name": resolved_config.prompt_protocol_name,
-        "pilot_paper_prompt_count": len(assigned_records),
+        "paper_prompt_count": len(assigned_records),
         "expected_prompt_count": expected_prompt_count,
         "split_counts": split_counts,
         "risk_profile_counts": risk_profile_counts,
         "calibration_test_disjoint": calibration_ids.isdisjoint(test_ids),
         "calibration_clean_negative_count": calibration_clean_negative_count,
         "test_clean_negative_count": test_clean_negative_count,
-        "pilot_paper_negative_count_minimum_required": resolved_config.minimum_clean_negative_count,
-        "pilot_paper_negative_count_ready": minimum_ready,
+        "paper_negative_count_minimum_required": resolved_config.minimum_clean_negative_count,
+        "paper_negative_count_ready": minimum_ready,
         "target_fpr": resolved_config.target_fpr,
         "allowed_false_positive_count": allowed_false_positive_count,
         "prompt_split_digest": prompt_split_digest,
@@ -599,13 +595,13 @@ def build_pilot_paper_prompt_split_summary(
     }
 
 
-def build_pilot_paper_attack_matrix_rows(
+def build_paper_attack_matrix_rows(
     attack_configs: Iterable[AttackConfig],
-    config: PilotPaperFixedFprConfig,
+    config: PaperFixedFprConfig,
 ) -> tuple[dict[str, Any], ...]:
-    """构建 pilot_paper 共同协议使用的同一攻击矩阵行。
+    """构建三个论文运行层级共用的攻击矩阵行。
 
-    这一实现属于项目特定写法: 它复用已有攻击配置, 但用 pilot_paper 协议 digest
+    这一实现属于项目特定写法: 它复用已有攻击配置, 并用当前论文运行协议摘要
     约束所有方法共享同一批攻击定义。
     """
 
@@ -631,8 +627,8 @@ def build_pilot_paper_attack_matrix_rows(
     return tuple(sorted(rows, key=lambda item: (item["resource_profile"], item["attack_family"], item["attack_name"], item["attack_id"])))
 
 
-def build_fixed_fpr_protocol_digest(config: PilotPaperFixedFprConfig) -> str:
-    """生成 pilot_paper fixed-FPR 协议摘要。"""
+def build_fixed_fpr_protocol_digest(config: PaperFixedFprConfig) -> str:
+    """生成当前论文运行层级的 fixed-FPR 协议摘要。"""
 
     resolved_config = config
     payload = {
@@ -650,14 +646,14 @@ def build_fixed_fpr_protocol_digest(config: PilotPaperFixedFprConfig) -> str:
     return build_stable_digest(payload)
 
 
-def build_pilot_paper_result_import_schema(
+def build_paper_result_import_schema(
     *,
     prompt_split_digest: str,
     attack_matrix_digest: str,
     fixed_fpr_protocol_digest: str,
-    config: PilotPaperFixedFprConfig,
+    config: PaperFixedFprConfig,
 ) -> dict[str, Any]:
-    """构建 pilot_paper 结果受治理导入 schema 描述。"""
+    """构建当前论文运行层级的受治理结果导入 schema。"""
 
     resolved_config = config
     return {
@@ -675,38 +671,38 @@ def build_pilot_paper_result_import_schema(
         "minimum_result_positive_count": resolved_config.minimum_clean_negative_count,
         "minimum_result_negative_count": resolved_config.minimum_clean_negative_count,
         "minimum_result_attacked_negative_count": resolved_config.minimum_clean_negative_count,
-        "method_ids": list(PILOT_PAPER_METHOD_IDS),
-        "primary_baseline_ids": list(PILOT_PAPER_PRIMARY_BASELINE_IDS),
-        "required_metric_fields": list(PILOT_PAPER_REQUIRED_METRIC_FIELDS),
-        "required_source_fields": list(PILOT_PAPER_REQUIRED_SOURCE_FIELDS),
-        "required_rate_fields": list(PILOT_PAPER_RATE_FIELDS),
+        "method_ids": list(PAPER_METHOD_IDS),
+        "primary_baseline_ids": list(PAPER_PRIMARY_BASELINE_IDS),
+        "required_metric_fields": list(PAPER_REQUIRED_METRIC_FIELDS),
+        "required_source_fields": list(PAPER_REQUIRED_SOURCE_FIELDS),
+        "required_rate_fields": list(PAPER_RATE_FIELDS),
         "metric_bounds": {
             field_name: [lower_bound, upper_bound]
             for field_name, (lower_bound, upper_bound) in (
-                PILOT_PAPER_METRIC_BOUNDS.items()
+                PAPER_METRIC_BOUNDS.items()
             )
         },
-        "ci_field_groups": [list(group) for group in PILOT_PAPER_CI_FIELD_GROUPS],
-        "ci_count_fields": dict(PILOT_PAPER_CI_COUNT_FIELDS),
+        "ci_field_groups": [list(group) for group in PAPER_CI_FIELD_GROUPS],
+        "ci_count_fields": dict(PAPER_CI_COUNT_FIELDS),
         "supports_paper_claim": True,
         "paper_run_allows_paper_claim": True,
         "paper_run_claim_type": resolved_config.result_claim_scope,
         "strict_formal_evidence_required": True,
         "nonformal_evidence_rejection_policy": "reject_nonformal_records",
-        "probe_paper_workflow_boundary": PROBE_PAPER_WORKFLOW_BOUNDARY,
+        "paper_run_workflow_boundary": PAPER_RUN_WORKFLOW_BOUNDARY,
         "paper_claim_scale": resolved_config.prompt_set,
-        "full_paper_claim_boundary": FULL_PAPER_CLAIM_BOUNDARY,
+        "paper_run_claim_boundary": PAPER_RUN_CLAIM_BOUNDARY,
     }
 
 
-def build_pilot_paper_method_registry_rows(
+def build_paper_method_registry_rows(
     *,
     prompt_split_digest: str,
     attack_matrix_digest: str,
     fixed_fpr_protocol_digest: str,
-    config: PilotPaperFixedFprConfig,
+    config: PaperFixedFprConfig,
 ) -> tuple[dict[str, Any], ...]:
-    """构建参与 pilot_paper 共同协议的方法登记表。"""
+    """构建参与共享论文协议的方法登记表。"""
 
     resolved_config = config
     display_names = {
@@ -717,7 +713,7 @@ def build_pilot_paper_method_registry_rows(
         "t2smark": "T2SMark",
     }
     rows: list[dict[str, Any]] = []
-    for method_id in PILOT_PAPER_METHOD_IDS:
+    for method_id in PAPER_METHOD_IDS:
         role = "proposed_method" if method_id == "slm_wm_current" else "primary_baseline"
         rows.append(
             {
@@ -744,12 +740,12 @@ def build_pilot_paper_method_registry_rows(
     return tuple(rows)
 
 
-def build_pilot_paper_result_import_template_rows(
+def build_paper_result_import_template_rows(
     method_rows: Iterable[Mapping[str, Any]],
     attack_rows: Iterable[Mapping[str, Any]],
-    config: PilotPaperFixedFprConfig,
+    config: PaperFixedFprConfig,
 ) -> tuple[dict[str, Any], ...]:
-    """构建 method × attack 的 pilot_paper 结果导入模板。
+    """构建当前论文运行层级的 method × attack 结果导入模板。
 
     在其他项目中可复用的部分是模板生成方式: 它不依赖具体 baseline 代码,
     只要求每个方法在同一 prompt split、同一 attack matrix 和同一 fixed-FPR
@@ -782,26 +778,26 @@ def build_pilot_paper_result_import_template_rows(
                 "fixed_fpr_protocol_digest": _str_field(method_row, "fixed_fpr_protocol_digest"),
                 "confidence_interval_method": resolved_config.confidence_interval_method,
                 "confidence_level": resolved_config.confidence_level,
-                "required_metric_fields": list(PILOT_PAPER_REQUIRED_METRIC_FIELDS),
-                "required_source_fields": list(PILOT_PAPER_REQUIRED_SOURCE_FIELDS),
+                "required_metric_fields": list(PAPER_REQUIRED_METRIC_FIELDS),
+                "required_source_fields": list(PAPER_REQUIRED_SOURCE_FIELDS),
                 "required_result_record_path": (
-                    "outputs/pilot_paper_fixed_fpr_results/"
-                    f"{resolved_config.paper_run_name}/pilot_paper_result_records.jsonl"
+                    "outputs/paper_fixed_fpr_results/"
+                    f"{resolved_config.paper_run_name}/paper_result_records.jsonl"
                 ),
                 "supports_paper_claim": False,
                 "paper_claim_scale": resolved_config.prompt_set,
             }
             digest = build_stable_digest(payload)
-            payload["pilot_paper_result_template_id"] = f"pilot_paper_result_template_{digest[:16]}"
-            payload["pilot_paper_result_template_digest"] = digest
+            payload["paper_result_template_id"] = f"paper_result_template_{digest[:16]}"
+            payload["paper_result_template_digest"] = digest
             rows.append(payload)
     return tuple(rows)
 
 
-def _validate_required_fields(row: Mapping[str, Any], row_index: int, schema: Mapping[str, Any]) -> list[PilotPaperImportIssue]:
+def _validate_required_fields(row: Mapping[str, Any], row_index: int, schema: Mapping[str, Any]) -> list[PaperImportIssue]:
     """校验 schema 要求的字段是否存在。"""
 
-    issues: list[PilotPaperImportIssue] = []
+    issues: list[PaperImportIssue] = []
     for field_name in tuple(schema["required_metric_fields"]) + tuple(schema["required_source_fields"]):
         value = row.get(field_name)
         missing = (
@@ -815,10 +811,10 @@ def _validate_required_fields(row: Mapping[str, Any], row_index: int, schema: Ma
     return issues
 
 
-def _validate_counts_and_rates(row: Mapping[str, Any], row_index: int, schema: Mapping[str, Any]) -> list[PilotPaperImportIssue]:
+def _validate_counts_and_rates(row: Mapping[str, Any], row_index: int, schema: Mapping[str, Any]) -> list[PaperImportIssue]:
     """校验计数、率值和置信区间边界。"""
 
-    issues: list[PilotPaperImportIssue] = []
+    issues: list[PaperImportIssue] = []
     minimum_count_fields = {
         "positive_count": int(schema.get("minimum_result_positive_count", 1)),
         "negative_count": int(schema.get("minimum_result_negative_count", 1)),
@@ -826,7 +822,7 @@ def _validate_counts_and_rates(row: Mapping[str, Any], row_index: int, schema: M
     }
     for field_name, minimum_count in minimum_count_fields.items():
         if _int_field(row, field_name) < minimum_count:
-            issues.append(_issue(row_index, row, field_name, "pilot_paper_minimum_sample_count_required"))
+            issues.append(_issue(row_index, row, field_name, "paper_minimum_sample_count_required"))
     positive_count = _int_field(row, "positive_count")
     attacked_negative_count = _int_field(row, "attacked_negative_count")
     supported_record_count = _int_field(row, "supported_record_count")
@@ -903,10 +899,10 @@ def _validate_counts_and_rates(row: Mapping[str, Any], row_index: int, schema: M
     return issues
 
 
-def _validate_protocol_fields(row: Mapping[str, Any], row_index: int, schema: Mapping[str, Any]) -> list[PilotPaperImportIssue]:
+def _validate_protocol_fields(row: Mapping[str, Any], row_index: int, schema: Mapping[str, Any]) -> list[PaperImportIssue]:
     """校验 prompt、attack、fixed-FPR 和声明边界是否与 schema 一致。"""
 
-    issues: list[PilotPaperImportIssue] = []
+    issues: list[PaperImportIssue] = []
     equality_fields = (
         "result_protocol_name",
         "result_scope",
@@ -920,7 +916,7 @@ def _validate_protocol_fields(row: Mapping[str, Any], row_index: int, schema: Ma
         if _str_field(row, field_name) != str(schema[field_name]):
             issues.append(_issue(row_index, row, field_name, "protocol_value_mismatch"))
     if _str_field(row, "method_id") not in set(schema["method_ids"]):
-        issues.append(_issue(row_index, row, "method_id", "pilot_paper_method_id_required"))
+        issues.append(_issue(row_index, row, "method_id", "paper_method_id_required"))
     try:
         attack_config = resolve_formal_attack_config(
             attack_family=_str_field(row, "attack_family"),
@@ -963,14 +959,16 @@ def _validate_protocol_fields(row: Mapping[str, Any], row_index: int, schema: Ma
     ):
         issues.append(_issue(row_index, row, "confidence_level", "confidence_level_mismatch"))
     paper_claim_scale = _str_field(row, "paper_claim_scale")
-    expected_paper_claim_scale = str(schema.get("paper_claim_scale", PILOT_PAPER_PROMPT_SET))
+    expected_paper_claim_scale = str(schema.get("paper_claim_scale", ""))
     if paper_claim_scale and paper_claim_scale != expected_paper_claim_scale:
-        reason = (
-            "pilot_paper_claim_scale_required"
-            if expected_paper_claim_scale == PILOT_PAPER_PROMPT_SET
-            else "paper_claim_scale_mismatch"
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "paper_claim_scale",
+                "paper_claim_scale_mismatch",
+            )
         )
-        issues.append(_issue(row_index, row, "paper_claim_scale", reason))
     if bool(schema.get("strict_formal_evidence_required", True)):
         if not _bool_field(row, "supports_paper_claim"):
             issues.append(_issue(row_index, row, "supports_paper_claim", "strict_formal_claim_record_required"))
@@ -992,7 +990,7 @@ def _validate_evidence_paths(
     row_index: int,
     evidence_root: Path,
     require_existing_evidence: bool,
-) -> list[PilotPaperImportIssue]:
+) -> list[PaperImportIssue]:
     """校验证据路径字段是否非空, 并在需要时检查文件存在。"""
 
     evidence_paths = _list_field(row, "evidence_paths")
@@ -1000,7 +998,7 @@ def _validate_evidence_paths(
         return [_issue(row_index, row, "evidence_paths", "evidence_paths_required")]
     if not require_existing_evidence:
         return []
-    issues: list[PilotPaperImportIssue] = []
+    issues: list[PaperImportIssue] = []
     for evidence_path in evidence_paths:
         candidate = Path(evidence_path)
         resolved_path = candidate if candidate.is_absolute() else evidence_root / candidate
@@ -1009,14 +1007,14 @@ def _validate_evidence_paths(
     return issues
 
 
-def validate_pilot_paper_result_import_rows(
+def validate_paper_result_import_rows(
     rows: Iterable[Mapping[str, Any]],
     schema: Mapping[str, Any],
     *,
     evidence_root: str | Path = ".",
     require_existing_evidence: bool = False,
 ) -> dict[str, Any]:
-    """校验 pilot_paper 共同协议结果导入记录。
+    """校验当前论文运行层级的共同协议结果导入记录。
 
     该函数属于 schema validator 层, 负责收敛重复字段校验。下游对比表只应消费
     accepted_records, 从而避免把小样本或未对齐协议的结果误当作正式论文结论。
@@ -1025,10 +1023,10 @@ def validate_pilot_paper_result_import_rows(
     evidence_root_path = Path(evidence_root).resolve()
     materialized_rows = [dict(row) for row in rows]
     accepted: list[dict[str, Any]] = []
-    issues: list[PilotPaperImportIssue] = []
+    issues: list[PaperImportIssue] = []
     seen_template_keys: set[tuple[str, str, str, str]] = set()
     for row_index, row in enumerate(materialized_rows):
-        row_issues: list[PilotPaperImportIssue] = []
+        row_issues: list[PaperImportIssue] = []
         template_key = (
             _str_field(row, "method_id"),
             _str_field(row, "attack_family"),
@@ -1056,14 +1054,14 @@ def validate_pilot_paper_result_import_rows(
         "result_scope": schema["result_scope"],
         "target_fpr": schema["target_fpr"],
         "input_record_count": len(materialized_rows),
-        "accepted_pilot_paper_import_count": len(accepted),
-        "rejected_pilot_paper_import_count": len(materialized_rows) - len(accepted),
-        "pilot_paper_import_issue_count": len(issues),
-        "pilot_paper_result_import_ready": bool(materialized_rows) and not issues,
+        "accepted_paper_import_count": len(accepted),
+        "rejected_paper_import_count": len(materialized_rows) - len(accepted),
+        "paper_import_issue_count": len(issues),
+        "paper_result_import_ready": bool(materialized_rows) and not issues,
         "accepted_records": accepted,
         "issues": [issue.to_dict() for issue in issues],
-        "accepted_pilot_paper_claim_record_count": sum(1 for row in accepted if _bool_field(row, "supports_paper_claim")),
-        "pilot_paper_claim_record_ready": claim_records_ready,
+        "accepted_paper_claim_record_count": sum(1 for row in accepted if _bool_field(row, "supports_paper_claim")),
+        "paper_claim_record_ready": claim_records_ready,
         "supports_paper_claim": claim_records_ready,
     }
 
@@ -1082,7 +1080,7 @@ def _mean_rate(rows: tuple[Mapping[str, Any], ...], field_name: str) -> float:
 
 def build_superiority_gate_summary(
     accepted_records: Iterable[Mapping[str, Any]],
-    config: PilotPaperFixedFprConfig,
+    config: PaperFixedFprConfig,
 ) -> dict[str, Any]:
     """根据受治理结果记录判断是否支持 SLM-WM 优势性主张。
 
@@ -1093,10 +1091,10 @@ def build_superiority_gate_summary(
     """
 
     materialized = tuple(row for row in accepted_records if _bool_field(row, "supports_paper_claim"))
-    slm_rows = tuple(row for row in materialized if str(row.get("method_id", "")) == PILOT_PAPER_PRIMARY_METHOD_ID)
+    slm_rows = tuple(row for row in materialized if str(row.get("method_id", "")) == PAPER_PRIMARY_METHOD_ID)
     baseline_rows_by_method = {
         method_id: tuple(row for row in materialized if str(row.get("method_id", "")) == method_id)
-        for method_id in PILOT_PAPER_PRIMARY_BASELINE_IDS
+        for method_id in PAPER_PRIMARY_BASELINE_IDS
     }
     slm_keys = {_record_key(row) for row in slm_rows}
     method_template_keys_unique = len(slm_rows) == len(slm_keys) and all(
@@ -1153,7 +1151,7 @@ def build_superiority_gate_summary(
     }
 
 
-def build_pilot_paper_common_protocol_summary(
+def build_paper_common_protocol_summary(
     *,
     prompt_summary: Mapping[str, Any],
     attack_rows: Iterable[Mapping[str, Any]],
@@ -1161,9 +1159,9 @@ def build_pilot_paper_common_protocol_summary(
     template_rows: Iterable[Mapping[str, Any]],
     import_validation_report: Mapping[str, Any],
     paired_superiority_summary: Mapping[str, Any],
-    config: PilotPaperFixedFprConfig,
+    config: PaperFixedFprConfig,
 ) -> dict[str, Any]:
-    """汇总 pilot_paper fixed-FPR 共同协议的运行前治理状态。"""
+    """汇总当前论文运行层级 fixed-FPR 共同协议的治理状态。"""
 
     resolved_config = config
     materialized_attack_rows = tuple(attack_rows)
@@ -1172,7 +1170,7 @@ def build_pilot_paper_common_protocol_summary(
     method_ids = {str(row["method_id"]) for row in materialized_method_rows}
     accepted_records = tuple(dict(row) for row in import_validation_report.get("accepted_records", ()))
     accepted_claim_record_count = sum(1 for row in accepted_records if _bool_field(row, "supports_paper_claim"))
-    import_ready = bool(import_validation_report.get("pilot_paper_result_import_ready", False))
+    import_ready = bool(import_validation_report.get("paper_result_import_ready", False))
     expected_template_keys = {
         (
             str(row.get("method_id", "")),
@@ -1210,14 +1208,14 @@ def build_pilot_paper_common_protocol_summary(
     ready = (
         bool(prompt_summary.get("prompt_split_ready"))
         and bool(materialized_attack_rows)
-        and method_ids == set(PILOT_PAPER_METHOD_IDS)
+        and method_ids == set(PAPER_METHOD_IDS)
         and len(materialized_template_rows) == len(materialized_attack_rows) * len(materialized_method_rows)
         and template_registry_unique
         and math.isclose(float(resolved_config.target_fpr), expected_target_fpr, rel_tol=0.0, abs_tol=1e-12)
     )
     paper_run_allows_claim = True
     paper_run_workflow_validation_ready = ready and import_ready and template_import_coverage_ready
-    expected_paired_baseline_ids = set(PILOT_PAPER_PRIMARY_BASELINE_IDS)
+    expected_paired_baseline_ids = set(PAPER_PRIMARY_BASELINE_IDS)
     paired_baseline_ids = {
         str(value) for value in paired_superiority_summary.get("primary_baseline_ids", ())
     }
@@ -1290,26 +1288,26 @@ def build_pilot_paper_common_protocol_summary(
         and paired_prompt_counts == {resolved_config.minimum_clean_negative_count}
         and paired_attack_counts == {len(materialized_attack_rows)}
         and int(paired_superiority_summary.get("bootstrap_resample_count", 0))
-        == PILOT_PAPER_PAIRED_BOOTSTRAP_RESAMPLE_COUNT
+        == PAPER_PAIRED_BOOTSTRAP_RESAMPLE_COUNT
         and math.isclose(
             float(paired_superiority_summary.get("confidence_level", math.nan)),
-            PILOT_PAPER_CONFIDENCE_LEVEL,
+            PAPER_CONFIDENCE_LEVEL,
             rel_tol=0.0,
             abs_tol=1e-12,
         )
         and paired_superiority_summary.get("bootstrap_analysis_schema")
-        == PILOT_PAPER_PAIRED_BOOTSTRAP_ANALYSIS_SCHEMA
+        == PAPER_PAIRED_BOOTSTRAP_ANALYSIS_SCHEMA
         and paired_superiority_summary.get("bootstrap_bit_generator")
-        == PILOT_PAPER_PAIRED_BOOTSTRAP_BIT_GENERATOR
+        == PAPER_PAIRED_BOOTSTRAP_BIT_GENERATOR
         and paired_superiority_summary.get("bootstrap_quantile_method")
-        == PILOT_PAPER_PAIRED_BOOTSTRAP_QUANTILE_METHOD
+        == PAPER_PAIRED_BOOTSTRAP_QUANTILE_METHOD
         and paired_superiority_summary.get("claim_p_value_method")
-        == PILOT_PAPER_PAIRED_CLAIM_P_VALUE_METHOD
+        == PAPER_PAIRED_CLAIM_P_VALUE_METHOD
         and paired_superiority_summary.get("sharp_null_diagnostic_method")
-        == PILOT_PAPER_PAIRED_SHARP_NULL_DIAGNOSTIC_METHOD
+        == PAPER_PAIRED_SHARP_NULL_DIAGNOSTIC_METHOD
         and isinstance(paired_observation_sha256_map, Mapping)
         and set(paired_observation_sha256_map)
-        == {"slm_wm", *PILOT_PAPER_PRIMARY_BASELINE_IDS}
+        == {"slm_wm", *PAPER_PRIMARY_BASELINE_IDS}
         and all(
             len(str(value)) == 64
             for value in paired_observation_sha256_map.values()
@@ -1328,58 +1326,48 @@ def build_pilot_paper_common_protocol_summary(
         and claim_coverage_ready
         and effectiveness_ready
     )
-    probe_paper_claim_ready = paper_run_claim_ready and resolved_config.prompt_set == PROBE_PAPER_RUN_NAME
-    probe_paper_workflow_validation_ready = (
-        resolved_config.prompt_set == PROBE_PAPER_RUN_NAME and paper_run_workflow_validation_ready
-    )
-    pilot_paper_claim_ready = paper_run_claim_ready and resolved_config.prompt_set == PILOT_PAPER_PROMPT_SET
-    full_paper_claim_ready = paper_run_claim_ready and resolved_config.prompt_set == FULL_PAPER_RUN_NAME
     return {
-        "construction_unit_name": "pilot_paper_fixed_fpr_common_protocol",
+        "construction_unit_name": "paper_fixed_fpr_common_protocol",
         "result_protocol_name": resolved_config.result_protocol_name,
         "result_scope": resolved_config.result_scope,
         "result_claim_scope": resolved_config.result_claim_scope,
         "paper_claim_scale": resolved_config.prompt_set,
         "paper_run_claim_type": resolved_config.result_claim_scope,
-        "full_paper_claim_boundary": FULL_PAPER_CLAIM_BOUNDARY,
-        "probe_paper_workflow_boundary": PROBE_PAPER_WORKFLOW_BOUNDARY,
+        "paper_run_claim_boundary": PAPER_RUN_CLAIM_BOUNDARY,
+        "paper_run_workflow_boundary": PAPER_RUN_WORKFLOW_BOUNDARY,
         "paper_run_allows_paper_claim": paper_run_allows_claim,
         "strict_formal_evidence_required": True,
-        "pilot_paper_common_protocol_ready": ready,
+        "paper_common_protocol_ready": ready,
         "paper_run_workflow_validation_ready": paper_run_workflow_validation_ready,
-        "probe_paper_workflow_validation_ready": probe_paper_workflow_validation_ready,
-        "pilot_paper_prompt_count": prompt_summary.get("pilot_paper_prompt_count", 0),
-        "paper_prompt_count": prompt_summary.get("pilot_paper_prompt_count", 0),
-        "pilot_paper_prompt_split_ready": prompt_summary.get("prompt_split_ready", False),
+        "paper_prompt_count": prompt_summary.get("paper_prompt_count", 0),
         "paper_prompt_split_ready": prompt_summary.get("prompt_split_ready", False),
         "calibration_prompt_id_digest": prompt_summary.get(
             "calibration_prompt_id_digest",
             "",
         ),
         "test_prompt_id_digest": prompt_summary.get("test_prompt_id_digest", ""),
-        "pilot_paper_target_fpr": resolved_config.target_fpr,
         "paper_target_fpr": resolved_config.target_fpr,
         "expected_target_fpr": expected_target_fpr,
-        "pilot_paper_negative_count_minimum_required": resolved_config.minimum_clean_negative_count,
+        "paper_negative_count_minimum_required": resolved_config.minimum_clean_negative_count,
         "minimum_result_positive_count": resolved_config.minimum_clean_negative_count,
         "minimum_result_negative_count": resolved_config.minimum_clean_negative_count,
         "minimum_result_attacked_negative_count": resolved_config.minimum_clean_negative_count,
-        "pilot_paper_attack_count": len(materialized_attack_rows),
-        "pilot_paper_method_count": len(materialized_method_rows),
-        "pilot_paper_import_template_count": len(materialized_template_rows),
-        "pilot_paper_result_import_ready": import_ready,
-        "accepted_pilot_paper_import_count": int(import_validation_report.get("accepted_pilot_paper_import_count", 0)),
-        "accepted_pilot_paper_claim_record_count": accepted_claim_record_count,
-        "pilot_paper_claim_record_ready": claim_coverage_ready,
+        "paper_attack_count": len(materialized_attack_rows),
+        "paper_method_count": len(materialized_method_rows),
+        "paper_import_template_count": len(materialized_template_rows),
+        "paper_result_import_ready": import_ready,
+        "accepted_paper_import_count": int(import_validation_report.get("accepted_paper_import_count", 0)),
+        "accepted_paper_claim_record_count": accepted_claim_record_count,
+        "paper_claim_record_ready": claim_coverage_ready,
         "paper_run_result_import_coverage_ready": template_import_coverage_ready,
         "paper_run_result_missing_template_count": missing_template_count,
         "paper_run_result_unexpected_template_count": unexpected_template_count,
         "paper_run_result_duplicate_template_count": duplicate_template_count,
         "paper_run_template_registry_unique": template_registry_unique,
-        "pilot_paper_evidence_coverage_ready": claim_coverage_ready,
+        "paper_evidence_coverage_ready": claim_coverage_ready,
         "point_estimate_effect_direction_ready": effect_direction_ready,
-        "pilot_paper_effectiveness_gate_ready": effectiveness_ready,
-        "pilot_paper_effectiveness_gate_reason": (
+        "paper_effectiveness_gate_ready": effectiveness_ready,
+        "paper_effectiveness_gate_reason": (
             "paired_superiority_with_fixed_fpr_ready"
             if effectiveness_ready
             else (
@@ -1480,30 +1468,22 @@ def build_pilot_paper_common_protocol_summary(
         "best_baseline_mean_true_positive_rate": superiority_gate["best_baseline_mean_true_positive_rate"],
         "best_baseline_method_id": superiority_gate["best_baseline_method_id"],
         "slm_wm_fixed_fpr_boundary_ready": superiority_gate["slm_wm_fixed_fpr_boundary_ready"],
-        "pilot_paper_claim_ready": pilot_paper_claim_ready,
         "confidence_interval_method": resolved_config.confidence_interval_method,
         "confidence_level": resolved_config.confidence_level,
-        "pilot_paper_supports_superiority_claim": pilot_paper_claim_ready,
         "paper_run_claim_ready": paper_run_claim_ready,
         "paper_run_supports_superiority_claim": paper_run_claim_ready,
-        "paper_claim_ready": paper_run_claim_ready,
-        "probe_paper_claim_ready": probe_paper_claim_ready,
-        "probe_claim_ready": probe_paper_claim_ready,
-        "full_paper_claim_ready": full_paper_claim_ready,
-        "pilot_claim_ready": pilot_paper_claim_ready,
-        "full_claim_ready": full_paper_claim_ready,
         "supports_paper_claim": paper_run_claim_ready,
     }
 
 
 def build_attack_matrix_digest(attack_rows: Iterable[Mapping[str, Any]]) -> str:
-    """生成 pilot_paper 攻击矩阵摘要。"""
+    """生成当前论文运行层级的攻击矩阵摘要。"""
 
     stable_rows = sorted((dict(row) for row in attack_rows), key=lambda item: str(item["attack_id"]))
     return build_stable_digest(stable_rows)
 
 
-def build_pilot_paper_manifest_config(
+def build_paper_manifest_config(
     *,
     prompt_summary: Mapping[str, Any],
     attack_rows: Iterable[Mapping[str, Any]],
@@ -1512,7 +1492,7 @@ def build_pilot_paper_manifest_config(
     schema: Mapping[str, Any],
     validation_report: Mapping[str, Any],
     summary: Mapping[str, Any],
-    config: PilotPaperFixedFprConfig,
+    config: PaperFixedFprConfig,
 ) -> dict[str, Any]:
     """构建 manifest 使用的稳定配置摘要输入。"""
 

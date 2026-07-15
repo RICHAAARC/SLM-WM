@@ -10,7 +10,7 @@ import pytest
 from experiments.protocol.attacks import attack_config_digest, default_attack_configs
 from experiments.protocol.formal_randomization import formal_randomization_repeat_ids
 from experiments.protocol.paper_run_config import RUN_DEFAULTS
-from experiments.protocol.pilot_paper_fixed_fpr import (
+from experiments.protocol.paper_fixed_fpr import (
     bounded_hoeffding_confidence_interval,
 )
 from main.core.digest import build_stable_digest

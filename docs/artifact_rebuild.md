@@ -7,14 +7,17 @@
 5. 失败案例图必须引用真实 attacked image 文件; 图像缺失时停止构图。
 6. baseline comparison 只消费 formal import 的 accepted records。
 7. 正式消融表只消费重新生成、重新攻击和重新检测的变体 records。
+8. 风险参数敏感性表只消费18项单参数设置各自重新生成、重新攻击、重新检测并独立校准的 records, 不得复用参考设置阈值。
+9. 跨重复参数敏感性区间以9个注册 seed-key repeat 的均值为统计单位, 不得把同一 repeat 内的 Prompt 伪装成独立重复。
 
 主要重建入口:
 
-- `scripts/write_pilot_paper_result_records.py`
-- `scripts/write_pilot_paper_fixed_fpr_common_protocol_outputs.py`
-- `scripts/write_pilot_paper_result_analysis_outputs.py`
+- `scripts/write_paper_result_records.py`
+- `scripts/write_paper_fixed_fpr_common_protocol_outputs.py`
+- `scripts/write_paper_result_analysis_outputs.py`
 - `scripts/write_external_baseline_comparison_outputs.py`
 - `scripts/write_paper_artifact_evidence_audit_outputs.py`
 - `scripts/write_submission_readiness_outputs.py`
+- `paper_experiments/runners/randomization_parameter_sensitivity.py`
 
 全部持久化产物写入 `outputs/`。

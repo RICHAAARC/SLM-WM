@@ -18,6 +18,10 @@ FORMAL_RUN_AND_PACKAGE_FUNCTIONS = {
         "run_runtime_rerun_ablations",
         "package_runtime_rerun_ablations",
     ),
+    "experiments/ablations/branch_risk_sensitivity_runtime.py": (
+        "run_branch_risk_parameter_sensitivity",
+        "package_branch_risk_parameter_sensitivity",
+    ),
     "experiments/artifacts/dataset_level_quality_outputs.py": (
         "write_dataset_level_quality_outputs",
         "package_dataset_level_quality_outputs",
@@ -95,7 +99,7 @@ def test_formal_run_and_package_functions_revalidate_execution_lock(
     module_path: str,
     function_names: tuple[str, str],
 ) -> None:
-    """8组底层运行与打包函数必须分别执行起止锁复验."""
+    """9组底层运行与打包函数必须分别执行起止锁复验。"""
 
     run_function = _function_node(module_path, function_names[0])
     package_function = _function_node(module_path, function_names[1])

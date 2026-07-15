@@ -53,12 +53,14 @@ SEMANTIC_WATERMARK_PACKAGE_FAMILIES = frozenset(
         "image_only_dataset_runtime",
         "dataset_level_quality",
         "runtime_rerun_ablation",
+        "branch_risk_parameter_sensitivity",
     }
 )
 RANDOMIZATION_REPEAT_PACKAGE_FAMILIES = frozenset(
     {
         "image_only_dataset_runtime",
         "runtime_rerun_ablation",
+        "branch_risk_parameter_sensitivity",
         "dataset_level_quality",
         "method_faithful_tree_ring",
         "method_faithful_gaussian_shading",
@@ -326,6 +328,16 @@ ABLATION_SUMMARY = ABLATION_PREFIX + "ablation_component_summary.json"
 ABLATION_MANIFEST = ABLATION_PREFIX + "manifest.local.json"
 ABLATION_PACKAGE_INPUT = (
     ABLATION_PREFIX + "mechanism_ablation_package_input_manifest.json"
+)
+
+SENSITIVITY_PREFIX = "outputs/formal_branch_risk_sensitivity/{paper_run}/"
+SENSITIVITY_SUMMARY = (
+    SENSITIVITY_PREFIX + "parameter_sensitivity_summary.json"
+)
+SENSITIVITY_MANIFEST = SENSITIVITY_PREFIX + "manifest.local.json"
+SENSITIVITY_PACKAGE_INPUT = (
+    SENSITIVITY_PREFIX
+    + "branch_risk_parameter_sensitivity_package_input_manifest.json"
 )
 
 QUALITY_PREFIX = "outputs/dataset_level_quality/{paper_run}/"
@@ -810,7 +822,101 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
             summary=T2SMARK_SUMMARY,
             manifest=T2SMARK_RUN_MANIFEST,
         ),
+    ),    ClosurePackageFamilySpec(
+        package_family="branch_risk_parameter_sensitivity",
+        filename_pattern=(
+            "branch_risk_parameter_sensitivity_package_*.zip"
+        ),
+        baseline_id=None,
+        allowed_output_prefix_templates=(SENSITIVITY_PREFIX,),
+        allowed_output_member_templates=(),
+        required_member_templates=(
+            SENSITIVITY_PREFIX + "parameter_sensitivity_records.jsonl",
+            SENSITIVITY_PREFIX + "formal_detection_records.jsonl",
+            SENSITIVITY_PREFIX + "per_setting_frozen_protocols.json",
+            SENSITIVITY_PREFIX + "parameter_sensitivity_metrics.csv",
+            SENSITIVITY_PREFIX + "parameter_sensitivity_delta.csv",
+            SENSITIVITY_SUMMARY,
+            SENSITIVITY_MANIFEST,
+            SENSITIVITY_PACKAGE_INPUT,
+            SENSITIVITY_PREFIX + "scientific_execution_binding.json",
+            SENSITIVITY_PREFIX + "isolated_scientific_execution_report.json",
+            SENSITIVITY_PREFIX + "isolated_dependency_environment_report.json",
+            SENSITIVITY_PREFIX + "scientific_command_dispatch_report.json",
+        ),
+        manifest_member_template=SENSITIVITY_MANIFEST,
+        manifest_artifact_id_template=(
+            "formal_branch_risk_parameter_sensitivity_manifest"
+        ),
+        generated_at_source=_source(SENSITIVITY_SUMMARY, "generated_at"),
+        paper_run_sources=(
+            _source(SENSITIVITY_SUMMARY, "paper_run_name"),
+            _source(SENSITIVITY_PACKAGE_INPUT, "paper_run_name"),
+        ),
+        target_fpr_sources=(
+            _source(SENSITIVITY_SUMMARY, "target_fpr"),
+            _source(SENSITIVITY_MANIFEST, "config", "target_fpr"),
+            _source(SENSITIVITY_PACKAGE_INPUT, "target_fpr"),
+        ),
+        baseline_sources=(),
+        code_version_sources=(
+            _source(SENSITIVITY_MANIFEST, "code_version"),
+        ),
+        randomization_repeat_sources=(
+            _source(
+                SENSITIVITY_PACKAGE_INPUT,
+                "randomization_repeat_identity",
+            ),
+            _source(SENSITIVITY_SUMMARY, "randomization_repeat_identity"),
+            _source(
+                SENSITIVITY_MANIFEST,
+                "config",
+                "randomization_repeat_identity",
+            ),
+        ),
+        value_requirements=(
+            _require(SENSITIVITY_SUMMARY, "protocol_decision", "pass"),
+            _require(
+                SENSITIVITY_SUMMARY,
+                "parameter_sensitivity_component_ready",
+                True,
+            ),
+            _require(
+                SENSITIVITY_SUMMARY,
+                "scientific_unit_provenance_ready",
+                True,
+            ),
+            _require(SENSITIVITY_SUMMARY, "repeat_component_ready", True),
+            _require(
+                SENSITIVITY_SUMMARY,
+                "randomization_aggregate_ready",
+                False,
+            ),
+            _require(SENSITIVITY_SUMMARY, "supports_paper_claim", False),
+            _require(
+                SENSITIVITY_PACKAGE_INPUT,
+                "report_schema",
+                "exact_package_input_manifest",
+            ),
+            _require(SENSITIVITY_PACKAGE_INPUT, "schema_version", 2),
+            _require(
+                SENSITIVITY_PACKAGE_INPUT,
+                "package_family",
+                "branch_risk_parameter_sensitivity",
+            ),
+            _require(SENSITIVITY_PACKAGE_INPUT, "decision", "pass"),
+        ),
+        package_input_manifest_template=SENSITIVITY_PACKAGE_INPUT,
+        scientific_execution_binding=_scientific_binding(
+            SENSITIVITY_PREFIX,
+            artifact_role="branch_risk_parameter_sensitivity",
+            profile_id="sd35_method_runtime_gpu",
+            execution_route="semantic_watermark_ablation_session",
+            summary=SENSITIVITY_SUMMARY,
+            manifest=SENSITIVITY_MANIFEST,
+        ),
     ),
+
 )
 
 
@@ -2768,7 +2874,7 @@ def validate_closure_candidate_repository_profile(
 def _validate_semantic_watermark_session_group(
     candidates: list[ClosurePackageCandidate],
 ) -> None:
-    """要求主方法、质量和消融三个包来自同一次完整科学会话."""
+    """要求主方法、质量、消融和敏感性包来自同一次科学会话。"""
 
     selected = {
         candidate.package_family: candidate
@@ -2868,10 +2974,10 @@ def select_randomization_repeat_package_candidates(
     randomization_repeat_id: str,
     root: str | Path = ".",
 ) -> tuple[ClosurePackageCandidate, ...]:
-    """选择一个正式 repeat 的7类随机化相关证据包.
+    """选择一个正式 repeat 的全部随机化相关证据包。
 
     三个官方参考环境包不随 seed 或密钥改变, 因此不重复写入9个 component;
-    它们只在最终聚合层选择一次.此处返回的7个包均必须精确绑定活动 repeat.
+    它们只在最终聚合层选择一次。此处返回的包均必须精确绑定活动 repeat。
     """
 
     resolved_paper_run = normalize_paper_run_name(paper_run_name)
@@ -2911,7 +3017,7 @@ def select_randomization_repeat_package_candidates(
         )
     ):
         raise ClosurePackageSelectionError(
-            "单 repeat 输入未精确覆盖7类活动随机化证据"
+            "单 repeat 输入未精确覆盖全部活动随机化证据"
         )
     _validate_semantic_watermark_session_group(list(selected_candidates))
     common_code_versions = {

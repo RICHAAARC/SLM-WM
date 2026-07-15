@@ -24,9 +24,9 @@ from experiments.protocol.paper_run_config import (
     validate_frozen_paper_run_target_fpr,
     validate_paper_run_protocol_identity,
 )
-from experiments.protocol.pilot_paper_fixed_fpr import (
+from experiments.protocol.paper_fixed_fpr import (
     PAPER_RUN_FIXED_FPR,
-    PilotPaperFixedFprConfig,
+    PaperFixedFprConfig,
 )
 from paper_workflow.colab_utils.paper_run_environment import (
     _resolve_paper_run_name,
@@ -371,7 +371,7 @@ def test_all_paper_run_levels_follow_one_fixed_fpr_authority() -> None:
     "config_type",
     (
         PaperRunConfig,
-        PilotPaperFixedFprConfig,
+        PaperFixedFprConfig,
         FixedFprCalibrationConfig,
     ),
 )

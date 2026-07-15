@@ -38,11 +38,11 @@ from paper_experiments.analysis.result_analysis_payload import (
 from paper_experiments.runners.paper_claim_provenance import (
     require_exact9_randomization_aggregate_provenance,
 )
-from scripts.write_pilot_paper_result_records import WorkProgress
+from scripts.write_paper_result_records import WorkProgress
 
-CONSTRUCTION_UNIT_NAME = "pilot_paper_complete_result_package"
-DEFAULT_OUTPUT_DIR = Path("outputs/pilot_paper_complete_result_package")
-COMMON_PROTOCOL_SUMMARY_NAME = "pilot_paper_common_protocol_summary.json"
+CONSTRUCTION_UNIT_NAME = "paper_complete_result_package"
+DEFAULT_OUTPUT_DIR = Path("outputs/paper_complete_result_package")
+COMMON_PROTOCOL_SUMMARY_NAME = "paper_common_protocol_summary.json"
 ZIP_COMPRESSION_METHODS = {
     "stored": ZIP_STORED,
     "deflated": ZIP_DEFLATED,
@@ -62,9 +62,9 @@ REQUIRED_OUTPUT_DIR_NAMES = (
     "external_baseline_results",
     "primary_baseline_formal_import",
     "external_baseline_comparison",
-    "pilot_paper_fixed_fpr_results",
-    "pilot_paper_fixed_fpr_common_protocol",
-    "pilot_paper_result_analysis",
+    "paper_fixed_fpr_results",
+    "paper_fixed_fpr_common_protocol",
+    "paper_result_analysis",
     "attack_matrix",
     "fixed_fpr_threshold_audit",
     "primary_baseline_method_faithful_adapter_protocol",
@@ -103,9 +103,10 @@ PACKAGE_EXTRA_PATHS = (
     "docs/builds/prompt_dataset_provenance.md",
     "docs/builds/real_scientific_operator_implementation.md",
     "docs/builds/algorithm_primitives_semantic_conditioned_latent_manifold_watermark.md",
+    "docs/builds/single_model_branch_risk_parameter_sensitivity.md",
     "docs/builds/formal_dependency_environment.md",
-    "scripts/write_pilot_paper_result_records.py",
-    "scripts/write_pilot_paper_fixed_fpr_common_protocol_outputs.py",
+    "scripts/write_paper_result_records.py",
+    "scripts/write_paper_fixed_fpr_common_protocol_outputs.py",
     "scripts/write_primary_baseline_result_candidates.py",
     "scripts/write_primary_baseline_formal_import_protocol.py",
     "scripts/write_primary_baseline_method_faithful_adapter_protocol.py",
@@ -119,7 +120,7 @@ PACKAGE_EXTRA_PATHS = (
     "scripts/write_submission_readiness_outputs.py",
     "scripts/write_evidence_closure_entry_review_outputs.py",
     "scripts/write_result_closure_gate_outputs.py",
-    "scripts/write_pilot_paper_complete_result_package.py",
+    "scripts/write_paper_complete_result_package.py",
     "scripts/run_gpu_server_result_closure.py",
     "scripts/formal_workflow_entry.py",
     "scripts/formal_workflow_environment.py",
@@ -130,6 +131,9 @@ PACKAGE_EXTRA_PATHS = (
     "scripts/run_semantic_watermark_scientific_session.py",
     "scripts/run_image_only_dataset_runtime.py",
     "scripts/run_runtime_rerun_ablations.py",
+    "experiments/ablations/branch_risk_sensitivity.py",
+    "experiments/ablations/branch_risk_sensitivity_runtime.py",
+    "experiments/ablations/branch_risk_sensitivity_workload.py",
     "scripts/build_external_baseline_command_plan.py",
     "scripts/run_external_baseline_command_plan.py",
     "scripts/validate_external_baseline_evidence.py",
@@ -149,6 +153,15 @@ PACKAGE_EXTRA_PATHS = (
     "paper_experiments/analysis/evidence_closure_entry_review.py",
     "paper_experiments/analysis/result_closure_gate.py",
     "paper_experiments/runners/closure_package_selection.py",
+    "paper_experiments/runners/randomization_repeat_evidence.py",
+    "paper_experiments/runners/randomization_aggregate_provenance.py",
+    "paper_experiments/runners/randomization_aggregate_record_workspace.py",
+    "paper_experiments/runners/randomization_prompt_source_contract.py",
+    "paper_experiments/runners/randomization_detection_statistics.py",
+    "paper_experiments/runners/randomization_paired_superiority.py",
+    "paper_experiments/runners/randomization_dataset_quality.py",
+    "paper_experiments/runners/randomization_ablation_necessity.py",
+    "paper_experiments/runners/randomization_parameter_sensitivity.py",
     "paper_experiments/runners/isolated_scientific_workflow.py",
     "paper_experiments/runners/external_baseline_method_faithful.py",
     "paper_experiments/runners/t2smark_formal_reproduction.py",
@@ -179,17 +192,19 @@ PACKAGE_EXTRA_PATHS = (
     "experiments/runtime/semantic_watermark_scientific_session.py",
     "experiments/runtime/repository_environment.py",
     "experiments/runtime/diffusion/sd3_pipeline_runtime.py",
-    "experiments/runtime/diffusion/semantic_features.py",
+    "experiments/runtime/diffusion/semantic_model_loader.py",
+    "main/methods/semantic/runtime.py",
     "experiments/runtime/diffusion/regeneration_attacks.py",
     "experiments/runtime/image_attacks.py",
     "paper_experiments/runners/model_snapshot_runtime.py",
     "main/methods/semantic/branch_risk.py",
     "main/methods/subspace/jacobian_nullspace.py",
+    "main/methods/subspace/semantic_projection.py",
     "main/methods/carrier/keyed_tensor.py",
     "main/methods/geometry/differentiable_attention.py",
     "main/methods/geometry/attention_alignment.py",
     "main/methods/detection/image_only.py",
-    "scripts/write_pilot_paper_result_analysis_outputs.py",
+    "scripts/write_paper_result_analysis_outputs.py",
     "scripts/prepare_dependency_profile.py",
     "scripts/prepare_isolated_dependency_environment.py",
     "scripts/materialize_dependency_lock_candidate.py",
@@ -891,7 +906,7 @@ def build_readiness_summary(
     common_protocol_summary_path = (
         root_path
         / "outputs"
-        / "pilot_paper_fixed_fpr_common_protocol"
+        / "paper_fixed_fpr_common_protocol"
         / paper_claim_scale
         / COMMON_PROTOCOL_SUMMARY_NAME
     )
@@ -942,9 +957,6 @@ def build_readiness_summary(
         )
         is True
     )
-    probe_claim_ready = common_protocol_summary.get("probe_claim_ready") is True
-    pilot_claim_ready = common_protocol_summary.get("pilot_claim_ready") is True
-    full_claim_ready = common_protocol_summary.get("full_claim_ready") is True
     entry_paths = [relative_or_absolute(path, root_path) for path in entry_list]
     return {
         "construction_unit_name": CONSTRUCTION_UNIT_NAME,
@@ -968,12 +980,6 @@ def build_readiness_summary(
         "paper_run_complete_result_package_ready": package_ready,
         "paper_run_claim_ready": run_claim_ready,
         "paper_run_claim_type": common_protocol_summary.get("paper_run_claim_type", ""),
-        "probe_paper_complete_result_package_ready": paper_claim_scale == "probe_paper" and package_ready,
-        "pilot_paper_complete_result_package_ready": paper_claim_scale == "pilot_paper" and package_ready,
-        "full_paper_complete_result_package_ready": paper_claim_scale == "full_paper" and package_ready,
-        "probe_claim_ready": probe_claim_ready,
-        "pilot_claim_ready": pilot_claim_ready,
-        "full_claim_ready": full_claim_ready,
         "supports_paper_claim": package_ready and run_claim_ready,
     }
 
@@ -1117,7 +1123,7 @@ def _validate_archive_name(archive_name: str) -> str:
     return normalized
 
 
-def write_pilot_paper_complete_result_package_outputs(
+def write_paper_complete_result_package_outputs(
     *args: Any,
     **kwargs: Any,
 ) -> dict[str, Any]:
@@ -1149,7 +1155,7 @@ def main() -> None:
     """命令行入口。"""
 
     args = build_parser().parse_args()
-    receipt = write_pilot_paper_complete_result_package_outputs(
+    receipt = write_paper_complete_result_package_outputs(
         root=args.root,
         output_dir=args.output_dir,
         drive_output_dir=args.drive_output_dir,

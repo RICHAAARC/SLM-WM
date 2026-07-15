@@ -48,6 +48,10 @@ SEMANTIC_ARTIFACT_SPECS = {
         "outputs/formal_mechanism_ablation/{paper_run_name}",
         "ablation_component_summary.json",
     ),
+    "branch_risk_parameter_sensitivity": (
+        "outputs/formal_branch_risk_sensitivity/{paper_run_name}",
+        "parameter_sensitivity_summary.json",
+    ),
 }
 
 
@@ -104,6 +108,9 @@ def _artifact_state(paper_run_name: str) -> dict[str, Any]:
     runtime_dir = ROOT / "outputs" / "image_only_dataset_runtime" / paper_run_name
     quality_dir = ROOT / "outputs" / "dataset_level_quality" / paper_run_name
     ablation_dir = ROOT / "outputs" / "formal_mechanism_ablation" / paper_run_name
+    sensitivity_dir = (
+        ROOT / "outputs" / "formal_branch_risk_sensitivity" / paper_run_name
+    )
     runtime_progress_path = runtime_dir / "dataset_runtime_progress.json"
     ablation_progress_path = ablation_dir / "runtime_rerun_progress.json"
     return {
@@ -119,6 +126,15 @@ def _artifact_state(paper_run_name: str) -> dict[str, Any]:
         "ablation_progress_path": ablation_progress_path.relative_to(ROOT).as_posix(),
         "ablation_summary_path": (
             ablation_dir / "ablation_component_summary.json"
+        ).relative_to(ROOT).as_posix(),
+        "sensitivity_progress_present": (
+            sensitivity_dir / "parameter_sensitivity_progress.json"
+        ).is_file(),
+        "sensitivity_progress_path": (
+            sensitivity_dir / "parameter_sensitivity_progress.json"
+        ).relative_to(ROOT).as_posix(),
+        "sensitivity_summary_path": (
+            sensitivity_dir / "parameter_sensitivity_summary.json"
         ).relative_to(ROOT).as_posix(),
     }
 
@@ -207,6 +223,10 @@ def run_scientific_commands(*, run_formal_ablation: bool) -> dict[str, Any]:
         "artifact_records": [],
         "artifact_validation_mode": "completed_or_revalidated_in_current_session",
         "decision": "fail",
+        "session_execution_decision": "fail",
+        "workflow_completion_state": "not_started",
+        "paper_run_closed": False,
+        "result_closure_ready": False,
         "failure_reasons": [],
         "supports_paper_claim": False,
     }
@@ -224,6 +244,8 @@ def run_scientific_commands(*, run_formal_ablation: bool) -> dict[str, Any]:
         report["artifact_state"] = state
         if state["runtime_progress_present"]:
             report["decision"] = "pass"
+            report["session_execution_decision"] = "pass"
+            report["workflow_completion_state"] = "resume_required"
             _write_dispatch_report(report_path, report)
             return report
 
@@ -267,15 +289,59 @@ def run_scientific_commands(*, run_formal_ablation: bool) -> dict[str, Any]:
                 )
                 closed_roles.append("runtime_rerun_ablation")
 
+            if "runtime_rerun_ablation" in closed_roles:
+                sensitivity_command = _run_child(
+                    (
+                        "-m",
+                        "experiments.ablations.branch_risk_sensitivity_workload",
+                    )
+                )
+                report["commands"].append(
+                    {
+                        "command_role": "branch_risk_parameter_sensitivity",
+                        **sensitivity_command,
+                    }
+                )
+                if sensitivity_command["return_code"] != 0:
+                    raise RuntimeError(
+                        "branch_risk_parameter_sensitivity_command_failed"
+                    )
+                state = _artifact_state(paper_run_name)
+                report["artifact_state"] = state
+                if not state["sensitivity_progress_present"]:
+                    sensitivity_summary = _read_json(
+                        ROOT / state["sensitivity_summary_path"]
+                    )
+                    if sensitivity_summary.get("protocol_decision") != "pass":
+                        raise RuntimeError(
+                            "branch_risk_parameter_sensitivity_not_closed"
+                        )
+                    _require_repeat_component_ready(
+                        sensitivity_summary,
+                        artifact_role="branch_risk_parameter_sensitivity",
+                    )
+                    closed_roles.append(
+                        "branch_risk_parameter_sensitivity"
+                    )
+
         report["artifact_records"] = [
             _closed_artifact_record(role, paper_run_name)
             for role in closed_roles
         ]
 
         report["decision"] = "pass"
+        report["session_execution_decision"] = "pass"
+        report["workflow_completion_state"] = (
+            "repeat_component_complete"
+            if not run_formal_ablation
+            or "branch_risk_parameter_sensitivity" in closed_roles
+            else "resume_required"
+        )
     except Exception as exc:
         report["failure_reasons"] = [str(exc)]
         report["decision"] = "fail"
+        report["session_execution_decision"] = "fail"
+        report["workflow_completion_state"] = "failed"
         _write_dispatch_report(report_path, report)
         raise
     _write_dispatch_report(report_path, report)
@@ -303,6 +369,9 @@ def package_bound_outputs(*, include_formal_ablation: bool) -> dict[str, Any]:
     """验证外层绑定后重新生成包含执行证据的正式结果包."""
 
     from experiments.ablations.runtime_rerun import package_runtime_rerun_ablations
+    from experiments.ablations.branch_risk_sensitivity_runtime import (
+        package_branch_risk_parameter_sensitivity,
+    )
     from experiments.artifacts.dataset_level_quality_outputs import (
         package_dataset_level_quality_outputs,
     )
@@ -329,6 +398,16 @@ def package_bound_outputs(*, include_formal_ablation: bool) -> dict[str, Any]:
                 "runtime_rerun_ablation",
                 ROOT / "outputs" / "formal_mechanism_ablation" / paper_run_name,
                 package_runtime_rerun_ablations,
+            )
+        )
+        specifications.append(
+            (
+                "branch_risk_parameter_sensitivity",
+                ROOT
+                / "outputs"
+                / "formal_branch_risk_sensitivity"
+                / paper_run_name,
+                package_branch_risk_parameter_sensitivity,
             )
         )
 
@@ -366,6 +445,10 @@ def package_bound_outputs(*, include_formal_ablation: bool) -> dict[str, Any]:
         "include_formal_ablation": include_formal_ablation,
         "archives": archive_records,
         "decision": "pass",
+        "session_execution_decision": "pass",
+        "workflow_completion_state": "repeat_component_packaged",
+        "paper_run_closed": False,
+        "result_closure_ready": False,
         "supports_paper_claim": False,
     }
 

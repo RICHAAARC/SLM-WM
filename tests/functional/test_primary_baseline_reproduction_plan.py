@@ -13,7 +13,7 @@ from paper_experiments.baselines import (
     build_primary_baseline_execution_plans,
     build_primary_result_templates,
 )
-from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
+from experiments.protocol.paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from scripts.write_primary_baseline_reproduction_plan import write_primary_baseline_reproduction_plan
 
 

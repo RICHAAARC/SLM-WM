@@ -78,8 +78,6 @@ _BOOLEAN_PAPER_CLAIM_FIELDS = (
     "comparison_table_supports_paper_claim",
     "evidence_closure_allowed",
     "formal_result_claim",
-    "full_claim_ready",
-    "full_paper_claim_ready",
     "package_freeze_allowed",
     "paper_artifact_claim_ready",
     "paper_claim_support",
@@ -88,12 +86,7 @@ _BOOLEAN_PAPER_CLAIM_FIELDS = (
     "paper_ready",
     "paper_run_claim_ready",
     "paper_run_supports_superiority_claim",
-    "pilot_claim_ready",
-    "pilot_paper_claim_ready",
-    "pilot_paper_claim_record_ready",
-    "pilot_paper_supports_superiority_claim",
-    "probe_claim_ready",
-    "probe_paper_claim_ready",
+    "paper_claim_record_ready",
     "raw_content_claim_ready",
     "release_package_allowed",
     "source_supports_paper_claim",
@@ -134,7 +127,7 @@ _ENUM_PAPER_CLAIM_POLICIES = (
 )
 
 _COUNT_PAPER_CLAIM_FIELDS = (
-    "accepted_pilot_paper_claim_record_count",
+    "accepted_paper_claim_record_count",
     "paper_ready_artifact_count",
     "superiority_claim_ready_count",
 )

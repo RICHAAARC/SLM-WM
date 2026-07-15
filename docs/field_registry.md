@@ -1669,30 +1669,30 @@ Notebook 与 repository module 的跨边界数据
 | threshold_audit_rows_digest | provenance | none | true | true | false | 对按方法身份规范排序的完整 fixed-FPR 阈值审计行计算的稳定 SHA-256 摘要。 |
 | threshold_observation_binding_ready | governance | none | false | false | false | 五方法身份、observation 文件字节摘要与冻结阈值摘要是否形成无缺失且格式有效的精确绑定。 |
 | fixed_fpr_threshold_audit_ready | governance | none | false | false | false | 五个方法的身份、目标 FPR、冻结阈值和逐条判定是否共同完成正式证据审计。 |
-| pilot_paper_common_protocol_ready | governance | none | false | false | false | pilot_paper 级 fixed-FPR 共同协议是否完成运行前治理冻结。|
-| pilot_paper_prompt_count | metric | none | false | false | false | pilot_paper prompt split 中的 prompt 数量。|
-| pilot_paper_prompt_split_ready | governance | none | false | false | false | pilot_paper prompt split 是否可供共同协议使用。|
-| pilot_paper_target_fpr | protocol | none | false | false | false | pilot_paper 共同协议使用的 fixed-FPR 目标值。|
+| paper_common_protocol_ready | governance | none | false | false | false | pilot_paper 级 fixed-FPR 共同协议是否完成运行前治理冻结。|
+| paper_prompt_count | metric | none | false | false | false | 当前论文运行层级 prompt split 中的 prompt 数量。|
+| paper_prompt_split_ready | governance | none | false | false | false | 当前论文运行层级 prompt split 是否可供共同协议使用。|
+| paper_target_fpr | protocol | none | false | false | false | 当前论文运行层级共同协议使用的 fixed-FPR 目标值。|
 | paper_target_fpr | protocol | none | false | false | false | 当前论文运行层级使用的 fixed-FPR 目标值, probe_paper、pilot_paper 与 full_paper 分别固定为0.1、0.01和0.001。|
 | expected_target_fpr | protocol | none | false | false | false | 当前论文运行层级按协议应匹配的 fixed-FPR 目标值。|
-| pilot_paper_negative_count_minimum_required | metric | none | false | false | false | pilot_paper fixed-FPR 校准所要求的最小 clean negative 数量。|
+| paper_negative_count_minimum_required | metric | none | false | false | false | pilot_paper fixed-FPR 校准所要求的最小 clean negative 数量。|
 | minimum_clean_negative_count | metric | none | false | false | false | fixed-FPR 协议要求的完整 test split clean negative 样本数, 三类运行层级分别为34、340、3400。|
 | minimum_result_positive_count | metric | none | false | false | false | 结果导入 schema 要求的完整 test split positive 样本数, 与当前运行层级的 test 数量一致。|
 | minimum_result_negative_count | metric | none | false | false | false | 结果导入 schema 要求的完整 test split negative 样本数, 不允许不完整统计进入论文 claim 边界。|
 | minimum_result_attacked_negative_count | metric | none | false | false | false | 结果导入 schema 要求的每个攻击设置完整 test split attacked negative 样本数。|
-| pilot_paper_negative_count_ready | governance | none | false | false | false | pilot_paper prompt split 中 clean negative 数量是否满足最小要求。|
-| pilot_paper_attack_count | metric | none | false | false | false | pilot_paper 共同协议攻击矩阵中的攻击配置数量。|
-| pilot_paper_method_count | metric | none | false | false | false | pilot_paper 共同协议覆盖的方法数量。|
-| pilot_paper_import_template_count | metric | none | false | false | false | pilot_paper 共同协议生成的 method × attack 导入模板数量。|
-| pilot_paper_result_import_ready | governance | none | false | false | false | pilot_paper 结果候选记录是否已通过受治理导入 schema。|
-| accepted_pilot_paper_import_count | metric | none | false | false | false | 已通过 pilot_paper 受治理导入 schema 的结果记录数量。|
-| rejected_pilot_paper_import_count | metric | none | false | false | false | 未通过 pilot_paper 受治理导入 schema 的结果记录数量。|
-| pilot_paper_import_issue_count | metric | none | false | false | false | pilot_paper 受治理导入 schema 发现的问题数量。|
-| accepted_pilot_paper_claim_record_count | metric | none | false | false | false | 已通过 pilot_paper 受治理导入且显式允许支撑 pilot_paper 论文主张的结果记录数量。|
-| pilot_paper_claim_record_ready | governance | none | false | false | false | pilot_paper 结果导入记录是否已覆盖模板并具备 pilot_paper 论文主张记录边界。|
-| pilot_paper_evidence_coverage_ready | governance | none | false | false | false | pilot_paper 结果是否已覆盖共同协议模板并完成受治理证据导入。|
-| pilot_paper_effectiveness_gate_ready | governance | none | false | false | false | pilot_paper 结果是否通过方法效果门禁并允许支持优势性主张。|
-| pilot_paper_effectiveness_gate_reason | governance | none | false | false | false | pilot_paper 方法效果门禁未通过或通过的原因代码。|
+| paper_negative_count_ready | governance | none | false | false | false | 当前论文运行层级 prompt split 中 clean negative 数量是否满足最小要求。|
+| paper_attack_count | metric | none | false | false | false | 当前论文运行层级共同协议攻击矩阵中的攻击配置数量。|
+| paper_method_count | metric | none | false | false | false | 当前论文运行层级共同协议覆盖的方法数量。|
+| paper_import_template_count | metric | none | false | false | false | 当前论文运行层级共同协议生成的 method × attack 导入模板数量。|
+| paper_result_import_ready | governance | none | false | false | false | 当前论文运行层级结果候选记录是否已通过受治理导入 schema。|
+| accepted_paper_import_count | metric | none | false | false | false | 已通过 当前论文运行层级受治理导入 schema 的结果记录数量。|
+| rejected_paper_import_count | metric | none | false | false | false | 未通过 当前论文运行层级受治理导入 schema 的结果记录数量。|
+| paper_import_issue_count | metric | none | false | false | false | 当前论文运行层级受治理导入 schema 发现的问题数量。|
+| accepted_paper_claim_record_count | metric | none | false | false | false | 已通过 当前论文运行层级受治理导入且显式允许支撑 当前论文运行层级论文主张的结果记录数量。|
+| paper_claim_record_ready | governance | none | false | false | false | 当前论文运行层级结果导入记录是否已覆盖模板并具备 当前论文运行层级论文主张记录边界。|
+| paper_evidence_coverage_ready | governance | none | false | false | false | 当前论文运行层级结果是否已覆盖共同协议模板并完成受治理证据导入。|
+| paper_effectiveness_gate_ready | governance | none | false | false | false | 当前论文运行层级结果是否通过方法效果门禁并允许支持优势性主张。|
+| paper_effectiveness_gate_reason | governance | none | false | false | false | 当前论文运行层级方法效果门禁未通过或通过的原因代码。|
 | slm_wm_mean_true_positive_rate | metric | none | false | false | false | SLM-WM 在共同攻击模板上的平均 true positive rate。|
 | slm_wm_mean_false_positive_rate | metric | none | false | false | false | SLM-WM 在共同攻击模板上的平均 false positive rate。|
 | slm_wm_fixed_fpr_boundary_ready | governance | none | false | false | false | SLM-WM 平均 false positive rate 是否满足 fixed-FPR 目标边界。|
@@ -1706,23 +1706,14 @@ Notebook 与 repository module 的跨边界数据
 | paper_run_result_unexpected_template_count | metric | none | false | false | false | 当前论文运行已接受结果中额外的 method × attack 模板数。|
 | paper_run_result_duplicate_template_count | metric | none | false | false | false | 当前论文运行已接受结果中重复的 method × attack 模板行数。|
 | paper_run_template_registry_unique | governance | none | false | false | false | 当前论文运行的正式导入模板注册表是否无重复键。|
-| pilot_paper_claim_ready | governance | none | false | false | false | pilot_paper 规模论文主张是否已由同一 prompt split、同一攻击矩阵、fixed-FPR 协议和受治理导入记录闭合。|
-| pilot_paper_supports_superiority_claim | governance | none | false | false | false | pilot_paper 结果是否允许在 pilot_paper 样本规模边界内支撑方法优越性主张。|
-| full_paper_claim_ready | governance | none | false | false | false | full_paper 规模论文主张是否已具备证据闭合。pilot_paper 共同协议中必须为 false。|
+| paper_run_supports_superiority_claim | governance | none | false | false | false | 当前论文运行层级结果是否允许在 pilot_paper 样本规模边界内支撑方法优越性主张。|
 | paper_claim_scale | governance | none | false | false | false | 当前结果或协议允许支撑的论文主张规模, 例如 pilot_paper 或 full_paper。|
 | paper_run_claim_type | governance | none | false | false | false | 当前论文运行层级对应的正式主张类型, probe_paper、pilot_paper 与 full_paper 分别对应 probe_claim、pilot_claim 与 full_claim。|
-| probe_claim_ready | governance | none | false | false | false | probe_paper 小规模正式流程主张是否已经通过同一协议门禁。|
-| pilot_claim_ready | governance | none | false | false | false | pilot_paper 中规模正式流程主张是否已经通过同一协议门禁。|
-| full_claim_ready | governance | none | false | false | false | full_paper 全规模正式流程主张是否已经通过同一协议门禁。|
 | strict_formal_evidence_required | governance | none | false | false | false | 当前共同协议是否要求结果记录只能来自正式真实测量证据。|
 | strict_formal_result_ready | governance | none | true | false | false | 单条共同协议结果记录是否已经通过正式真实测量证据门禁。|
 | nonformal_evidence_rejection_policy | governance | none | false | false | false | 非正式证据进入共同协议结果导入时的拒绝策略。|
 | paper_run_complete_result_package_ready | governance | none | false | false | false | 当前论文运行层级完整结果包是否已经覆盖所有必需输出目录并完成归档。|
-| probe_paper_complete_result_package_ready | governance | none | false | false | false | probe_paper 完整结果包是否已经覆盖所有必需输出目录并完成归档。|
-| pilot_paper_complete_result_package_ready | governance | none | false | false | false | pilot_paper 完整结果包是否已经覆盖所有必需输出目录并完成归档。|
-| full_paper_complete_result_package_ready | governance | none | false | false | false | full_paper 完整结果包是否已经覆盖所有必需输出目录并完成归档。|
 | paper_run_claim_ready | governance | none | false | false | false | 当前论文运行层级的正式主张是否已经通过共同协议、证据覆盖和优势性门禁。|
-| full_paper_claim_boundary | governance | none | false | false | false | pilot_paper 结果与 full_paper 规模论文主张之间的样本规模边界说明。|
 | prompt_split_digest | artifact | none | false | false | false | 共同协议使用的 prompt split 稳定摘要。|
 | attack_matrix_digest | artifact | none | false | false | false | 共同协议使用的攻击矩阵稳定摘要。|
 | fixed_fpr_protocol_digest | artifact | none | false | false | false | fixed-FPR 校准协议的稳定摘要。|
@@ -1736,18 +1727,18 @@ Notebook 与 repository module 的跨边界数据
 | metric_bounds | protocol | none | false | false | false | 导入 schema 为每个正式指标声明数学上下界, 检测率与分数保持率使用 [0,1], SSIM 质量均值使用 [-1,1].|
 | ci_field_groups | protocol | none | false | false | false | 导入 schema 中 metric 与置信区间字段组合, 每组区间必须服从 `metric_bounds` 声明的范围.|
 | ci_count_fields | protocol | none | false | false | false | 导入 schema 为每个置信区间指标声明原始样本计数字段, 用于精确重建 bounded Hoeffding 区间.|
-| pilot_paper_result_template_id | artifact | none | true | false | false | pilot_paper 共同协议结果导入模板行的稳定标识。|
-| pilot_paper_result_template_digest | artifact | none | true | false | false | pilot_paper 共同协议结果导入模板行的稳定摘要。|
+| paper_result_template_id | artifact | none | true | false | false | 当前论文运行层级共同协议结果导入模板行的稳定标识。|
+| paper_result_template_digest | artifact | none | true | false | false | 当前论文运行层级共同协议结果导入模板行的稳定摘要。|
 | quality_score_mean | metric | none | true | false | false | 当前论文运行层级共同协议中 attacked positive 的实测 SSIM 均值, 合法范围为 [-1,1], 不执行 [0,1] 裁剪.|
 | quality_score_ci_low | metric | none | true | false | false | SSIM 均值 Hoeffding 置信区间下界, 使用 [-1,1] 观测范围和 range_width=2.|
 | quality_score_ci_high | metric | none | true | false | false | SSIM 均值 Hoeffding 置信区间上界, 使用 [-1,1] 观测范围和 range_width=2.|
 | score_retention_ci_low | metric | none | true | false | false | 攻击后分数保持率 Hoeffding 置信区间下界, 使用 [0,1] 观测范围和 range_width=1.|
 | score_retention_ci_high | metric | none | true | false | false | 攻击后分数保持率 Hoeffding 置信区间上界, 使用 [0,1] 观测范围和 range_width=1.|
 | baseline_formal_import_record_accepted | governance | none | true | false | false | 外部 baseline 候选记录是否已经被主表受治理导入报告接受。|
-| template_covered | governance | none | true | false | false | 单个 pilot_paper method × attack 模板是否已被结果记录覆盖。|
-| pilot_paper_result_record_digest | artifact | none | true | false | false | pilot_paper 共同协议结果记录的稳定摘要。|
-| pilot_paper_result_record_id | artifact | none | true | false | false | pilot_paper 共同协议结果记录的稳定标识。|
-| result_source_kind | governance | none | true | false | false | pilot_paper 结果记录来源类型, 区分 SLM-WM 攻击矩阵与外部 baseline 结果。|
+| template_covered | governance | none | true | false | false | 单个 当前论文运行层级 method × attack 模板是否已被结果记录覆盖。|
+| paper_result_record_digest | artifact | none | true | false | false | 当前论文运行层级共同协议结果记录的稳定摘要。|
+| paper_result_record_id | artifact | none | true | false | false | 当前论文运行层级共同协议结果记录的稳定标识。|
+| result_source_kind | governance | none | true | false | false | 当前论文运行层级结果记录来源类型, 区分 SLM-WM 攻击矩阵与外部 baseline 结果。|
 | dataset_quality_formal_metric_ready | governance | none | true | false | false | 数据集级正式 FID / KID 指标是否可以支撑共同协议结果记录。|
 | attacked_image_latent_rescore | method | none | true | false | false | attacked image 经过 VAE latent 投影后的直接水印重检测摘要对象。|
 | attacked_image_rescore_count | metric | none | true | false | false | 已完成 attacked image 直接水印重检测的记录数量。|
@@ -1778,13 +1769,12 @@ Notebook 与 repository module 的跨边界数据
 | materialized_output_entry_count | metric | none | true | false | false | 从结果包中成功物化到 outputs/ 的条目数量。|
 | input_package_paths | artifact | none | true | false | false | 参与结果物化的 zip 结果包路径集合。|
 | materialization_report | artifact | none | true | false | false | 从 Google Drive 或其他结果包物化 outputs 条目的摘要报告对象。|
-| missing_template_examples | governance | none | true | false | false | pilot_paper 结果记录物化摘要中用于诊断的缺失模板示例集合。|
-| pilot_paper_template_coverage_ready | governance | none | true | false | false | pilot_paper 结果记录是否覆盖全部 method × attack 导入模板。|
-| pilot_paper_template_missing_count | metric | none | true | false | false | 尚未被结果记录覆盖的 pilot_paper 导入模板数量。|
-| pilot_paper_template_covered_count | metric | none | true | false | false | 已被结果记录覆盖的 pilot_paper 导入模板数量。|
-| pilot_paper_template_record_count | metric | none | true | false | false | pilot_paper 共同协议结果导入模板总数量。|
-| pilot_paper_result_method_ids | protocol | none | true | false | false | pilot_paper 结果记录实际覆盖的方法 id 集合。|
-| pilot_paper_result_record_count | metric | none | true | false | false | pilot_paper 共同协议结果记录物化后的记录数量。|
+| missing_template_examples | governance | none | true | false | false | 当前论文运行层级结果记录物化摘要中用于诊断的缺失模板示例集合。|
+| paper_template_coverage_ready | governance | none | true | false | false | 当前论文运行层级结果记录是否覆盖全部 method × attack 导入模板。|
+| paper_template_missing_count | metric | none | true | false | false | 尚未被结果记录覆盖的 当前论文运行层级导入模板数量。|
+| paper_template_covered_count | metric | none | true | false | false | 已被结果记录覆盖的 当前论文运行层级导入模板数量。|
+| paper_template_record_count | metric | none | true | false | false | 当前论文运行层级共同协议结果导入模板总数量。|
+| paper_result_record_count | metric | none | true | false | false | 当前论文运行层级共同协议结果记录物化后的记录数量。|
 | expected_superiority_row_count | metric | none | true | false | false | 正式攻击矩阵应产生的逐攻击优越性比较行数。|
 | expected_result_record_count | metric | none | true | false | false | 五种方法与正式攻击矩阵笛卡尔积对应的预期结果记录数。|
 | actual_result_record_count | metric | none | true | false | false | 结果分析实际读取的记录行数, 包含可能的重复键。|
@@ -2012,13 +2002,13 @@ Notebook 与 repository module 的跨边界数据
 | package_path | artifact | none | true | false | false | 上游选择器复验的 leaf ZIP 显式绝对路径; 外层 component manifest 不持久化该外部路径。 |
 | package_sha256 | provenance | none | true | false | false | 上游 leaf ZIP 原始文件字节的 SHA-256。 |
 | repeat_component_ready | governance | none | true | false | false | 一个已登记 seed-key repeat 的原始证据是否完整通过其科学运行与打包契约。该字段固定不表示论文 claim 成立。 |
-| leaf_package_families | protocol | none | true | false | false | 单 repeat 自包含证据包内7类活动随机化 leaf package 的规范有序 family 集合。 |
-| leaf_package_family_count | metric | none | true | false | false | 单 repeat manifest 登记的活动随机化 leaf package family 数量, 固定为7。 |
+| leaf_package_families | protocol | none | true | false | false | 单 repeat 自包含证据包内8类活动随机化 leaf package 的规范有序 family 集合。 |
+| leaf_package_family_count | metric | none | true | false | false | 单 repeat manifest 登记的活动随机化 leaf package family 数量, 固定为8。 |
 | leaf_packages | artifact | none | true | false | false | 单 repeat manifest 按规范 family 顺序保存的 leaf ZIP 身份、成员路径、字节摘要、代码版本与执行锁摘要记录集合。 |
 | archive_member | artifact | none | true | false | false | leaf ZIP 在单 repeat 外层归档中的规范 POSIX 成员路径, 由 repeat ID 与 package family 唯一派生。 |
 | leaf_package_sha256_map | provenance | none | true | false | false | 单 repeat 自包含证据包内从 package family 到嵌套 leaf ZIP 原始字节 SHA-256 的映射。 |
-| leaf_package_set_digest | provenance | none | true | false | false | 7个 leaf package 身份、成员路径、代码版本与执行锁摘要记录集合的稳定摘要。 |
-| component_content_digest | provenance | none | true | false | false | 排除生成时间和外部绝对路径后, 单 repeat 身份、代码版本、7个 leaf package 字节摘要与结论边界的稳定内容摘要。 |
+| leaf_package_set_digest | provenance | none | true | false | false | 8个 leaf package 身份、成员路径、代码版本与执行锁摘要记录集合的稳定摘要。 |
+| component_content_digest | provenance | none | true | false | false | 排除生成时间和外部绝对路径后, 单 repeat 身份、代码版本、8个 leaf package 字节摘要与结论边界的稳定内容摘要。 |
 | randomization_repeat_evidence_manifest_digest | provenance | none | true | false | false | 单 repeat 自包含证据 manifest 在移除自身摘要字段后的稳定内容摘要。 |
 | randomization_aggregate_ready | governance | none | true | false | false | 是否已经精确覆盖权威9个 repeat、3个跨 repeat 不变包并完成全部嵌套来源生产复验。该字段只表示聚合输入就绪, 不单独支持论文 claim。单 repeat component 固定为 false。 |
 | randomization_aggregate_schema_version | protocol | none | true | false | false | 精确9+3随机化 aggregate payload 与 manifest 共同采用的整数 schema 版本。 |
@@ -3451,3 +3441,44 @@ Notebook 与 repository module 的跨边界数据
 | detector_guided_attack_threshold_digest | provenance | none | true | true | false | detector-guided attack 实际连续目标引用的冻结协议摘要。 |
 | allowed_threshold_freeze_false_positive_count | metric | none | true | false | false | method-repeat 在共同 threshold-freeze 子集上的最大允许假阳性数量。 |
 | proposed_measurement_digest | provenance | none | true | true | false | 配对优势记录引用的主方法攻击后阈值无关仅图像 measurement 摘要。 |
+
+## 单模型分支风险参数敏感性字段
+
+| field | role | unit | per_record | per_artifact | derived | description |
+|---|---|---|---|---|---|---|
+| risk_parameter_protocol | protocol | none | true | false | false | 区分正式参考参数与受治理单模型内部敏感性参数覆盖的运行协议。 |
+| sensitivity_id | protocol | none | true | false | false | 18项单参数敏感性设置中的稳定设置标识。 |
+| sensitivity_config | protocol | none | true | false | false | 单条敏感性运行绑定的参数名、变化方向、操作和值及解析后分支配置。 |
+| sensitivity_summary | artifact | none | false | true | true | GPU 会话返回的单重复参数敏感性完成摘要。 |
+| sensitivity_progress | artifact | none | false | true | true | 尚未完成的参数敏感性会话进度, 不支持论文结论。 |
+| sensitivity_prompt_id | protocol | none | true | false | false | 检测原子绑定的敏感性运行 prompt 标识。 |
+| parameter_name | protocol | none | true | false | false | 当前单参数设置改变的手工风险函数字段名。 |
+| variation | protocol | none | true | false | false | 参数设置相对参考值的 reference、low 或 high 方向。 |
+| numeric_value | metric | none | true | false | false | 参数替换值或乘法因子。 |
+| resolved_branch_risk_configs | protocol | none | true | false | true | 参数操作应用后三个分支的完整风险配置正文。 |
+| sensitivity_protocol | protocol | none | false | true | false | 单模型内部一次只改变一个参数的敏感性协议名称。 |
+| sensitivity_model_scope | governance | none | false | true | false | 敏感性证据覆盖的模型范围, 当前只允许登记主扩散模型。 |
+| sensitivity_fixed_identity_fields | protocol | none | false | true | false | 参数变化时必须保持不变的模型、prompt、随机化、攻击和检测身份字段。 |
+| sensitivity_setting_ids | protocol | none | false | true | false | 按冻结顺序登记的18项敏感性设置标识。 |
+| sensitivity_setting_count | metric | none | false | true | true | 已登记或已完整测量的敏感性设置数量。 |
+| sensitivity_spec_digest | provenance | none | false | true | true | 18项设置协议正文的稳定摘要。 |
+| sensitivity_exact_set_ready | governance | none | false | true | true | 设置集合、顺序、数量和协议摘要是否精确匹配冻结规范。 |
+| cross_model_evidence_provided | governance | none | false | true | false | 当前敏感性证据是否包含跨模型实验, 当前固定为 false。 |
+| per_setting_calibration_required | governance | none | false | true | false | 每个参数设置是否必须使用自己的 calibration negatives 冻结阈值。 |
+| single_model_internal_sensitivity | governance | none | true | false | false | 聚合指标行是否严格属于单模型内部参数敏感性。 |
+| parameter_sensitivity_component_ready | governance | none | false | true | true | 当前 seed-key 重复是否完成18项真实生成、攻击、检测和独立校准。 |
+| minimum_attacked_true_positive_rate_across_settings | metric | none | false | true | true | 单重复18项设置中 attacked TPR 点估计的最小值。 |
+| maximum_attacked_true_positive_rate_across_settings | metric | none | false | true | true | 单重复18项设置中 attacked TPR 点估计的最大值。 |
+| attacked_true_positive_rate_range | metric | none | false | true | true | 单重复18项设置 attacked TPR 最大值与最小值之差。 |
+| minimum_paired_ssim_across_settings | metric | none | false | true | true | 单重复18项设置中配对 SSIM 均值的最小值。 |
+| maximum_paired_ssim_across_settings | metric | none | false | true | true | 单重复18项设置中配对 SSIM 均值的最大值。 |
+| parameter_sensitivity_records_digest | provenance | none | false | true | true | 单重复逐 prompt 敏感性记录集合的稳定摘要。 |
+| per_setting_frozen_protocols_digest | provenance | none | false | true | true | 18项设置各自冻结检测协议的联合稳定摘要。 |
+| parameter_sensitivity_aggregate_ready | governance | none | false | true | true | 精确9重复参数敏感性原始证据是否完成重建与统计。 |
+| repeat_metric_rows_digest | provenance | none | false | true | true | 9重复乘18项设置的逐重复指标行稳定摘要。 |
+| aggregate_metric_rows_digest | provenance | none | false | true | true | 18项跨重复绝对指标与参考配对差值行的稳定摘要。 |
+| parameter_sensitivity_summary_digest | provenance | none | false | true | true | 跨重复参数敏感性摘要在排除自身摘要字段后的稳定摘要。 |
+| measurement_component_roles | governance | none | false | true | true | 结果闭合要求完整存在但不参与中心优越性投票的测量组件角色集合。 |
+| workflow_completion_state | governance | none | false | true | true | 区分续跑、数据集组件完成、单重复组件完成和单重复打包完成的会话状态。 |
+| session_execution_decision | governance | none | false | true | true | 本次命令是否正常结束, 不表示论文运行已经闭合。 |
+| paper_run_closed | governance | none | false | true | true | 当前论文运行层级是否已通过最终结果闭合, 单重复 GPU 会话中固定为 false。 |

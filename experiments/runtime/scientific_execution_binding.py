@@ -127,14 +127,24 @@ def validate_semantic_watermark_dispatch_report(
         )
     ]
     if include_ablation:
-        expected_commands.append(
+        expected_commands.extend(
             (
-                "runtime_rerun_ablation",
-                [
-                    python_executable,
-                    "-m",
-                    "experiments.ablations.mechanism_ablation_workload",
-                ],
+                (
+                    "runtime_rerun_ablation",
+                    [
+                        python_executable,
+                        "-m",
+                        "experiments.ablations.mechanism_ablation_workload",
+                    ],
+                ),
+                (
+                    "branch_risk_parameter_sensitivity",
+                    [
+                        python_executable,
+                        "-m",
+                        "experiments.ablations.branch_risk_sensitivity_workload",
+                    ],
+                ),
             )
         )
     commands = dispatch_report.get("commands")
@@ -144,6 +154,11 @@ def validate_semantic_watermark_dispatch_report(
             dispatch_report.get("python_executable") == python_executable,
             dispatch_report.get("formal_ablation_requested") is include_ablation,
             dispatch_report.get("packaging_deferred") is True,
+            dispatch_report.get("session_execution_decision") == "pass",
+            dispatch_report.get("workflow_completion_state")
+            == "repeat_component_complete",
+            dispatch_report.get("paper_run_closed") is False,
+            dispatch_report.get("result_closure_ready") is False,
             isinstance(commands, list),
             len(commands) == len(expected_commands)
             if isinstance(commands, list)
@@ -178,7 +193,12 @@ def validate_semantic_watermark_dispatch_report(
         "dataset_level_quality",
     ]
     if include_ablation:
-        expected_artifact_roles.append("runtime_rerun_ablation")
+        expected_artifact_roles.extend(
+            (
+                "runtime_rerun_ablation",
+                "branch_risk_parameter_sensitivity",
+            )
+        )
     artifact_records = dispatch_report.get("artifact_records")
     if not isinstance(artifact_records, list) or [
         record.get("artifact_role") if isinstance(record, dict) else None

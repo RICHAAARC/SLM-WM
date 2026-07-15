@@ -1453,7 +1453,7 @@ def build_governed_paper_payload_path_map(paper_claim_scale: str) -> dict[str, s
     scale = str(paper_claim_scale).strip()
     if not scale:
         raise ValueError("paper_claim_scale 不得为空")
-    result_analysis_root = f"outputs/pilot_paper_result_analysis/{scale}"
+    result_analysis_root = f"outputs/paper_result_analysis/{scale}"
     return {
         "main_comparison_table": (
             f"outputs/external_baseline_comparison/{scale}/baseline_comparison_table.csv"

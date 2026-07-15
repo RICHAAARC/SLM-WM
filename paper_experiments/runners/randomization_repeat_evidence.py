@@ -1,9 +1,9 @@
-"""把一个正式随机化重复的7类上游证据封装为自包含结果包.
+"""把一个正式随机化重复的全部上游证据封装为自包含结果包。
 
 该模块只负责单个 ``randomization_repeat_id`` 的输入闭合. 写包时保持上游
 leaf ZIP 原始字节; 写后验证会在临时目录中逐包调用生产 selector 复验, 不向
 持久化输出解压上游内容. 该模块不计算跨重复统计. 最终聚合层把这里生成的
-结果包作为不可直接支持论文结论的原子输入, 并从7个 leaf ZIP 重建统计事实.
+结果包作为不可直接支持论文结论的原子输入, 并从全部 leaf ZIP 重建统计事实。
 """
 
 from __future__ import annotations
@@ -50,6 +50,7 @@ RANDOMIZATION_REPEAT_EVIDENCE_OUTPUT_ROOT = Path(
 RANDOMIZATION_REPEAT_LEAF_PACKAGE_FAMILIES = (
     "image_only_dataset_runtime",
     "runtime_rerun_ablation",
+    "branch_risk_parameter_sensitivity",
     "dataset_level_quality",
     "method_faithful_tree_ring",
     "method_faithful_gaussian_shading",
@@ -150,13 +151,13 @@ def _canonical_candidates(
     target_fpr: float,
     randomization_repeat_id: str,
 ) -> tuple[ClosurePackageCandidate, ...]:
-    """要求候选精确覆盖7类 leaf 包并共享同一重复和代码版本."""
+    """要求候选精确覆盖全部 leaf 包并共享同一重复和代码版本。"""
 
     materialized = tuple(candidates)
     actual_families = tuple(candidate.package_family for candidate in materialized)
     if actual_families != RANDOMIZATION_REPEAT_LEAF_PACKAGE_FAMILIES:
         raise RandomizationRepeatEvidenceError(
-            "单重复证据必须按稳定顺序精确覆盖7类随机化 leaf 包"
+            "单重复证据必须按稳定顺序精确覆盖全部随机化 leaf 包"
         )
     expected_identity = _repeat_identity(randomization_repeat_id)
     expected_run_name = normalize_paper_run_name(paper_run_name)
@@ -191,7 +192,7 @@ def _canonical_candidates(
             raise RandomizationRepeatEvidenceError("leaf 包字节摘要已漂移")
         code_versions.add(str(candidate.code_version))
     if len(code_versions) != 1:
-        raise RandomizationRepeatEvidenceError("7类 leaf 包必须共享同一代码版本")
+        raise RandomizationRepeatEvidenceError("全部 leaf 包必须共享同一代码版本")
     code_version = next(iter(code_versions))
     if re.fullmatch(r"[0-9a-f]{40}", code_version) is None:
         raise RandomizationRepeatEvidenceError("leaf 包代码版本必须是40位小写 Git commit")
@@ -206,7 +207,7 @@ def build_randomization_repeat_evidence_manifest(
     randomization_repeat_id: str,
     generated_at: str,
 ) -> dict[str, Any]:
-    """构造精确绑定7个 leaf ZIP 的单重复 manifest."""
+    """构造精确绑定8个 leaf ZIP 的单重复 manifest."""
 
     resolved_run_name = normalize_paper_run_name(paper_run_name)
     resolved_target_fpr = validate_frozen_paper_run_target_fpr(
@@ -365,7 +366,7 @@ def validate_randomization_repeat_evidence_package(
     target_fpr: float,
     randomization_repeat_id: str,
 ) -> dict[str, Any]:
-    """写后或消费时复验外层包、manifest 与7个 leaf ZIP 的字节绑定."""
+    """写后或消费时复验外层包、manifest 与8个 leaf ZIP 的字节绑定."""
 
     unresolved_path = Path(archive_path).expanduser()
     if unresolved_path.is_symlink():
@@ -571,7 +572,7 @@ def write_randomization_repeat_evidence_package(
     root: str | Path = ".",
     output_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    """选择7类 leaf ZIP, 不解压地写出单重复自包含证据包."""
+    """选择全部 leaf ZIP, 不解压地写出单重复自包含证据包。"""
 
     repository_root = Path(root).resolve()
     resolved_run_name = normalize_paper_run_name(paper_run_name)

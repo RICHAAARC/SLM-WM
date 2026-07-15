@@ -13,25 +13,25 @@ from experiments.protocol.attacks import (
     default_attack_configs,
     resolve_formal_attack_config,
 )
-from experiments.protocol.pilot_paper_fixed_fpr import (
-    PilotPaperFixedFprConfig,
+from experiments.protocol.paper_fixed_fpr import (
+    PaperFixedFprConfig,
     bounded_hoeffding_confidence_interval,
     build_paper_fixed_fpr_config,
     build_attack_matrix_digest,
     build_fixed_fpr_protocol_digest,
-    build_pilot_paper_attack_matrix_rows,
-    build_pilot_paper_common_protocol_summary,
-    build_pilot_paper_method_registry_rows,
-    build_pilot_paper_prompt_split_summary,
-    build_pilot_paper_result_import_template_rows,
-    build_pilot_paper_result_import_schema,
-    validate_pilot_paper_result_import_rows,
+    build_paper_attack_matrix_rows,
+    build_paper_common_protocol_summary,
+    build_paper_method_registry_rows,
+    build_paper_prompt_split_summary,
+    build_paper_result_import_template_rows,
+    build_paper_result_import_schema,
+    validate_paper_result_import_rows,
 )
 from experiments.protocol.prompts import build_prompt_records
 from paper_experiments.runners.paper_claim_provenance import (
     PaperClaimAggregateRequiredError,
 )
-from scripts.write_pilot_paper_fixed_fpr_common_protocol_outputs import write_pilot_paper_fixed_fpr_common_protocol_outputs
+from scripts.write_paper_fixed_fpr_common_protocol_outputs import write_paper_fixed_fpr_common_protocol_outputs
 
 
 PRIMARY_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
@@ -45,7 +45,7 @@ def _select_pilot_paper(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def paired_superiority_summary(
-    config: PilotPaperFixedFprConfig,
+    config: PaperFixedFprConfig,
     *,
     attack_count: int,
     ready: bool,
@@ -137,7 +137,7 @@ def test_fixed_fpr_config_rejects_cross_level_identity(
 
 
 @pytest.mark.quick
-def test_writer_outputs_pilot_paper_common_protocol_with_shared_boundaries(tmp_path: Path) -> None:
+def test_writer_outputs_paper_common_protocol_with_shared_boundaries(tmp_path: Path) -> None:
     """未验证聚合来源时必须在读取输入和创建输出前拒绝."""
 
     repo_root = tmp_path / "repo"
@@ -146,7 +146,7 @@ def test_writer_outputs_pilot_paper_common_protocol_with_shared_boundaries(tmp_p
         PaperClaimAggregateRequiredError,
         match="版本化精确9重复聚合证据验证",
     ):
-        write_pilot_paper_fixed_fpr_common_protocol_outputs(root=repo_root)
+        write_paper_fixed_fpr_common_protocol_outputs(root=repo_root)
     assert not (repo_root / "outputs").exists()
 
 
@@ -157,17 +157,17 @@ def test_common_protocol_accepts_complete_paired_superiority_evidence() -> None:
     config = build_paper_fixed_fpr_config()
     prompt_summary = {
         "prompt_split_ready": True,
-        "pilot_paper_prompt_count": 700,
+        "paper_prompt_count": 700,
         "test_prompt_id_digest": "d" * 64,
     }
-    attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
-    method_rows = build_pilot_paper_method_registry_rows(
+    attack_rows = build_paper_attack_matrix_rows(default_attack_configs(), config)
+    method_rows = build_paper_method_registry_rows(
         prompt_split_digest="prompt_digest",
         attack_matrix_digest="attack_digest",
         fixed_fpr_protocol_digest="fixed_fpr_digest",
         config=config,
     )
-    template_rows = build_pilot_paper_result_import_template_rows(
+    template_rows = build_paper_result_import_template_rows(
         method_rows,
         attack_rows,
         config,
@@ -184,14 +184,14 @@ def test_common_protocol_accepts_complete_paired_superiority_evidence() -> None:
         for row in template_rows
     ]
 
-    summary = build_pilot_paper_common_protocol_summary(
+    summary = build_paper_common_protocol_summary(
         prompt_summary=prompt_summary,
         attack_rows=attack_rows,
         method_rows=method_rows,
         template_rows=template_rows,
         import_validation_report={
-            "pilot_paper_result_import_ready": True,
-            "accepted_pilot_paper_import_count": len(accepted_records),
+            "paper_result_import_ready": True,
+            "accepted_paper_import_count": len(accepted_records),
             "accepted_records": accepted_records,
         },
         paired_superiority_summary=paired_superiority_summary(
@@ -203,8 +203,8 @@ def test_common_protocol_accepts_complete_paired_superiority_evidence() -> None:
     )
 
     assert summary["paired_superiority_ready"] is True
-    assert summary["pilot_paper_effectiveness_gate_ready"] is True
-    assert summary["paper_claim_ready"] is True
+    assert summary["paper_effectiveness_gate_ready"] is True
+    assert summary["paper_run_claim_ready"] is True
     assert summary["supports_paper_claim"] is True
 
     paired_summary = paired_superiority_summary(
@@ -212,14 +212,14 @@ def test_common_protocol_accepts_complete_paired_superiority_evidence() -> None:
         attack_count=len(attack_rows),
         ready=True,
     )
-    mismatched = build_pilot_paper_common_protocol_summary(
+    mismatched = build_paper_common_protocol_summary(
         prompt_summary=prompt_summary,
         attack_rows=attack_rows,
         method_rows=method_rows,
         template_rows=template_rows,
         import_validation_report={
-            "pilot_paper_result_import_ready": True,
-            "accepted_pilot_paper_import_count": len(accepted_records),
+            "paper_result_import_ready": True,
+            "accepted_paper_import_count": len(accepted_records),
             "accepted_records": accepted_records,
         },
         paired_superiority_summary={
@@ -229,7 +229,7 @@ def test_common_protocol_accepts_complete_paired_superiority_evidence() -> None:
         config=config,
     )
     assert mismatched["paired_superiority_ready"] is False
-    assert mismatched["paper_claim_ready"] is False
+    assert mismatched["paper_run_claim_ready"] is False
 
 
 @pytest.mark.quick
@@ -239,18 +239,18 @@ def test_common_protocol_blocks_superiority_claim_when_slm_wm_tpr_is_below_basel
     config = build_paper_fixed_fpr_config()
     prompt_summary = {
         "prompt_split_ready": True,
-        "pilot_paper_prompt_count": 700,
+        "paper_prompt_count": 700,
         "test_prompt_id_digest": "d" * 64,
         "prompt_split_digest": "prompt_digest",
     }
-    attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
-    method_rows = build_pilot_paper_method_registry_rows(
+    attack_rows = build_paper_attack_matrix_rows(default_attack_configs(), config)
+    method_rows = build_paper_method_registry_rows(
         prompt_split_digest="prompt_digest",
         attack_matrix_digest="attack_digest",
         fixed_fpr_protocol_digest="fixed_fpr_digest",
         config=config,
     )
-    template_rows = build_pilot_paper_result_import_template_rows(method_rows, attack_rows, config)
+    template_rows = build_paper_result_import_template_rows(method_rows, attack_rows, config)
     accepted_records = []
     for row in template_rows:
         method_id = str(row["method_id"])
@@ -262,14 +262,14 @@ def test_common_protocol_blocks_superiority_claim_when_slm_wm_tpr_is_below_basel
                 "supports_paper_claim": True,
             }
         )
-    summary = build_pilot_paper_common_protocol_summary(
+    summary = build_paper_common_protocol_summary(
         prompt_summary=prompt_summary,
         attack_rows=attack_rows,
         method_rows=method_rows,
         template_rows=template_rows,
         import_validation_report={
-            "pilot_paper_result_import_ready": True,
-            "accepted_pilot_paper_import_count": len(accepted_records),
+            "paper_result_import_ready": True,
+            "accepted_paper_import_count": len(accepted_records),
             "accepted_records": accepted_records,
         },
         paired_superiority_summary=paired_superiority_summary(
@@ -280,11 +280,11 @@ def test_common_protocol_blocks_superiority_claim_when_slm_wm_tpr_is_below_basel
         config=config,
     )
 
-    assert summary["pilot_paper_evidence_coverage_ready"] is True
-    assert summary["pilot_paper_effectiveness_gate_ready"] is False
-    assert summary["pilot_paper_effectiveness_gate_reason"] == "slm_wm_tpr_not_above_best_baseline"
-    assert summary["pilot_paper_supports_superiority_claim"] is False
-    assert summary["paper_claim_ready"] is False
+    assert summary["paper_evidence_coverage_ready"] is True
+    assert summary["paper_effectiveness_gate_ready"] is False
+    assert summary["paper_effectiveness_gate_reason"] == "slm_wm_tpr_not_above_best_baseline"
+    assert summary["paper_run_supports_superiority_claim"] is False
+    assert summary["paper_run_claim_ready"] is False
 
 
 @pytest.mark.quick
@@ -294,17 +294,17 @@ def test_common_protocol_blocks_duplicate_method_attack_records() -> None:
     config = build_paper_fixed_fpr_config()
     prompt_summary = {
         "prompt_split_ready": True,
-        "pilot_paper_prompt_count": 700,
+        "paper_prompt_count": 700,
         "test_prompt_id_digest": "d" * 64,
     }
-    attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
-    method_rows = build_pilot_paper_method_registry_rows(
+    attack_rows = build_paper_attack_matrix_rows(default_attack_configs(), config)
+    method_rows = build_paper_method_registry_rows(
         prompt_split_digest="prompt_digest",
         attack_matrix_digest="attack_digest",
         fixed_fpr_protocol_digest="fixed_fpr_digest",
         config=config,
     )
-    template_rows = build_pilot_paper_result_import_template_rows(method_rows, attack_rows, config)
+    template_rows = build_paper_result_import_template_rows(method_rows, attack_rows, config)
     accepted_records = [
         {
             **row,
@@ -316,14 +316,14 @@ def test_common_protocol_blocks_duplicate_method_attack_records() -> None:
     ]
     accepted_records.append(dict(accepted_records[0]))
 
-    summary = build_pilot_paper_common_protocol_summary(
+    summary = build_paper_common_protocol_summary(
         prompt_summary=prompt_summary,
         attack_rows=attack_rows,
         method_rows=method_rows,
         template_rows=template_rows,
         import_validation_report={
-            "pilot_paper_result_import_ready": True,
-            "accepted_pilot_paper_import_count": len(accepted_records),
+            "paper_result_import_ready": True,
+            "accepted_paper_import_count": len(accepted_records),
             "accepted_records": accepted_records,
         },
         paired_superiority_summary=paired_superiority_summary(
@@ -336,8 +336,8 @@ def test_common_protocol_blocks_duplicate_method_attack_records() -> None:
 
     assert summary["paper_run_result_duplicate_template_count"] == 1
     assert summary["paper_run_result_import_coverage_ready"] is False
-    assert summary["pilot_paper_effectiveness_gate_ready"] is False
-    assert summary["pilot_paper_effectiveness_gate_reason"] == "duplicate_method_attack_template_records"
+    assert summary["paper_effectiveness_gate_ready"] is False
+    assert summary["paper_effectiveness_gate_reason"] == "duplicate_method_attack_template_records"
     assert summary["supports_paper_claim"] is False
 
 
@@ -357,12 +357,12 @@ def test_common_protocol_writer_uses_same_aggregate_gate_for_all_scales(
         PaperClaimAggregateRequiredError,
         match="版本化精确9重复聚合证据验证",
     ):
-        write_pilot_paper_fixed_fpr_common_protocol_outputs(root=repo_root)
+        write_paper_fixed_fpr_common_protocol_outputs(root=repo_root)
     assert not (repo_root / "outputs").exists()
 
 
-def pilot_paper_result_row(schema: dict[str, object], evidence_path: str) -> dict[str, object]:
-    """构造一条满足 pilot_paper 导入 schema 的最小结果记录。"""
+def paper_result_row(schema: dict[str, object], evidence_path: str) -> dict[str, object]:
+    """构造一条满足当前论文运行层级导入 schema 的最小结果记录。"""
 
     attack_config = resolve_formal_attack_config(
         attack_family="standard_distortion",
@@ -436,7 +436,7 @@ def pilot_paper_result_row(schema: dict[str, object], evidence_path: str) -> dic
 
 
 @pytest.mark.quick
-def test_pilot_paper_import_validator_accepts_governed_confidence_interval_record(tmp_path: Path) -> None:
+def test_paper_import_validator_accepts_governed_confidence_interval_record(tmp_path: Path) -> None:
     """带 Hoeffding 置信区间的 pilot_paper 结果应能进入受治理导入协议。"""
 
     config = build_paper_fixed_fpr_config()
@@ -444,18 +444,18 @@ def test_pilot_paper_import_validator_accepts_governed_confidence_interval_recor
         "pilot_paper",
         tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(700)),
     )
-    prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
-    attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
-    schema = build_pilot_paper_result_import_schema(
+    prompt_summary = build_paper_prompt_split_summary(prompt_records, config)
+    attack_rows = build_paper_attack_matrix_rows(default_attack_configs(), config)
+    schema = build_paper_result_import_schema(
         prompt_split_digest=prompt_summary["prompt_split_digest"],
         attack_matrix_digest=build_attack_matrix_digest(attack_rows),
         fixed_fpr_protocol_digest=build_fixed_fpr_protocol_digest(config),
         config=config,
     )
-    evidence_path = tmp_path / "outputs" / "pilot_paper_fixed_fpr_results" / "tree_ring_metrics.json"
+    evidence_path = tmp_path / "outputs" / "paper_fixed_fpr_results" / "tree_ring_metrics.json"
     evidence_path.parent.mkdir(parents=True)
     evidence_path.write_text('{"true_positive_rate": 0.8}\n', encoding="utf-8")
-    row = pilot_paper_result_row(schema, "outputs/pilot_paper_fixed_fpr_results/tree_ring_metrics.json")
+    row = paper_result_row(schema, "outputs/paper_fixed_fpr_results/tree_ring_metrics.json")
     quality_ci = bounded_hoeffding_confidence_interval(
         -0.25,
         340,
@@ -467,18 +467,18 @@ def test_pilot_paper_import_validator_accepts_governed_confidence_interval_recor
     row["quality_score_ci_low"] = quality_ci[0]
     row["quality_score_ci_high"] = quality_ci[1]
 
-    report = validate_pilot_paper_result_import_rows(
+    report = validate_paper_result_import_rows(
         [row],
         schema,
         evidence_root=tmp_path,
         require_existing_evidence=True,
     )
 
-    assert report["pilot_paper_result_import_ready"] is True
-    assert report["accepted_pilot_paper_import_count"] == 1
+    assert report["paper_result_import_ready"] is True
+    assert report["accepted_paper_import_count"] == 1
     assert report["accepted_records"][0]["method_id"] == "tree_ring"
     assert report["accepted_records"][0]["quality_score_mean"] == -0.25
-    assert report["accepted_pilot_paper_claim_record_count"] == 1
+    assert report["accepted_paper_claim_record_count"] == 1
     assert report["supports_paper_claim"] is True
 
 
@@ -487,13 +487,13 @@ def test_paper_result_schema_rejects_unit_range_ssim_interval() -> None:
     """旧 [0,1] Hoeffding 区间不得冒充 signed-range SSIM 正式区间."""
 
     config = build_paper_fixed_fpr_config()
-    schema = build_pilot_paper_result_import_schema(
+    schema = build_paper_result_import_schema(
         prompt_split_digest="a" * 64,
         attack_matrix_digest="b" * 64,
         fixed_fpr_protocol_digest="c" * 64,
         config=config,
     )
-    row = pilot_paper_result_row(schema, "outputs/result.json")
+    row = paper_result_row(schema, "outputs/result.json")
     old_low, old_high = bounded_hoeffding_confidence_interval(
         float(row["quality_score_mean"]),
         int(row["positive_count"]),
@@ -502,9 +502,9 @@ def test_paper_result_schema_rejects_unit_range_ssim_interval() -> None:
     row["quality_score_ci_low"] = old_low
     row["quality_score_ci_high"] = old_high
 
-    report = validate_pilot_paper_result_import_rows([row], schema)
+    report = validate_paper_result_import_rows([row], schema)
 
-    assert report["pilot_paper_result_import_ready"] is False
+    assert report["paper_result_import_ready"] is False
     assert "confidence_interval_must_match_bounded_hoeffding" in {
         issue["reason"] for issue in report["issues"]
     }
@@ -521,31 +521,31 @@ def test_paper_result_schema_rejects_post_labeled_attack_identity(
         "pilot_paper",
         tuple(f"formal prompt {index}" for index in range(700)),
     )
-    prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
-    attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
-    schema = build_pilot_paper_result_import_schema(
+    prompt_summary = build_paper_prompt_split_summary(prompt_records, config)
+    attack_rows = build_paper_attack_matrix_rows(default_attack_configs(), config)
+    schema = build_paper_result_import_schema(
         prompt_split_digest=prompt_summary["prompt_split_digest"],
         attack_matrix_digest=build_attack_matrix_digest(attack_rows),
         fixed_fpr_protocol_digest=build_fixed_fpr_protocol_digest(config),
         config=config,
     )
-    row = pilot_paper_result_row(schema, "outputs/result.json")
+    row = paper_result_row(schema, "outputs/result.json")
     row["attack_id"] = "jpeg_compression_probe"
 
-    report = validate_pilot_paper_result_import_rows(
+    report = validate_paper_result_import_rows(
         [row],
         schema,
         evidence_root=tmp_path,
     )
 
-    assert report["accepted_pilot_paper_import_count"] == 0
+    assert report["accepted_paper_import_count"] == 0
     assert "formal_attack_identity_must_match_attack_config" in {
         issue["reason"] for issue in report["issues"]
     }
 
 
 @pytest.mark.quick
-def test_pilot_paper_import_validator_rejects_duplicate_template_key(tmp_path: Path) -> None:
+def test_paper_import_validator_rejects_duplicate_template_key(tmp_path: Path) -> None:
     """行级导入校验器必须阻断重复的 method × attack 模板键。"""
 
     config = build_paper_fixed_fpr_config()
@@ -553,64 +553,64 @@ def test_pilot_paper_import_validator_rejects_duplicate_template_key(tmp_path: P
         "pilot_paper",
         tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(700)),
     )
-    prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
-    attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
-    schema = build_pilot_paper_result_import_schema(
+    prompt_summary = build_paper_prompt_split_summary(prompt_records, config)
+    attack_rows = build_paper_attack_matrix_rows(default_attack_configs(), config)
+    schema = build_paper_result_import_schema(
         prompt_split_digest=prompt_summary["prompt_split_digest"],
         attack_matrix_digest=build_attack_matrix_digest(attack_rows),
         fixed_fpr_protocol_digest=build_fixed_fpr_protocol_digest(config),
         config=config,
     )
-    evidence_path = tmp_path / "outputs" / "pilot_paper_fixed_fpr_results" / "tree_ring_metrics.json"
+    evidence_path = tmp_path / "outputs" / "paper_fixed_fpr_results" / "tree_ring_metrics.json"
     evidence_path.parent.mkdir(parents=True)
     evidence_path.write_text('{"true_positive_rate": 0.8}\n', encoding="utf-8")
-    row = pilot_paper_result_row(schema, "outputs/pilot_paper_fixed_fpr_results/tree_ring_metrics.json")
+    row = paper_result_row(schema, "outputs/paper_fixed_fpr_results/tree_ring_metrics.json")
 
-    report = validate_pilot_paper_result_import_rows(
+    report = validate_paper_result_import_rows(
         [row, dict(row)],
         schema,
         evidence_root=tmp_path,
         require_existing_evidence=True,
     )
 
-    assert report["pilot_paper_result_import_ready"] is False
-    assert report["accepted_pilot_paper_import_count"] == 1
-    assert report["pilot_paper_claim_record_ready"] is False
+    assert report["paper_result_import_ready"] is False
+    assert report["accepted_paper_import_count"] == 1
+    assert report["paper_claim_record_ready"] is False
     assert report["supports_paper_claim"] is False
     assert {issue["reason"] for issue in report["issues"]} == {"duplicate_result_template_key"}
 
 
 @pytest.mark.quick
-def test_pilot_paper_import_validator_rejects_full_paper_claim_boundary(tmp_path: Path) -> None:
-    """pilot_paper 导入记录不得声明为 full_paper 论文主张。"""
+def test_paper_import_validator_rejects_mismatched_claim_scale(tmp_path: Path) -> None:
+    """导入记录声明的论文层级必须与当前运行配置一致。"""
 
     config = build_paper_fixed_fpr_config()
     prompt_records = build_prompt_records(
         "pilot_paper",
         tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(700)),
     )
-    prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
-    attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
-    schema = build_pilot_paper_result_import_schema(
+    prompt_summary = build_paper_prompt_split_summary(prompt_records, config)
+    attack_rows = build_paper_attack_matrix_rows(default_attack_configs(), config)
+    schema = build_paper_result_import_schema(
         prompt_split_digest=prompt_summary["prompt_split_digest"],
         attack_matrix_digest=build_attack_matrix_digest(attack_rows),
         fixed_fpr_protocol_digest=build_fixed_fpr_protocol_digest(config),
         config=config,
     )
-    row = pilot_paper_result_row(schema, "outputs/pilot_paper_fixed_fpr_results/tree_ring_metrics.json")
+    row = paper_result_row(schema, "outputs/paper_fixed_fpr_results/tree_ring_metrics.json")
     row["result_claim_scope"] = "full_claim"
     row["paper_claim_scale"] = "full_paper"
 
-    report = validate_pilot_paper_result_import_rows([row], schema, evidence_root=tmp_path)
+    report = validate_paper_result_import_rows([row], schema, evidence_root=tmp_path)
     reasons = {issue["reason"] for issue in report["issues"]}
 
-    assert report["accepted_pilot_paper_import_count"] == 0
+    assert report["accepted_paper_import_count"] == 0
     assert "protocol_value_mismatch" in reasons
-    assert "pilot_paper_claim_scale_required" in reasons
+    assert "paper_claim_scale_mismatch" in reasons
 
 
 @pytest.mark.quick
-def test_pilot_paper_import_validator_rejects_incomplete_statistical_scale(tmp_path: Path) -> None:
+def test_paper_import_validator_rejects_incomplete_statistical_scale(tmp_path: Path) -> None:
     """低于 pilot_paper fixed-FPR 统计边界的记录不得进入受治理导入协议。"""
 
     config = build_paper_fixed_fpr_config()
@@ -618,23 +618,23 @@ def test_pilot_paper_import_validator_rejects_incomplete_statistical_scale(tmp_p
         "pilot_paper",
         tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(700)),
     )
-    prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
-    attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
-    schema = build_pilot_paper_result_import_schema(
+    prompt_summary = build_paper_prompt_split_summary(prompt_records, config)
+    attack_rows = build_paper_attack_matrix_rows(default_attack_configs(), config)
+    schema = build_paper_result_import_schema(
         prompt_split_digest=prompt_summary["prompt_split_digest"],
         attack_matrix_digest=build_attack_matrix_digest(attack_rows),
         fixed_fpr_protocol_digest=build_fixed_fpr_protocol_digest(config),
         config=config,
     )
-    row = pilot_paper_result_row(schema, "outputs/pilot_paper_fixed_fpr_results/tree_ring_metrics.json")
+    row = paper_result_row(schema, "outputs/paper_fixed_fpr_results/tree_ring_metrics.json")
     row["positive_count"] = 5
     row["negative_count"] = 5
 
-    report = validate_pilot_paper_result_import_rows([row], schema, evidence_root=tmp_path)
+    report = validate_paper_result_import_rows([row], schema, evidence_root=tmp_path)
     reasons = {issue["reason"] for issue in report["issues"]}
 
-    assert report["accepted_pilot_paper_import_count"] == 0
-    assert "pilot_paper_minimum_sample_count_required" in reasons
+    assert report["accepted_paper_import_count"] == 0
+    assert "paper_minimum_sample_count_required" in reasons
 
 
 @pytest.mark.quick
@@ -646,19 +646,19 @@ def test_paper_import_validator_rejects_nonformal_marked_result_records(tmp_path
         "pilot_paper",
         tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(700)),
     )
-    prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
-    attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
-    schema = build_pilot_paper_result_import_schema(
+    prompt_summary = build_paper_prompt_split_summary(prompt_records, config)
+    attack_rows = build_paper_attack_matrix_rows(default_attack_configs(), config)
+    schema = build_paper_result_import_schema(
         prompt_split_digest=prompt_summary["prompt_split_digest"],
         attack_matrix_digest=build_attack_matrix_digest(attack_rows),
         fixed_fpr_protocol_digest=build_fixed_fpr_protocol_digest(config),
         config=config,
     )
-    row = pilot_paper_result_row(schema, "outputs/pilot_paper_fixed_fpr_results/tree_ring_metrics.json")
+    row = paper_result_row(schema, "outputs/paper_fixed_fpr_results/tree_ring_metrics.json")
     row["metric_status"] = "measured_from_local_proxy"
 
-    report = validate_pilot_paper_result_import_rows([row], schema, evidence_root=tmp_path)
+    report = validate_paper_result_import_rows([row], schema, evidence_root=tmp_path)
     reasons = {issue["reason"] for issue in report["issues"]}
 
-    assert report["accepted_pilot_paper_import_count"] == 0
+    assert report["accepted_paper_import_count"] == 0
     assert "nonformal_result_marker_rejected" in reasons

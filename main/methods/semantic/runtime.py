@@ -1,4 +1,8 @@
-"""为真实 SD3/SD3.5 latent 构造可微语义与手工结构约束特征."""
+"""为生成模型 latent 构造可微语义与手工结构约束特征。
+
+该模块属于核心方法层。调用方负责注入已经加载的 VAE 与视觉编码器,
+因此该实现不依赖实验配置、模型注册表或具体运行环境。
+"""
 
 from __future__ import annotations
 
@@ -6,7 +10,6 @@ from dataclasses import dataclass
 import math
 from typing import Any
 
-from experiments.runtime.model_sources import require_registered_model_reference
 from main.methods.semantic.feature_protocol import (
     CLIP_CLS_TOKEN_INDEX,
     CLIP_PATCH_TOKEN_START_INDEX,
@@ -28,36 +31,6 @@ from main.methods.semantic.feature_protocol import (
     STRUCTURE_POOL_WIDTH,
     semantic_feature_protocol_record,
 )
-
-
-def load_clip_vision_model(
-    model_id: str,
-    model_revision: str,
-    device_name: str,
-    torch_dtype: str = "float32",
-) -> Any:
-    """加载冻结的 CLIP 图像编码器, 用作真实语义特征映射。"""
-
-    import torch
-    from transformers import CLIPVisionModelWithProjection
-
-    require_registered_model_reference(
-        model_id,
-        model_revision,
-        required_usage_role="semantic_condition_encoder",
-    )
-    dtype = getattr(torch, torch_dtype)
-    model = CLIPVisionModelWithProjection.from_pretrained(
-        model_id,
-        revision=model_revision,
-        torch_dtype=dtype,
-        attn_implementation="eager",
-    )
-    model = model.to(device_name)
-    model.eval()
-    for parameter in model.parameters():
-        parameter.requires_grad_(False)
-    return model
 
 
 def freeze_module_parameters(module: Any) -> None:

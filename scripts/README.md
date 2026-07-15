@@ -45,7 +45,7 @@ python scripts/run_gpu_server_workflow.py \
 
 ## CPU 闭合入口
 
-- `write_randomization_repeat_evidence_package.py`: 显式选择一个已登记 seed-key repeat 的7类随机化 leaf ZIP, 以原始 ZIP 字节写出自包含证据组件。该组件固定 `randomization_aggregate_ready=false` 与 `supports_paper_claim=false`。
+- `write_randomization_repeat_evidence_package.py`: 显式选择一个已登记 seed-key repeat 的8类随机化 leaf ZIP, 以原始 ZIP 字节写出自包含证据组件。该组件固定 `randomization_aggregate_ready=false` 与 `supports_paper_claim=false`。
 - `write_randomization_aggregate_provenance_package.py`: 按权威顺序接收9个 repeat 证据组件与3个跨 repeat 不变 official-reference ZIP, 重新调用生产 validator 后保存12个输入 ZIP 的原始字节。聚合包固定 `randomization_aggregate_ready=true` 与 `supports_paper_claim=false`, 只表示最终统计输入已经闭合。
 - `paper_result_closure.py`: 从显式文件或目录中选择唯一有效聚合 ZIP, 核验论文运行层级、冻结 FPR、共同 clean Git 提交和聚合摘要, 随后执行4个可脱离 Notebook 的规范统计 Writer。Writer 分别重建检测与逐攻击统计、全样本及质量匹配配对优势、FID/KID 联合质量统计、真实重运行消融必要性统计。
 - `run_gpu_server_result_closure.py`: CPU 汇总主机入口。`--dry-run` 仍会验证聚合来源与 Git 提交并返回真实命令计划；正式模式调用同一个 `paper_result_closure.py` 实现, 不维护第二套闭合逻辑。

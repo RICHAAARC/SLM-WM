@@ -174,8 +174,12 @@ EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS = {
             "semantic_conditioned_latent_method_definition",
         ),
     ),
-    # 风险输入和完整特征仍由真实模型绑定层构造, 当前没有核心纯算子入口。
-    "branch_signal_origin": (),
+    "branch_signal_origin": _bindings(
+        (
+            "main/methods/semantic/runtime.py",
+            "DifferentiableSemanticFeatureRuntime",
+        ),
+    ),
     "branch_risk_bounds_written_update": _bindings(
         ("main/methods/semantic/branch_risk.py", "build_branch_risk_fields"),
         (
@@ -205,6 +209,10 @@ EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS = {
         (
             "main/methods/semantic/feature_protocol.py",
             "semantic_feature_protocol_record",
+        ),
+        (
+            "main/methods/semantic/runtime.py",
+            "DifferentiableSemanticFeatureRuntime",
         ),
     ),
     "spatial_low_pass_and_amplitude_tail_carriers": _bindings(
@@ -399,19 +407,11 @@ EXPECTED_RUNTIME_BINDING_SYMBOLS.update(
         ),
         "branch_signal_origin": _bindings(
             (
-                "experiments/runtime/diffusion/semantic_features.py",
-                "DifferentiableSemanticFeatureRuntime",
-            ),
-            (
                 "experiments/runners/semantic_watermark_runtime.py",
                 "run_semantic_watermark_runtime",
             ),
         ),
         "complete_716_feature_jacobian": _bindings(
-            (
-                "experiments/runtime/diffusion/semantic_features.py",
-                "DifferentiableSemanticFeatureRuntime",
-            ),
             (
                 "experiments/runners/semantic_watermark_runtime.py",
                 "run_semantic_watermark_runtime",

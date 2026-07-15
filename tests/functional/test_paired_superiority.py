@@ -16,8 +16,8 @@ from experiments.protocol.attacks import (
     formal_attack_seed_random,
 )
 from experiments.protocol.fixed_fpr_observation_audit import FORMAL_THRESHOLD_SOURCE
-from experiments.protocol.pilot_paper_fixed_fpr import (
-    build_pilot_paper_attack_matrix_rows,
+from experiments.protocol.paper_fixed_fpr import (
+    build_paper_attack_matrix_rows,
 )
 from main.core.digest import build_stable_digest
 from paper_experiments.analysis import paired_superiority as paired_module

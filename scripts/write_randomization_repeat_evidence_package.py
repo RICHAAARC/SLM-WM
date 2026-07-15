@@ -1,4 +1,4 @@
-"""写出单个正式随机化重复的7类自包含上游证据包."""
+"""写出单个正式随机化重复的8类自包含上游证据包."""
 
 from __future__ import annotations
 
@@ -21,13 +21,13 @@ def build_parser() -> argparse.ArgumentParser:
     """构造脱离 Notebook 可运行的命令行参数."""
 
     parser = argparse.ArgumentParser(
-        description="选择7类 leaf ZIP 并写出单重复自包含证据包。"
+        description="选择8类 leaf ZIP 并写出单重复自包含证据包。"
     )
     parser.add_argument("--root", default=".", help="仓库根目录。")
     parser.add_argument(
         "--package-search-root",
         required=True,
-        help="包含7类当前重复上游结果包的搜索目录。",
+        help="包含8类当前重复上游结果包的搜索目录。",
     )
     parser.add_argument("--paper-run-name", required=True)
     parser.add_argument("--target-fpr", type=float, required=True)

@@ -53,12 +53,12 @@ def _select_pilot_paper(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
 
 
-def write_pilot_threshold_observation_evidence(
+def write_paper_threshold_observation_evidence(
     path: Path,
     *,
     evidence_path: str,
 ) -> dict[str, object]:
-    """写出可重算阈值且逐 Prompt 覆盖的 pilot_paper observation evidence。"""
+    """写出可重算阈值且逐 Prompt 覆盖的 当前论文运行层级 observation evidence。"""
 
     calibration_scores = [index / 330.0 for index in range(330)]
     threshold = conformal_threshold_from_clean_negative_scores(calibration_scores, target_fpr=0.01)

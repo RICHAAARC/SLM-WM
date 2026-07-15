@@ -6,15 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from experiments.protocol.pilot_paper_fixed_fpr import (
+from experiments.protocol.paper_fixed_fpr import (
     bounded_hoeffding_confidence_interval,
 )
 from paper_experiments.runners.paper_claim_provenance import (
     PaperClaimAggregateRequiredError,
 )
-from scripts.write_pilot_paper_result_records import (
+from scripts.write_paper_result_records import (
     attach_metric_fields,
-    write_pilot_paper_result_record_outputs,
+    write_paper_result_record_outputs,
 )
 
 
@@ -76,7 +76,7 @@ def test_formal_result_writer_requires_validated_exact9_aggregate_before_output(
         PaperClaimAggregateRequiredError,
         match="版本化精确9重复聚合证据验证",
     ):
-        write_pilot_paper_result_record_outputs(
+        write_paper_result_record_outputs(
             root=tmp_path,
             output_dir=tmp_path / "outside_outputs",
             baseline_records_path=tmp_path / "missing.jsonl",

@@ -52,6 +52,7 @@ RECORD_FORMAT_RAW_BYTES = "raw_bytes"
 
 RECORD_GROUP_OBSERVATION = "observation"
 RECORD_GROUP_ABLATION = "ablation"
+RECORD_GROUP_SENSITIVITY = "sensitivity"
 RECORD_GROUP_QUALITY = "quality"
 RECORD_GROUP_THRESHOLD_BINDING = "threshold_binding"
 RECORD_GROUP_REFERENCE = "reference"
@@ -330,6 +331,46 @@ _ACTIVE_RECORD_MEMBER_SPECS = (
         member_template=(
             "outputs/formal_mechanism_ablation/{paper_run}/"
             "per_ablation_frozen_protocols.json"
+        ),
+        record_format=RECORD_FORMAT_JSON_OBJECT,
+    ),
+    _RecordMemberSpec(
+        package_family="branch_risk_parameter_sensitivity",
+        record_group=RECORD_GROUP_SENSITIVITY,
+        record_role="parameter_sensitivity_runtime_record",
+        member_template=(
+            "outputs/formal_branch_risk_sensitivity/{paper_run}/"
+            "parameter_sensitivity_records.jsonl"
+        ),
+        record_format=RECORD_FORMAT_JSONL,
+    ),
+    _RecordMemberSpec(
+        package_family="branch_risk_parameter_sensitivity",
+        record_group=RECORD_GROUP_SENSITIVITY,
+        record_role="parameter_sensitivity_detection_record",
+        member_template=(
+            "outputs/formal_branch_risk_sensitivity/{paper_run}/"
+            "formal_detection_records.jsonl"
+        ),
+        record_format=RECORD_FORMAT_JSONL,
+    ),
+    _RecordMemberSpec(
+        package_family="branch_risk_parameter_sensitivity",
+        record_group=RECORD_GROUP_SENSITIVITY,
+        record_role="parameter_sensitivity_frozen_protocol",
+        member_template=(
+            "outputs/formal_branch_risk_sensitivity/{paper_run}/"
+            "per_setting_frozen_protocols.json"
+        ),
+        record_format=RECORD_FORMAT_JSON_OBJECT,
+    ),
+    _RecordMemberSpec(
+        package_family="branch_risk_parameter_sensitivity",
+        record_group=RECORD_GROUP_RUN_MANIFEST,
+        record_role="parameter_sensitivity_run_manifest",
+        member_template=(
+            "outputs/formal_branch_risk_sensitivity/{paper_run}/"
+            "manifest.local.json"
         ),
         record_format=RECORD_FORMAT_JSON_OBJECT,
     ),
@@ -749,6 +790,19 @@ class RandomizationAggregateRecordWorkspace:
         )
 
     @property
+    def sensitivity_sources(
+        self,
+    ) -> tuple[RandomizationAggregateRecordSource, ...]:
+        """返回逐重复的参数敏感性运行、检测和冻结协议记录源。"""
+
+        self._require_active()
+        return tuple(
+            source
+            for source in self._record_sources
+            if source.record_group == RECORD_GROUP_SENSITIVITY
+        )
+
+    @property
     def threshold_binding_sources(
         self,
     ) -> tuple[RandomizationAggregateRecordSource, ...]:
@@ -1071,7 +1125,7 @@ class RandomizationAggregateRecordWorkspace:
         validated: RandomizationAggregateProvenance,
         temporary_root: Path,
     ) -> None:
-        """复制来源并完成9个组件、66个 leaf 与全部记录成员复验."""
+        """复制来源并完成9个组件、全部 leaf 与全部记录成员复验。"""
 
         aggregate_copy = temporary_root / "aggregate_source.zip"
         with validated.package_path.open("rb") as source, aggregate_copy.open(
@@ -1257,7 +1311,7 @@ class RandomizationAggregateRecordWorkspace:
         repeat_manifest_digest: str,
         component_content_digest: str,
     ) -> list[RandomizationAggregateRecordSource]:
-        """复制并逐一调用生产 inspector 复验一个 repeat 的7个 leaf."""
+        """复制并逐一调用生产 inspector 复验一个 repeat 的8个 leaf."""
 
         manifest = _validated_repeat_manifest(
             component_archive,

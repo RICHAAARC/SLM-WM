@@ -1,6 +1,6 @@
 """从精确随机化聚合包重建统计并发布自包含论文结果包.
 
-该入口只消费通过生产 validator 复验的聚合 ZIP. 四类统计 Writer 均从包内
+该入口只消费通过生产 validator 复验的聚合 ZIP。五类统计 Writer 均从包内
 原始记录重算结果, 随后本模块独立核对输出 manifest、文件摘要和共同来源
 身份. 只有全部证据通过门禁后才会构造最终归档.
 """
@@ -116,6 +116,26 @@ _CLOSURE_ARTIFACT_SPECS = (
             "mechanism_necessity_statistics.csv",
             "mechanism_necessity_summary.json",
             "randomization_ablation_necessity_report.json",
+            "manifest.local.json",
+        ),
+    ),
+    _ClosureArtifactSpec(
+        module_name=(
+            "paper_experiments.runners.randomization_parameter_sensitivity"
+        ),
+        output_root=(
+            "outputs/randomization_branch_risk_parameter_sensitivity"
+        ),
+        artifact_id=(
+            "randomization_branch_risk_parameter_sensitivity_manifest"
+        ),
+        ready_field="parameter_sensitivity_aggregate_ready",
+        summary_file_name="parameter_sensitivity_aggregate_summary.json",
+        file_names=(
+            "parameter_sensitivity_repeat_metrics.csv",
+            "parameter_sensitivity_aggregate_metrics.csv",
+            "parameter_sensitivity_aggregate_summary.json",
+            "parameter_sensitivity_source_report.json",
             "manifest.local.json",
         ),
     ),
@@ -259,7 +279,7 @@ def _commands_for_source(
     *,
     root_path: Path,
 ) -> list[list[str]]:
-    """为同一不可变聚合来源构造四类统计重建命令."""
+    """为同一不可变聚合来源构造五类统计重建命令。"""
 
     paper_run_name = str(source.payload["paper_run_name"])
     target_fpr = float(source.payload["target_fpr"])
@@ -620,13 +640,66 @@ def _derive_ablation_necessity_gate(
     }
 
 
+def _derive_parameter_sensitivity_component(
+    summary: Mapping[str, Any],
+    config: Mapping[str, Any],
+    metadata: Mapping[str, Any],
+    *,
+    artifact_id: str,
+) -> dict[str, Any]:
+    """确认18项单模型内部敏感性已经由精确9重复完整测量。"""
+
+    _require_summary_run_identity(
+        summary,
+        config,
+        artifact_id=artifact_id,
+    )
+    _validate_embedded_summary_digest(
+        summary,
+        config,
+        digest_field="parameter_sensitivity_summary_digest",
+        artifact_id=artifact_id,
+    )
+    _require_matching_summary_fields(
+        summary,
+        metadata,
+        (
+            "parameter_sensitivity_aggregate_ready",
+            "claim_boundary",
+            "supports_paper_claim",
+        ),
+        artifact_id=artifact_id,
+    )
+    if not all(
+        (
+            summary.get("parameter_sensitivity_aggregate_ready") is True,
+            summary.get("sensitivity_setting_count") == 18,
+            summary.get("randomization_repeat_count") == 9,
+            summary.get("sensitivity_model_scope")
+            == "registered_primary_diffusion_model_only",
+            summary.get("cross_model_evidence_provided") is False,
+            summary.get("claim_boundary")
+            == "single_model_internal_parameter_sensitivity_only",
+            summary.get("supports_paper_claim") is True,
+        )
+    ):
+        raise RuntimeError(f"{artifact_id} 单模型参数敏感性未完整重建")
+    return {
+        "component_role": "single_model_parameter_sensitivity",
+        "component_evidence_ready": True,
+        "contributes_to_central_claim_gate": False,
+        "component_decision": "measured_single_model_sensitivity",
+        "claim_boundary": summary["claim_boundary"],
+    }
+
+
 def _derive_artifact_component(
     spec: _ClosureArtifactSpec,
     summary: Mapping[str, Any],
     config: Mapping[str, Any],
     metadata: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """把四个冻结 Writer 映射到各自的显式论文判定规则."""
+    """把五个冻结 Writer 映射到各自的显式论文判定规则。"""
 
     derivations = {
         "randomization_detection_statistics_manifest": _derive_detection_gate,
@@ -638,6 +711,9 @@ def _derive_artifact_component(
         ),
         "randomization_ablation_necessity_manifest": (
             _derive_ablation_necessity_gate
+        ),
+        "randomization_branch_risk_parameter_sensitivity_manifest": (
+            _derive_parameter_sensitivity_component
         ),
     }
     try:
@@ -752,6 +828,18 @@ def _write_closure_gate(
     }
     if set(claim_gate_records) != required_claim_gate_roles:
         raise RuntimeError("论文中心结论门禁组件集合不完整")
+    measurement_component_roles = {
+        str(record["component_role"])
+        for record in artifact_records
+        if record.get("component_evidence_ready") is True
+        and record.get("contributes_to_central_claim_gate") is False
+    }
+    required_measurement_component_roles = {
+        "dataset_quality_measurement",
+        "single_model_parameter_sensitivity",
+    }
+    if measurement_component_roles != required_measurement_component_roles:
+        raise RuntimeError("论文必要测量证据组件集合不完整")
     supports_paper_claim = all(claim_gate_records.values())
     conclusion_decision = (
         "supported" if supports_paper_claim else "measured_not_supported"
@@ -770,6 +858,9 @@ def _write_closure_gate(
         "common_code_version": source.common_code_version,
         "artifact_records": artifact_records,
         "claim_gate_records": claim_gate_records,
+        "measurement_component_roles": sorted(
+            measurement_component_roles
+        ),
         "unsupported_claim_gate_roles": sorted(
             role for role, ready in claim_gate_records.items() if not ready
         ),

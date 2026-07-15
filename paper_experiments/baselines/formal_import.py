@@ -15,8 +15,8 @@ from experiments.protocol.attacks import (
     attack_config_digest,
     resolve_formal_attack_config,
 )
-from experiments.protocol.pilot_paper_fixed_fpr import (
-    PILOT_PAPER_ATTACK_RESOURCE_PROFILES,
+from experiments.protocol.paper_fixed_fpr import (
+    PAPER_ATTACK_RESOURCE_PROFILES,
     prompt_protocol_name_for_run,
 )
 from experiments.protocol.paper_run_config import build_paper_run_config
@@ -312,7 +312,7 @@ def build_primary_baseline_formal_import_schema(
         "required_threshold_fields": list(REQUIRED_THRESHOLD_FIELDS),
         "allowed_result_source_types": list(ALLOWED_RESULT_SOURCE_TYPES),
         "allowed_adapter_boundaries": list(ALLOWED_ADAPTER_BOUNDARIES),
-        "allowed_resource_profiles": list(PILOT_PAPER_ATTACK_RESOURCE_PROFILES),
+        "allowed_resource_profiles": list(PAPER_ATTACK_RESOURCE_PROFILES),
         "rejected_adapter_boundaries": list(REJECTED_ADAPTER_BOUNDARIES),
         "prompt_protocol_name": prompt_protocol_name,
         "paper_claim_scale": paper_run.run_name,
@@ -1000,7 +1000,7 @@ def validate_primary_baseline_formal_import_rows(
     require_existing_evidence: bool = True,
     evidence_search_roots: Iterable[str | Path] = (),
     prompt_protocol_name: str | None = None,
-    allowed_resource_profiles: Iterable[str] = PILOT_PAPER_ATTACK_RESOURCE_PROFILES,
+    allowed_resource_profiles: Iterable[str] = PAPER_ATTACK_RESOURCE_PROFILES,
 ) -> dict[str, Any]:
     """校验主表 baseline 正式结果导入记录, 并返回仅包含通过记录的报告。
 
@@ -1384,11 +1384,11 @@ def build_primary_baseline_formal_evidence_collection_rows(
         accepted_match_count = accepted_keys.count(template_key)
         actions: list[str] = []
         if candidate_match_count == 0:
-            actions.append("generate_pilot_paper_baseline_result_record")
+            actions.append("generate_paper_baseline_result_record")
         if accepted_match_count == 0:
             actions.extend(
                 [
-                    "run_pilot_paper_prompt_protocol",
+                    "run_paper_prompt_protocol",
                     "calibrate_fixed_fpr_baseline",
                     "run_attack_matrix_baseline_detection",
                     "attach_formal_evidence_paths",

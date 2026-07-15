@@ -118,7 +118,7 @@ from experiments.runners.semantic_watermark_runtime import (
     semantic_watermark_runtime_config_payload,
 )
 from experiments.runtime.repository_environment import resolve_code_version
-from experiments.runtime.diffusion.semantic_features import (
+from main.methods.semantic import (
     JOINT_FEATURE_WIDTH,
     SEMANTIC_FEATURE_SCHEMA,
     SEMANTIC_FEATURE_WIDTH,

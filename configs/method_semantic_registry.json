@@ -198,12 +198,13 @@
         "risk_neutral_texture_value",
         "attention_module_names"
       ],
-      "method_implementation_symbols": [],
-      "runtime_binding_symbols": [
+      "method_implementation_symbols": [
         {
-          "path": "experiments/runtime/diffusion/semantic_features.py",
+          "path": "main/methods/semantic/runtime.py",
           "symbol": "DifferentiableSemanticFeatureRuntime"
-        },
+        }
+      ],
+      "runtime_binding_symbols": [
         {
           "path": "experiments/runners/semantic_watermark_runtime.py",
           "symbol": "run_semantic_watermark_runtime"
@@ -452,13 +453,13 @@
         {
           "path": "main/methods/semantic/feature_protocol.py",
           "symbol": "semantic_feature_protocol_record"
+        },
+        {
+          "path": "main/methods/semantic/runtime.py",
+          "symbol": "DifferentiableSemanticFeatureRuntime"
         }
       ],
       "runtime_binding_symbols": [
-        {
-          "path": "experiments/runtime/diffusion/semantic_features.py",
-          "symbol": "DifferentiableSemanticFeatureRuntime"
-        },
         {
           "path": "experiments/runners/semantic_watermark_runtime.py",
           "symbol": "run_semantic_watermark_runtime"

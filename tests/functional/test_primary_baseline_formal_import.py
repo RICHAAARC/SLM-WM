@@ -17,7 +17,7 @@ from experiments.protocol.attacks import attack_config_digest, resolve_formal_at
 from experiments.protocol.image_only_evidence import (
     partition_calibration_prompt_ids,
 )
-from experiments.protocol.pilot_paper_fixed_fpr import (
+from experiments.protocol.paper_fixed_fpr import (
     FULL_PAPER_FIXED_FPR,
     PILOT_PAPER_FIXED_FPR,
 )
@@ -742,7 +742,7 @@ def test_formal_evidence_collection_plan_marks_missing_templates(tmp_path: Path)
     assert missing_row["required_result_record_path"] == (
         "outputs/external_baseline_results/pilot_paper/baseline_result_records.jsonl"
     )
-    assert "generate_pilot_paper_baseline_result_record" in missing_row["required_collection_actions"]
+    assert "generate_paper_baseline_result_record" in missing_row["required_collection_actions"]
     assert collection_summary["formal_evidence_collection_task_count"] == 2
     assert collection_summary["missing_formal_evidence_collection_task_count"] == 1
     assert collection_summary["primary_baseline_formal_evidence_collection_ready"] is False

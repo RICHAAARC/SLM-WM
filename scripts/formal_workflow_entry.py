@@ -178,6 +178,17 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
         != bootstrap_identity["complete_hash_lock_digest"]
     ):
         raise RuntimeError("宿主引导身份与父编排依赖门禁不一致")
+    workflow_completion_state = str(
+        workflow_summary.get(
+            "workflow_completion_state",
+            (
+                "repeat_component_packaged"
+                if workflow_name == "randomization_repeat_evidence"
+                and workflow_summary.get("repeat_component_ready") is True
+                else "unknown"
+            ),
+        )
+    )
     return {
         "report_schema": "formal_workflow_execution_result",
         "schema_version": 1,
@@ -194,6 +205,10 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
         "workflow_environment": workflow_environment,
         "archive_record": archive_record,
         "decision": "pass",
+        "session_execution_decision": "pass",
+        "workflow_completion_state": workflow_completion_state,
+        "paper_run_closed": False,
+        "result_closure_ready": False,
         "supports_paper_claim": False,
     }
 
@@ -252,6 +267,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             json.dumps(
                 {
                     "decision": payload["decision"],
+                    "session_execution_decision": payload[
+                        "session_execution_decision"
+                    ],
+                    "workflow_completion_state": payload[
+                        "workflow_completion_state"
+                    ],
                     "workflow_name": payload["workflow_name"],
                     "paper_run_name": payload["paper_run_name"],
                     "result_path": result_path.as_posix(),
@@ -284,6 +305,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             "workflow_environment": {},
             "archive_record": None,
             "decision": "fail",
+            "session_execution_decision": "fail",
+            "workflow_completion_state": "failed",
+            "paper_run_closed": False,
+            "result_closure_ready": False,
             "failure_reasons": [f"{type(exc).__name__}:{exc}"],
             "supports_paper_claim": False,
         }

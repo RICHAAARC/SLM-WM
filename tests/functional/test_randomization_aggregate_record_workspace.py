@@ -428,14 +428,15 @@ def test_workspace_revalidates_and_inspects_every_leaf_before_exposing_records(
         assert len(workspace.prompt_runtime_sources) == 9
         assert len(workspace.prompt_source_sources) == 27
         assert len(workspace.ablation_sources) == 27
+        assert len(workspace.sensitivity_sources) == 27
         assert len(workspace.quality_sources) == 27
         assert len(workspace.quality_feature_sources) == 9
         assert len(workspace.reference_sources) == 3
-        assert len(workspace.record_sources) == 237
+        assert len(workspace.record_sources) == 273
         assert sum(
             source.record_group == "run_manifest"
             for source in workspace.record_sources
-        ) == 54
+        ) == 63
         first_prompt_source = workspace.prompt_source_sources[0]
         assert workspace.read_bytes(first_prompt_source)
         assert all(
@@ -510,7 +511,7 @@ def test_workspace_revalidates_and_inspects_every_leaf_before_exposing_records(
     assert not temporary_root.exists()
     assert len(calls["aggregate"]) == 1
     assert len(calls["repeat"]) == 9
-    assert len(calls["leaf"]) == 66
+    assert len(calls["leaf"]) == 75
     with pytest.raises(
         RandomizationAggregateRecordWorkspaceError,
         match="with context",

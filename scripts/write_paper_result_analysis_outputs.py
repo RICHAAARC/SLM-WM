@@ -1,4 +1,4 @@
-"""重建 pilot_paper 论文结果分析表与失败案例图。
+"""重建当前论文运行层级的结果分析表与失败案例图。
 
 该脚本只读取已经闭合的 records 与 manifests, 不重新运行 GPU 推理, 也不手工
 拼接论文结论。它用于把 fixed-FPR 结果记录转换为可直接进入论文图表的
@@ -24,15 +24,15 @@ from paper_experiments.runners.paper_claim_provenance import (
     require_exact9_randomization_aggregate_provenance,
 )
 from experiments.protocol.paper_run_config import build_paper_run_config
-from experiments.protocol.pilot_paper_fixed_fpr import (
-    PILOT_PAPER_CONFIDENCE_LEVEL,
-    PILOT_PAPER_PAIRED_BOOTSTRAP_ANALYSIS_SCHEMA,
-    PILOT_PAPER_PAIRED_BOOTSTRAP_BIT_GENERATOR,
-    PILOT_PAPER_PAIRED_BOOTSTRAP_QUANTILE_METHOD,
-    PILOT_PAPER_PAIRED_BOOTSTRAP_RESAMPLE_COUNT,
-    PILOT_PAPER_PAIRED_CLAIM_P_VALUE_METHOD,
-    PILOT_PAPER_PAIRED_SHARP_NULL_DIAGNOSTIC_METHOD,
-    build_pilot_paper_result_record_set_digest,
+from experiments.protocol.paper_fixed_fpr import (
+    PAPER_CONFIDENCE_LEVEL,
+    PAPER_PAIRED_BOOTSTRAP_ANALYSIS_SCHEMA,
+    PAPER_PAIRED_BOOTSTRAP_BIT_GENERATOR,
+    PAPER_PAIRED_BOOTSTRAP_QUANTILE_METHOD,
+    PAPER_PAIRED_BOOTSTRAP_RESAMPLE_COUNT,
+    PAPER_PAIRED_CLAIM_P_VALUE_METHOD,
+    PAPER_PAIRED_SHARP_NULL_DIAGNOSTIC_METHOD,
+    build_paper_result_record_set_digest,
 )
 from experiments.protocol.attacks import default_attack_configs
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
@@ -50,9 +50,9 @@ from paper_experiments.analysis.result_analysis_payload import (
     rebuild_and_validate_result_analysis_derived_payload,
 )
 
-CONSTRUCTION_UNIT_NAME = "pilot_paper_result_analysis"
-DEFAULT_OUTPUT_ROOT = Path("outputs/pilot_paper_result_analysis")
-DEFAULT_RESULT_RECORDS_ROOT = Path("outputs/pilot_paper_fixed_fpr_results")
+CONSTRUCTION_UNIT_NAME = "paper_result_analysis"
+DEFAULT_OUTPUT_ROOT = Path("outputs/paper_result_analysis")
+DEFAULT_RESULT_RECORDS_ROOT = Path("outputs/paper_fixed_fpr_results")
 DEFAULT_ATTACK_MATRIX_ROOT = Path("outputs/attack_matrix")
 DEFAULT_PAIRED_SUPERIORITY_ROOT = Path("outputs/paired_superiority_analysis")
 PRIMARY_BASELINE_METHOD_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
@@ -134,7 +134,7 @@ def ensure_output_dir_under_outputs(root_path: Path, output_dir: str | Path) -> 
     try:
         resolved.relative_to(outputs_root)
     except ValueError as exc:
-        raise ValueError("pilot_paper 结果分析输出目录必须位于 outputs/ 下") from exc
+        raise ValueError("论文结果分析输出目录必须位于 outputs/ 下") from exc
     resolved.mkdir(parents=True, exist_ok=True)
     return resolved
 
@@ -279,7 +279,7 @@ def build_result_template_coverage(result_records: Iterable[dict[str, Any]]) -> 
     }
 
 
-def write_pilot_paper_result_analysis_outputs(*args: Any, **kwargs: Any) -> dict[str, Any]:
+def write_paper_result_analysis_outputs(*args: Any, **kwargs: Any) -> dict[str, Any]:
     """在精确9重复原始记录重算 Writer 就绪前拒绝正式结论物化."""
 
     require_exact9_randomization_aggregate_provenance()
@@ -288,12 +288,12 @@ def write_pilot_paper_result_analysis_outputs(*args: Any, **kwargs: Any) -> dict
 def build_parser() -> argparse.ArgumentParser:
     """构造命令行参数解析器。"""
 
-    parser = argparse.ArgumentParser(description="重建 pilot_paper 论文结果分析表与失败案例图。")
+    parser = argparse.ArgumentParser(description="重建当前论文运行层级的结果分析表与失败案例图。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="输出目录; 默认写入 outputs/pilot_paper_result_analysis/<paper_run_name>。",
+        help="输出目录; 默认写入 outputs/paper_result_analysis/<paper_run_name>。",
     )
     parser.add_argument(
         "--result-records-path",
@@ -316,7 +316,7 @@ def main() -> None:
     """命令行入口。"""
 
     args = build_parser().parse_args()
-    manifest = write_pilot_paper_result_analysis_outputs(
+    manifest = write_paper_result_analysis_outputs(
         root=args.root,
         output_dir=args.output_dir,
         result_records_path=args.result_records_path,

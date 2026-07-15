@@ -22,9 +22,9 @@ from paper_experiments.runners.paper_claim_provenance import (
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.protocol.attacks import default_attack_configs
 from experiments.protocol.paper_run_config import build_paper_run_config
-from experiments.protocol.pilot_paper_fixed_fpr import (
+from experiments.protocol.paper_fixed_fpr import (
     build_paper_fixed_fpr_config,
-    build_pilot_paper_attack_matrix_rows,
+    build_paper_attack_matrix_rows,
 )
 from experiments.protocol.splits import build_group_split_counts
 from experiments.runtime.repository_environment import resolve_code_version

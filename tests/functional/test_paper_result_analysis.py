@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.write_pilot_paper_result_analysis_outputs import (
+from scripts.write_paper_result_analysis_outputs import (
     build_result_template_coverage,
 )
 from paper_experiments.analysis.result_analysis_payload import (

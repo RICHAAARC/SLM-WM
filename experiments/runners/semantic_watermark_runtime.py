@@ -38,10 +38,7 @@ from experiments.protocol.image_only_evidence import (
     decision_equivalent_score,
     validate_frozen_evidence_protocol_integrity,
 )
-from experiments.runtime.diffusion.semantic_features import (
-    DifferentiableSemanticFeatureRuntime,
-    load_clip_vision_model,
-)
+from experiments.runtime.diffusion.semantic_model_loader import load_clip_vision_model
 from experiments.protocol.attacks import (
     attack_config_digest,
     default_attack_configs,
@@ -127,6 +124,7 @@ from main.methods.method_definition import (
 from main.methods.semantic import (
     BRANCH_NAMES,
     BranchRiskConfig,
+    DifferentiableSemanticFeatureRuntime,
     build_active_branch_risk_fields,
     semantic_feature_protocol_record,
 )
@@ -135,6 +133,7 @@ from main.methods.subspace import (
     build_exact_jacobian_linearization,
     exact_jvp,
     generate_keyed_candidate_directions,
+    solve_semantic_branch_subspace,
     solve_jacobian_null_space,
 )
 from main.methods.update_composition import (
@@ -224,6 +223,7 @@ class SemanticWatermarkRuntimeConfig:
     risk_zero_support_protocol: str = (
         _FORMAL_METHOD_CONFIG.risk_zero_support_protocol
     )
+    risk_parameter_protocol: str = "formal_reference"
     risk_bounded_scale_protocol: str = (
         _FORMAL_METHOD_CONFIG.risk_bounded_scale_protocol
     )
@@ -453,7 +453,23 @@ class SemanticWatermarkRuntimeConfig:
                 in _FORMAL_ATTENTION_COMPONENT_WEIGHT_PROTOCOLS
             )
         )
-        if drifted_method_fields:
+        risk_config_fields = {
+            "lf_content_risk_config",
+            "tail_robust_risk_config",
+            "attention_geometry_risk_config",
+        }
+        if self.risk_parameter_protocol not in {
+            "formal_reference",
+            "single_model_internal_sensitivity",
+        }:
+            raise ValueError("risk_parameter_protocol 不是受治理的参数协议")
+        sensitivity_override_ready = (
+            self.risk_parameter_protocol
+            == "single_model_internal_sensitivity"
+            and bool(drifted_method_fields)
+            and set(drifted_method_fields) <= risk_config_fields
+        )
+        if drifted_method_fields and not sensitivity_override_ready:
             raise ValueError(
                 "方法运行设置必须精确继承 configs/model_sd35.yaml: "
                 + ", ".join(drifted_method_fields)
@@ -1914,63 +1930,6 @@ def _branch_risk_content_evidence(
         "branch_risk_content_records": branch_risk_content_records,
     }
 
-
-def _solve_branch_subspace(
-    latent: Any,
-    feature_runtime: DifferentiableSemanticFeatureRuntime,
-    key_material: str,
-    branch_name: str,
-    axis_budget: Any,
-    candidate_count: int,
-    null_rank: int,
-    joint_feature_linearization: ExactJacobianLinearization,
-    preferred_directions: tuple[Any, ...] = (),
-    maximum_relative_response_residual: float = 1e-4,
-    minimum_projection_energy_retention: float = 0.01,
-    cg_maximum_iterations: int = 64,
-    cg_relative_tolerance: float = 1e-6,
-    numerical_epsilon: float = 1e-12,
-    maximum_qr_condition_number: float = 1e6,
-    maximum_orthogonality_error: float = 1e-5,
-    qr_reference_solve_protocol: str = (
-        "right_upper_triangular_solve_without_explicit_inverse"
-    ),
-    prg_version: str = KEYED_PRG_VERSION,
-) -> Any:
-    """为一个载体分支运行完整 Jacobian 风险支持约束投影。"""
-
-    candidates = generate_keyed_candidate_directions(
-        latent,
-        key_material,
-        branch_name,
-        candidate_count,
-        axis_budget=None,
-        preferred_directions=preferred_directions,
-        prg_version=prg_version,
-    )
-    result = solve_jacobian_null_space(
-        latent=latent.float(),
-        candidate_matrix=candidates,
-        risk_budget=axis_budget,
-        null_rank=null_rank,
-        joint_feature_linearization=joint_feature_linearization,
-        branch_name=branch_name,
-        maximum_relative_response_residual=maximum_relative_response_residual,
-        minimum_projection_energy_retention=minimum_projection_energy_retention,
-        cg_maximum_iterations=cg_maximum_iterations,
-        cg_relative_tolerance=cg_relative_tolerance,
-        numerical_epsilon=numerical_epsilon,
-        maximum_qr_condition_number=maximum_qr_condition_number,
-        maximum_orthogonality_error=maximum_orthogonality_error,
-        qr_reference_solve_protocol=qr_reference_solve_protocol,
-    )
-    result.metadata["preferred_direction_count"] = len(preferred_directions)
-    result.metadata["preferred_direction_role"] = "carrier_or_attention_gradient"
-    result.metadata.update(keyed_prg_protocol_record(prg_version))
-    result.metadata.update(feature_runtime.feature_schema_record())
-    if result.relative_response_residual > maximum_relative_response_residual:
-        raise RuntimeError("完整 Jacobian Null Space 的相对响应残差超过正式门禁")
-    return result
 
 
 def _feature_preservation_values(
@@ -4236,7 +4195,7 @@ def run_semantic_watermark_runtime(
                     linearized_latent,
                 )
                 subspaces = {
-                    branch_name: _solve_branch_subspace(
+                    branch_name: solve_semantic_branch_subspace(
                         latent=linearized_latent,
                         feature_runtime=feature_runtime,
                         key_material=active_injection_config.key_material,

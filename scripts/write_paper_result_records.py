@@ -30,22 +30,22 @@ from experiments.protocol.formal_evidence import contains_nonformal_marker
 from experiments.protocol.dataset_quality import (
     FORMAL_DATASET_QUALITY_METRIC_NAMES,
 )
-from experiments.protocol.pilot_paper_fixed_fpr import (
-    PILOT_PAPER_METRIC_BOUNDS,
-    PilotPaperFixedFprConfig,
+from experiments.protocol.paper_fixed_fpr import (
+    PAPER_METRIC_BOUNDS,
+    PaperFixedFprConfig,
     build_attack_matrix_digest,
     build_fixed_fpr_protocol_digest,
     build_paper_fixed_fpr_config,
-    build_pilot_paper_attack_matrix_rows,
-    build_pilot_paper_method_registry_rows,
-    build_pilot_paper_prompt_split_summary,
-    build_pilot_paper_result_record_set_digest,
-    build_pilot_paper_result_import_schema,
-    build_pilot_paper_result_import_template_rows,
+    build_paper_attack_matrix_rows,
+    build_paper_method_registry_rows,
+    build_paper_prompt_split_summary,
+    build_paper_result_record_set_digest,
+    build_paper_result_import_schema,
+    build_paper_result_import_template_rows,
     bounded_hoeffding_confidence_interval,
     bounded_metric_value,
     clamp_unit_interval,
-    validate_pilot_paper_result_import_rows,
+    validate_paper_result_import_rows,
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.runtime.image_metrics import measured_score_retention
@@ -54,8 +54,8 @@ from paper_experiments.runners.paper_claim_provenance import (
     require_exact9_randomization_aggregate_provenance,
 )
 
-CONSTRUCTION_UNIT_NAME = "pilot_paper_fixed_fpr_result_records"
-DEFAULT_OUTPUT_ROOT = Path("outputs/pilot_paper_fixed_fpr_results")
+CONSTRUCTION_UNIT_NAME = "paper_fixed_fpr_result_records"
+DEFAULT_OUTPUT_ROOT = Path("outputs/paper_fixed_fpr_results")
 DEFAULT_BASELINE_RESULTS_ROOT = Path("outputs/external_baseline_results")
 DEFAULT_DATASET_QUALITY_ROOT = Path("outputs/dataset_level_quality")
 DEFAULT_DATASET_QUALITY_SUMMARY_NAME = "dataset_quality_summary.json"
@@ -100,12 +100,12 @@ def ensure_output_dir_under_outputs(root_path: Path, output_dir: str | Path) -> 
 
     resolved = resolve_path(root_path, output_dir)
     if resolved is None:
-        raise ValueError("pilot_paper 结果记录输出目录不能为空")
+        raise ValueError("论文结果记录输出目录不能为空")
     outputs_root = (root_path / "outputs").resolve()
     try:
         resolved.relative_to(outputs_root)
     except ValueError as exc:
-        raise ValueError("pilot_paper 结果记录输出目录必须位于 outputs/ 下") from exc
+        raise ValueError("论文结果记录输出目录必须位于 outputs/ 下") from exc
     resolved.mkdir(parents=True, exist_ok=True)
     return resolved
 
@@ -241,30 +241,30 @@ def _list_field(row: Mapping[str, Any], field_name: str) -> list[str]:
     return []
 
 
-def build_protocol_context(root_path: Path, config: PilotPaperFixedFprConfig) -> dict[str, Any]:
+def build_protocol_context(root_path: Path, config: PaperFixedFprConfig) -> dict[str, Any]:
     """构造 result records 需要引用的共同协议摘要。"""
 
     prompt_path = resolve_path(root_path, config.prompt_file)
     if prompt_path is None or not prompt_path.is_file():
         raise FileNotFoundError(f"缺少论文运行 prompt 文件: {config.prompt_file}")
     prompt_records = build_prompt_records(config.prompt_set, read_prompt_file(prompt_path))
-    prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
-    attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
+    prompt_summary = build_paper_prompt_split_summary(prompt_records, config)
+    attack_rows = build_paper_attack_matrix_rows(default_attack_configs(), config)
     attack_matrix_digest = build_attack_matrix_digest(attack_rows)
     fixed_fpr_protocol_digest = build_fixed_fpr_protocol_digest(config)
-    method_rows = build_pilot_paper_method_registry_rows(
+    method_rows = build_paper_method_registry_rows(
         prompt_split_digest=str(prompt_summary["prompt_split_digest"]),
         attack_matrix_digest=attack_matrix_digest,
         fixed_fpr_protocol_digest=fixed_fpr_protocol_digest,
         config=config,
     )
-    schema = build_pilot_paper_result_import_schema(
+    schema = build_paper_result_import_schema(
         prompt_split_digest=str(prompt_summary["prompt_split_digest"]),
         attack_matrix_digest=attack_matrix_digest,
         fixed_fpr_protocol_digest=fixed_fpr_protocol_digest,
         config=config,
     )
-    template_rows = build_pilot_paper_result_import_template_rows(method_rows, attack_rows, config)
+    template_rows = build_paper_result_import_template_rows(method_rows, attack_rows, config)
     return {
         "prompt_summary": prompt_summary,
         "attack_rows": attack_rows,
@@ -371,7 +371,7 @@ def build_common_result_fields(
     method_threshold_digest: str,
     evidence_paths: list[str],
 ) -> dict[str, Any]:
-    """构造所有方法共享的 pilot_paper schema 字段。"""
+    """构造所有论文运行层级和方法共享的 schema 字段。"""
 
     return {
         "result_protocol_name": schema["result_protocol_name"],
@@ -394,9 +394,11 @@ def build_common_result_fields(
         "baseline_result_source": baseline_result_source,
         "baseline_result_source_digest": baseline_result_source_digest,
         "evidence_paths": evidence_paths,
-        "paper_claim_scale": schema.get("paper_claim_scale", "pilot_paper"),
-        "paper_run_claim_type": schema.get("paper_run_claim_type", schema["result_claim_scope"]),
-        "strict_formal_evidence_required": bool(schema.get("strict_formal_evidence_required", True)),
+        "paper_claim_scale": schema["paper_claim_scale"],
+        "paper_run_claim_type": schema["paper_run_claim_type"],
+        "strict_formal_evidence_required": bool(
+            schema["strict_formal_evidence_required"]
+        ),
     }
 
 
@@ -417,7 +419,7 @@ def attach_metric_fields(
 ) -> dict[str, Any]:
     """补齐指标字段和确定性置信区间字段。"""
 
-    quality_lower, quality_upper = PILOT_PAPER_METRIC_BOUNDS[
+    quality_lower, quality_upper = PAPER_METRIC_BOUNDS[
         "quality_score_mean"
     ]
     metric_payload = {
@@ -522,8 +524,8 @@ def finalize_result_record(
     payload["strict_formal_result_ready"] = supports_claim
     payload["supports_paper_claim"] = supports_claim
     digest = build_stable_digest(payload)
-    payload["pilot_paper_result_record_digest"] = digest
-    payload["pilot_paper_result_record_id"] = f"pilot_paper_result_record_{digest[:16]}"
+    payload["paper_result_record_digest"] = digest
+    payload["paper_result_record_id"] = f"paper_result_record_{digest[:16]}"
     return payload
 
 
@@ -780,7 +782,7 @@ def build_baseline_result_records(
     baseline_records_path: Path,
     baseline_validation_report_path: Path,
 ) -> list[dict[str, Any]]:
-    """从外部 baseline 候选记录构造 pilot_paper 结果记录。"""
+    """从外部 baseline 候选记录构造当前论文层级结果记录。"""
 
     rows = read_jsonl_rows(baseline_records_path)
     if not rows:
@@ -909,7 +911,7 @@ def build_template_coverage_rows(
 def template_record_keys(
     template_rows: Iterable[Mapping[str, Any]],
 ) -> set[tuple[str, str, str, str, str, str]]:
-    """提取 pilot_paper 共同协议允许进入 claim 比较的模板键。"""
+    """提取共享论文协议允许进入 claim 比较的模板键。"""
 
     return {
         (
@@ -952,7 +954,7 @@ def filter_records_to_template(
     ]
 
 
-def write_pilot_paper_result_record_outputs(
+def write_paper_result_record_outputs(
     *,
     root: str | Path = ".",
     output_dir: str | Path | None = None,
@@ -1010,7 +1012,7 @@ def main() -> None:
     """命令行入口。"""
 
     args = build_parser().parse_args()
-    manifest = write_pilot_paper_result_record_outputs(
+    manifest = write_paper_result_record_outputs(
         root=args.root,
         output_dir=args.output_dir,
         baseline_records_path=args.baseline_records_path,

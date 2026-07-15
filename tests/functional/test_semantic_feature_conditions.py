@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from experiments.runtime.diffusion.semantic_features import (
+from main.methods.semantic import (
     DifferentiableSemanticFeatureRuntime,
 )
 from experiments.runners.semantic_watermark_runtime import (

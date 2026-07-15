@@ -21,7 +21,7 @@ from experiments.runners.semantic_watermark_runtime import (
     _build_image_only_measurement_config,
     semantic_watermark_runtime_config_payload,
 )
-from experiments.runtime.diffusion import sd3_pipeline_runtime, semantic_features
+from experiments.runtime.diffusion import sd3_pipeline_runtime, semantic_model_loader
 from experiments.runtime.model_sources import (
     MODEL_SOURCE_REGISTRY_PATH,
     get_model_source,
@@ -857,7 +857,7 @@ def test_clip_loader_forwards_registered_revision(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setitem(__import__("sys").modules, "transformers", fake_transformers)
     source = get_model_source("openai_clip_vit_base_patch32")
 
-    semantic_features.load_clip_vision_model(
+    semantic_model_loader.load_clip_vision_model(
         source.repository_id,
         source.revision,
         "cpu",

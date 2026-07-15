@@ -1,4 +1,4 @@
-"""验证单重复7类 leaf ZIP 的自包含证据包契约."""
+"""验证单重复8类 leaf ZIP 的自包含证据包契约."""
 
 from __future__ import annotations
 
@@ -106,7 +106,7 @@ def test_repeat_evidence_package_nests_exact_leaf_zips_without_claim(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """写出结果必须包含7个原样 leaf ZIP 和一个受治理 manifest."""
+    """写出结果必须包含8个原样 leaf ZIP 和一个受治理 manifest。"""
 
     candidates = _candidates(tmp_path)
     monkeypatch.setattr(
@@ -125,7 +125,7 @@ def test_repeat_evidence_package_nests_exact_leaf_zips_without_claim(
 
     archive_path = Path(report["archive_path"])
     assert archive_path.is_file()
-    assert report["archive_entry_count"] == 8
+    assert report["archive_entry_count"] == 9
     assert report["repeat_component_ready"] is True
     assert report["randomization_aggregate_ready"] is False
     assert report["supports_paper_claim"] is False
@@ -144,7 +144,7 @@ def test_repeat_evidence_package_nests_exact_leaf_zips_without_claim(
             )
             for family in RANDOMIZATION_REPEAT_LEAF_PACKAGE_FAMILIES
         }
-        assert len(names) == 8
+        assert len(names) == 9
         for candidate in candidates:
             member = next(
                 name

@@ -10,14 +10,14 @@ import pytest
 from paper_experiments.runners.paper_claim_provenance import (
     PaperClaimAggregateRequiredError,
 )
-from scripts.write_pilot_paper_complete_result_package import (
+from scripts.write_paper_complete_result_package import (
     REQUIRED_OUTPUT_DIR_NAMES,
     _validated_zip_member_name,
     build_parser,
     build_required_output_dirs,
     resolve_explicit_package_paths,
     write_archive_with_progress,
-    write_pilot_paper_complete_result_package_outputs,
+    write_paper_complete_result_package_outputs,
 )
 
 
@@ -33,7 +33,7 @@ def test_public_complete_result_package_rejects_missing_exact9_aggregate_before_
         PaperClaimAggregateRequiredError,
         match="版本化精确9重复聚合证据",
     ):
-        write_pilot_paper_complete_result_package_outputs(root=tmp_path)
+        write_paper_complete_result_package_outputs(root=tmp_path)
 
     assert not (tmp_path / "outputs").exists()
 

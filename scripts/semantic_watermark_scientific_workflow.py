@@ -1,7 +1,7 @@
-"""调度真实科学算子, 仅图像检测和正式消融的 GPU 会话.
+"""调度真实科学算子、仅图像检测、正式消融和参数敏感性的 GPU 会话。
 
 Notebook 所在解释器只运行 workflow 编排. 主方法, 规范 Inception 质量评估和
-正式消融由一次隔离环境准备得到的 ``sd35_method_runtime_gpu`` 子解释器完成.
+正式消融与单模型参数敏感性由同一个 ``sd35_method_runtime_gpu`` 子解释器完成。
 本模块不依赖 Notebook. 它判断续跑状态, 绑定执行证据并重新打包; 可选的
 归档目标目录由更外层 Colab 包装显式注入.
 """
@@ -345,14 +345,24 @@ def _write_bindings(
         ),
     ]
     if include_formal_ablation:
-        specifications.append(
+        specifications.extend(
             (
-                "runtime_rerun_ablation",
-                root_path
-                / "outputs"
-                / "formal_mechanism_ablation"
-                / paper_run_name,
-                "ablation_component_summary.json",
+                (
+                    "runtime_rerun_ablation",
+                    root_path
+                    / "outputs"
+                    / "formal_mechanism_ablation"
+                    / paper_run_name,
+                    "ablation_component_summary.json",
+                ),
+                (
+                    "branch_risk_parameter_sensitivity",
+                    root_path
+                    / "outputs"
+                    / "formal_branch_risk_sensitivity"
+                    / paper_run_name,
+                    "parameter_sensitivity_summary.json",
+                ),
             )
         )
     bindings: dict[str, dict[str, Any]] = {}
@@ -544,7 +554,12 @@ def run_semantic_watermark_image_only_session(
         "dataset_level_quality",
     }
     if run_formal_ablation:
-        expected_archive_roles.add("runtime_rerun_ablation")
+        expected_archive_roles.update(
+            {
+                "runtime_rerun_ablation",
+                "branch_risk_parameter_sensitivity",
+            }
+        )
     closed_archive_recovery = _recover_closed_archives(
         root_path=root_path,
         paper_run_name=paper_run_name,
@@ -556,9 +571,13 @@ def run_semantic_watermark_image_only_session(
     if closed_archive_recovery["all_expected_roles_recovered"] is True:
         return {
             "workflow_decision": "closed_archives_recovered",
+            "workflow_completion_state": "repeat_component_complete",
+            "session_execution_decision": "pass",
+            "paper_run_closed": False,
+            "result_closure_ready": False,
             "paper_run_name": paper_run_name,
             "active_workflow": (
-                "runtime_rerun_ablation"
+                "branch_risk_parameter_sensitivity"
                 if run_formal_ablation
                 else "image_only_dataset_runtime"
             ),
@@ -570,6 +589,12 @@ def run_semantic_watermark_image_only_session(
     runtime_output_dir = root_path / "outputs" / "image_only_dataset_runtime" / paper_run_name
     quality_output_dir = root_path / "outputs" / "dataset_level_quality" / paper_run_name
     ablation_output_dir = root_path / "outputs" / "formal_mechanism_ablation" / paper_run_name
+    sensitivity_output_dir = (
+        root_path
+        / "outputs"
+        / "formal_branch_risk_sensitivity"
+        / paper_run_name
+    )
     execution_report_path = (
         root_path
         / "outputs"
@@ -614,6 +639,10 @@ def run_semantic_watermark_image_only_session(
     if runtime_progress_path.is_file():
         return {
             "workflow_decision": "resume_required",
+            "workflow_completion_state": "resume_required",
+            "session_execution_decision": "pass",
+            "paper_run_closed": False,
+            "result_closure_ready": False,
             "paper_run_name": paper_run_name,
             "active_workflow": "image_only_dataset_runtime",
             "runtime_progress": _read_json(runtime_progress_path),
@@ -645,6 +674,10 @@ def run_semantic_watermark_image_only_session(
     if run_formal_ablation and ablation_progress_path.is_file():
         return {
             "workflow_decision": "resume_required",
+            "workflow_completion_state": "resume_required",
+            "session_execution_decision": "pass",
+            "paper_run_closed": False,
+            "result_closure_ready": False,
             "paper_run_name": paper_run_name,
             "active_workflow": "runtime_rerun_ablation",
             "runtime_summary": runtime_summary,
@@ -666,25 +699,66 @@ def run_semantic_watermark_image_only_session(
         )
         ablation_complete = True
 
+    sensitivity_progress_path = (
+        sensitivity_output_dir / "parameter_sensitivity_progress.json"
+    )
+    sensitivity_complete = False
+    sensitivity_summary: dict[str, Any] = {}
+    if run_formal_ablation and sensitivity_progress_path.is_file():
+        return {
+            "workflow_decision": "resume_required",
+            "workflow_completion_state": "resume_required",
+            "session_execution_decision": "pass",
+            "paper_run_closed": False,
+            "result_closure_ready": False,
+            "paper_run_name": paper_run_name,
+            "active_workflow": "branch_risk_parameter_sensitivity",
+            "runtime_summary": runtime_summary,
+            "quality_summary": quality_summary,
+            "ablation_summary": ablation_summary,
+            "sensitivity_progress": _read_json(sensitivity_progress_path),
+            "formal_ablation_requested": True,
+            "closed_archive_recovery_ready": False,
+            "closed_archive_recovery": closed_archive_recovery,
+            "supports_paper_claim": False,
+            **evidence,
+        }
+    if run_formal_ablation and not sensitivity_progress_path.is_file():
+        sensitivity_summary = _read_json(
+            sensitivity_output_dir / "parameter_sensitivity_summary.json"
+        )
+        if sensitivity_summary.get("protocol_decision") != "pass":
+            raise RuntimeError("单模型风险参数敏感性未生成通过协议的摘要")
+        _require_repeat_component_ready(
+            sensitivity_summary,
+            artifact_role="branch_risk_parameter_sensitivity",
+        )
+        sensitivity_complete = True
+
     bindings = _write_bindings(
         root_path=root_path,
         paper_run_name=paper_run_name,
         execution_report_path=resolved_execution_report_path,
         dispatch_report_path=dispatch_report_path,
-        include_formal_ablation=ablation_complete,
+        include_formal_ablation=ablation_complete and sensitivity_complete,
     )
     packaging_execution = _run_bound_packaging(
         root_path=root_path,
         paper_run_name=paper_run_name,
         execution_report=execution_report,
-        include_formal_ablation=ablation_complete,
+        include_formal_ablation=ablation_complete and sensitivity_complete,
     )
     expected_packaged_roles = {
         "image_only_dataset_runtime",
         "dataset_level_quality",
     }
     if ablation_complete:
-        expected_packaged_roles.add("runtime_rerun_ablation")
+        expected_packaged_roles.update(
+            {
+                "runtime_rerun_ablation",
+                "branch_risk_parameter_sensitivity",
+            }
+        )
     archives = _archive_paths_from_packaging(
         root_path,
         packaging_execution,
@@ -724,6 +798,10 @@ def run_semantic_watermark_image_only_session(
     if not run_formal_ablation:
         return {
             "workflow_decision": "dataset_complete",
+            "workflow_completion_state": "dataset_component_complete",
+            "session_execution_decision": "pass",
+            "paper_run_closed": False,
+            "result_closure_ready": False,
             "active_workflow": "image_only_dataset_runtime",
             "formal_ablation_requested": False,
             "repeat_component_ready": True,
@@ -732,8 +810,13 @@ def run_semantic_watermark_image_only_session(
         }
     return {
         "workflow_decision": "complete",
-        "active_workflow": "runtime_rerun_ablation",
+        "workflow_completion_state": "repeat_component_complete",
+        "session_execution_decision": "pass",
+        "paper_run_closed": False,
+        "result_closure_ready": False,
+        "active_workflow": "branch_risk_parameter_sensitivity",
         "ablation_summary": ablation_summary,
+        "sensitivity_summary": sensitivity_summary,
         "formal_ablation_requested": True,
         "repeat_component_ready": True,
         "randomization_aggregate_ready": False,

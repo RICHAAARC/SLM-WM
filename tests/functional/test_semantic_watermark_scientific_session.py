@@ -65,11 +65,11 @@ def test_runtime_progress_prevents_formal_ablation_command(
     assert report["artifact_state"]["runtime_progress_present"] is True
 
 
-def test_closed_main_runs_requested_ablation_once(
+def test_closed_main_runs_requested_formal_analysis_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """主方法和质量均闭合后, 请求的正式消融必须恰好运行一次."""
+    """主结果闭合后, 机制消融与参数敏感性必须各运行一次。"""
 
     run_name = "probe_paper"
     _write_json(
@@ -84,6 +84,7 @@ def test_closed_main_runs_requested_ablation_once(
         f"outputs/image_only_dataset_runtime/{run_name}/manifest.local.json",
         f"outputs/dataset_level_quality/{run_name}/manifest.local.json",
         f"outputs/formal_mechanism_ablation/{run_name}/manifest.local.json",
+        f"outputs/formal_branch_risk_sensitivity/{run_name}/manifest.local.json",
     ):
         _write_json(
             tmp_path / relative_path,
@@ -108,6 +109,14 @@ def test_closed_main_runs_requested_ablation_once(
         / "ablation_component_summary.json",
         {"protocol_decision": "pass", "repeat_component_ready": True},
     )
+    _write_json(
+        tmp_path
+        / "outputs"
+        / "formal_branch_risk_sensitivity"
+        / run_name
+        / "parameter_sensitivity_summary.json",
+        {"protocol_decision": "pass", "repeat_component_ready": True},
+    )
     calls = []
     monkeypatch.setattr(dispatcher, "ROOT", tmp_path)
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", run_name)
@@ -124,17 +133,25 @@ def test_closed_main_runs_requested_ablation_once(
     assert calls == [
         ("-m", "experiments.runners.image_only_dataset_workload"),
         ("-m", "experiments.ablations.mechanism_ablation_workload"),
+        (
+            "-m",
+            "experiments.ablations.branch_risk_sensitivity_workload",
+        ),
     ]
     assert report["decision"] == "pass"
     assert [record["command_role"] for record in report["commands"]] == [
         "image_only_dataset_runtime",
         "runtime_rerun_ablation",
+        "branch_risk_parameter_sensitivity",
     ]
     assert [record["artifact_role"] for record in report["artifact_records"]] == [
         "image_only_dataset_runtime",
         "dataset_level_quality",
         "runtime_rerun_ablation",
+        "branch_risk_parameter_sensitivity",
     ]
+    assert report["workflow_completion_state"] == "repeat_component_complete"
+    assert report["paper_run_closed"] is False
 
 
 def test_protocol_pass_without_repeat_component_cannot_close(

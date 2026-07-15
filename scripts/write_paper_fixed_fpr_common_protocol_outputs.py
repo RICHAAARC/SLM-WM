@@ -23,7 +23,7 @@ def stable_json_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
-def write_pilot_paper_fixed_fpr_common_protocol_outputs(
+def write_paper_fixed_fpr_common_protocol_outputs(
     *,
     root: str | Path = ".",
     output_dir: str | Path | None = None,
@@ -77,7 +77,7 @@ def main() -> None:
     """命令行入口."""
 
     args = build_parser().parse_args()
-    manifest = write_pilot_paper_fixed_fpr_common_protocol_outputs(
+    manifest = write_paper_fixed_fpr_common_protocol_outputs(
         root=args.root,
         output_dir=args.output_dir,
         candidate_records_path=args.candidate_records_path,

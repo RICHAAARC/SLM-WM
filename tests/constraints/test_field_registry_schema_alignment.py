@@ -11,9 +11,9 @@ from experiments.artifacts.detection_score_curves import (
     CURVE_POINT_FIELDNAMES,
     SCORE_DISTRIBUTION_FIELDNAMES,
 )
-from experiments.protocol.pilot_paper_fixed_fpr import (
-    PILOT_PAPER_REQUIRED_METRIC_FIELDS,
-    PILOT_PAPER_REQUIRED_SOURCE_FIELDS,
+from experiments.protocol.paper_fixed_fpr import (
+    PAPER_REQUIRED_METRIC_FIELDS,
+    PAPER_REQUIRED_SOURCE_FIELDS,
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
@@ -60,8 +60,8 @@ ARTIFACT_DATA_CHECK_FIELDS = {
     "ready_flag_consistency_ready",
 }
 FORMAL_PERSISTED_SCHEMA_FIELDS = set().union(
-    PILOT_PAPER_REQUIRED_METRIC_FIELDS,
-    PILOT_PAPER_REQUIRED_SOURCE_FIELDS,
+    PAPER_REQUIRED_METRIC_FIELDS,
+    PAPER_REQUIRED_SOURCE_FIELDS,
     FROZEN_PROTOCOL_FIELDS,
     TEST_METRIC_FIELDS,
     ATTACK_METRIC_FIELDS,

@@ -30,7 +30,7 @@ from paper_experiments.analysis.result_analysis_payload import (
     rebuild_and_validate_result_analysis_semantics,
     result_analysis_payload_binding_ready,
 )
-from scripts.write_pilot_paper_complete_result_package import (
+from scripts.write_paper_complete_result_package import (
     collect_result_closure_source_entries,
 )
 
@@ -42,7 +42,7 @@ def _ready_payload(tmp_path: Path) -> tuple[dict[str, object], dict[str, object]
     """写出四类最小 payload 并构造相互一致的 summary 与 manifest."""
 
     output_dir = (
-        tmp_path / "outputs/pilot_paper_result_analysis/probe_paper"
+        tmp_path / "outputs/paper_result_analysis/probe_paper"
     )
     output_dir.mkdir(parents=True)
     contents = {
@@ -68,8 +68,8 @@ def _ready_payload(tmp_path: Path) -> tuple[dict[str, object], dict[str, object]
     manifest: dict[str, object] = {
         "output_paths": [
             *binding["result_analysis_payload_path_map"].values(),
-            "outputs/pilot_paper_result_analysis/probe_paper/result_analysis_summary.json",
-            "outputs/pilot_paper_result_analysis/probe_paper/manifest.local.json",
+            "outputs/paper_result_analysis/probe_paper/result_analysis_summary.json",
+            "outputs/paper_result_analysis/probe_paper/manifest.local.json",
         ],
         "config_digest": build_stable_digest(config),
         "metadata": dict(summary),
@@ -140,8 +140,8 @@ def test_result_analysis_payload_binding_requires_canonical_exact_paths(
 
     summary, manifest, actual_source_sha256 = _ready_payload(tmp_path)
     for forged_path in (
-        "archive/outputs/pilot_paper_result_analysis/probe_paper/failure_case_figure.svg",
-        "outputs\\pilot_paper_result_analysis\\probe_paper\\failure_case_figure.svg",
+        "archive/outputs/paper_result_analysis/probe_paper/failure_case_figure.svg",
+        "outputs\\paper_result_analysis\\probe_paper\\failure_case_figure.svg",
     ):
         forged_summary = copy.deepcopy(summary)
         original_path = forged_summary["result_analysis_payload_path_map"][
@@ -460,7 +460,7 @@ def _semantic_payload_kwargs() -> dict[str, object]:
     )
     failure_rows = build_failure_case_records(attack_records, limit=12)
     figure_path = (
-        "outputs/pilot_paper_result_analysis/probe_paper/failure_case_figure.svg"
+        "outputs/paper_result_analysis/probe_paper/failure_case_figure.svg"
     )
     return {
         "paper_claim_scale": "probe_paper",

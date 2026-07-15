@@ -4,8 +4,8 @@
 
 ## 目录职责
 
-- `methods/semantic/`: 使用冻结解析范围的 CLIP patch-to-CLS 一致性、解码纹理、5x5局部对比度、紧邻 scheduler 步 RGB 稳定度和独立跨层 Q/K 稳定度, 构造三个分支的风险场、严格资格集合和连续承载预算。有效预算必须同时进入 Null Space 与最终逐位置写回包络。
-- `methods/subspace/`: 使用512维归一化 CLIP embedding 与204维明确限定的手工结构统计向量组成的716维特征 JVP/VJP、显式风险算子、无阻尼 PSD-CG 和逐列残差门禁求解 Jacobian Null Space。
+- `methods/semantic/`: 使用冻结解析范围的 CLIP patch-to-CLS 一致性、解码纹理、5x5局部对比度、紧邻 scheduler 步 RGB 稳定度和独立跨层 Q/K 稳定度, 构造三个分支的风险场、严格资格集合和连续承载预算。`DifferentiableSemanticFeatureRuntime` 接收外部注入的 VAE 与视觉编码器, 真实计算512维 CLIP 特征和204维手工结构描述符, 不依赖实验层模型注册表。
+- `methods/subspace/`: 使用512维归一化 CLIP embedding 与204维明确限定的手工结构描述符组成的716维特征 JVP/VJP、显式风险算子、无阻尼 PSD-CG 和逐列残差门禁求解 Jacobian Null Space。`solve_semantic_branch_subspace` 是单 latent、单分支的公开核心方法入口, 把密钥候选生成、局部 Jacobian 低响应投影和残差门禁组合为可复用算子。
 - `methods/carrier/`: 构造空间低通 LF 模板、高斯幅值尾部截断模板及其安全子空间投影。
 - `methods/update_composition.py`: 在单位方向上分离处理方向活动 epsilon 与数值退化 epsilon, 清理零预算支持后执行逐位置风险硬包络缩放；attention 候选和最终写回共同调用唯一固定顺序 float32 合成原语, 对 original latent 只执行一次实际 dtype 转换并产出可重算共同回溯证据。
 - `methods/geometry/`: 从真实 Transformer Q/K 直接构造中心化 logit、可微 rank、抽样图像 token 关系概率和距离调制中心化概率四分量图, 计算目标梯度, 构造可核对身份的稳定 token pair 权重, 并通过攻击配置无关的分层搜索恢复二维参考系。归一化 token 坐标把角点中心映射到 -1 与 1, 与图像仿射重采样的 `align_corners=True` 完全一致。
@@ -16,12 +16,14 @@
 
 ## 分层边界
 
-- 数据划分、fixed-FPR、攻击、正式消融和主方法运行位于 `experiments/`。
+- 数据划分、模型加载、fixed-FPR、攻击、正式消融、单模型参数敏感性和数据集运行位于 `experiments/`。
 - baseline、公平对比、论文证据审计和投稿就绪分析位于 `paper_experiments/`。
 - 独立服务器命令位于 `scripts/`。
 - Colab 包装和 Notebook 位于 `paper_workflow/`。
 
 `main/` 不得导入上述任何外层目录。
+
+核心包提供方法数学原语、可微特征运行时、局部子空间求解、载体、注意力几何、更新合成和图像检测。具体 SD3.5 模型下载、设备放置、prompt 循环和结果持久化属于可替换的外层模型执行适配, 不得反向进入核心包。该划分属于通用依赖倒置写法, 不是用外层代理替代核心算法。
 
 ## 方法语义
 

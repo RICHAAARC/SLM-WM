@@ -32,23 +32,23 @@ from experiments.protocol.dataset_quality import (
     FORMAL_DATASET_QUALITY_METRIC_NAMES,
     formal_dataset_quality_metric_protocol,
 )
-from experiments.protocol.pilot_paper_fixed_fpr import (
-    PILOT_PAPER_METRIC_BOUNDS,
-    PilotPaperFixedFprConfig,
+from experiments.protocol.paper_fixed_fpr import (
+    PAPER_METRIC_BOUNDS,
+    PaperFixedFprConfig,
     bounded_hoeffding_confidence_interval,
     bounded_metric_value,
     build_attack_matrix_digest,
     build_fixed_fpr_protocol_digest,
-    build_pilot_paper_attack_matrix_rows,
-    build_pilot_paper_result_import_schema,
-    build_pilot_paper_result_record_set_digest,
-    build_pilot_paper_result_records_manifest_config,
+    build_paper_attack_matrix_rows,
+    build_paper_result_import_schema,
+    build_paper_result_record_set_digest,
+    build_paper_result_records_manifest_config,
     clamp_unit_interval,
     prompt_protocol_name_for_run,
     result_claim_scope_for_run,
     result_protocol_name_for_run,
     result_scope_for_run,
-    validate_pilot_paper_result_import_rows,
+    validate_paper_result_import_rows,
 )
 from experiments.protocol.paper_run_config import RUN_DEFAULTS
 from experiments.protocol.formal_randomization import (
@@ -389,17 +389,17 @@ def _metadata_matches(
 def _record_digest_ready(record: Mapping[str, Any]) -> bool:
     """重算单条正式结果记录摘要, 防止记录正文与 id 分离。"""
 
-    digest = str(record.get("pilot_paper_result_record_digest", ""))
-    record_id = str(record.get("pilot_paper_result_record_id", ""))
+    digest = str(record.get("paper_result_record_digest", ""))
+    record_id = str(record.get("paper_result_record_id", ""))
     payload = {
         key: value
         for key, value in record.items()
-        if key not in {"pilot_paper_result_record_digest", "pilot_paper_result_record_id"}
+        if key not in {"paper_result_record_digest", "paper_result_record_id"}
     }
     return (
         _is_sha256(digest)
         and build_stable_digest(payload) == digest
-        and record_id == f"pilot_paper_result_record_{digest[:16]}"
+        and record_id == f"paper_result_record_{digest[:16]}"
     )
 
 
@@ -761,7 +761,7 @@ def _test_count_ready(bundle: ResultClosureGateInput) -> bool:
     expected = bundle.expected_test_count
     ablation_splits = bundle.ablation_summary.get("split_counts", {})
     common_counts = (
-        bundle.common_protocol_summary.get("pilot_paper_negative_count_minimum_required"),
+        bundle.common_protocol_summary.get("paper_negative_count_minimum_required"),
         bundle.common_protocol_summary.get("minimum_result_positive_count"),
         bundle.common_protocol_summary.get("minimum_result_negative_count"),
         bundle.common_protocol_summary.get("minimum_result_attacked_negative_count"),
@@ -836,14 +836,14 @@ def _common_protocol_digest_ready(bundle: ResultClosureGateInput) -> bool:
 
 def _expected_fixed_fpr_config(
     bundle: ResultClosureGateInput,
-) -> PilotPaperFixedFprConfig | None:
+) -> PaperFixedFprConfig | None:
     """根据门禁显式期望值重建当前论文运行配置."""
 
     defaults = RUN_DEFAULTS.get(bundle.expected_paper_claim_scale)
     if defaults is None:
         return None
     try:
-        return PilotPaperFixedFprConfig(
+        return PaperFixedFprConfig(
             paper_run_name=bundle.expected_paper_claim_scale,
             protocol_profile=str(defaults["protocol_profile"]),
             prompt_set=bundle.expected_paper_claim_scale,
@@ -874,13 +874,13 @@ def _expected_common_protocol_schema(
     threshold_map = _threshold_digest_map_from_audit(bundle.threshold_audit_rows)
     if config is None or threshold_map is None:
         return None
-    attack_rows = build_pilot_paper_attack_matrix_rows(
+    attack_rows = build_paper_attack_matrix_rows(
         default_attack_configs(),
         config,
     )
     attack_matrix_digest = build_attack_matrix_digest(attack_rows)
     fixed_fpr_protocol_digest = build_fixed_fpr_protocol_digest(config)
-    schema = build_pilot_paper_result_import_schema(
+    schema = build_paper_result_import_schema(
         prompt_split_digest=bundle.expected_prompt_split_digest,
         attack_matrix_digest=attack_matrix_digest,
         fixed_fpr_protocol_digest=fixed_fpr_protocol_digest,
@@ -890,7 +890,7 @@ def _expected_common_protocol_schema(
     schema.update(
         {
             "result_record_set_digest": (
-                build_pilot_paper_result_record_set_digest(bundle.result_records)
+                build_paper_result_record_set_digest(bundle.result_records)
             ),
             "calibration_prompt_id_digest": (
                 bundle.expected_calibration_prompt_id_digest
@@ -1012,7 +1012,7 @@ def _expected_common_protocol_schema(
 def _result_record_set_provenance_ready(bundle: ResultClosureGateInput) -> bool:
     """复算正式记录稳定有序集合摘要并核验全部下游登记."""
 
-    expected_digest = build_pilot_paper_result_record_set_digest(bundle.result_records)
+    expected_digest = build_paper_result_record_set_digest(bundle.result_records)
     result_metadata = bundle.result_record_manifest.get("metadata", {})
     common_metadata = bundle.common_protocol_manifest.get("metadata", {})
     analysis_metadata = bundle.result_analysis_manifest.get("metadata", {})
@@ -1101,7 +1101,7 @@ def _expected_result_metric_fields(
     }
     if any(value <= 0 for value in counts.values()):
         raise ValueError("正式结果指标计数必须为正整数")
-    quality_lower, quality_upper = PILOT_PAPER_METRIC_BOUNDS[
+    quality_lower, quality_upper = PAPER_METRIC_BOUNDS[
         "quality_score_mean"
     ]
     rates = {
@@ -3003,7 +3003,7 @@ def _expected_result_record_coverage(
     config = _expected_fixed_fpr_config(bundle)
     if config is None:
         return None
-    attack_rows = build_pilot_paper_attack_matrix_rows(
+    attack_rows = build_paper_attack_matrix_rows(
         default_attack_configs(),
         config,
     )
@@ -3082,7 +3082,7 @@ def _result_record_manifest_config_ready(
     )
     if normalized_coverage is None:
         return False
-    expected_config = build_pilot_paper_result_records_manifest_config(
+    expected_config = build_paper_result_records_manifest_config(
         result_records=bundle.result_records,
         method_threshold_digest_map=(
             bundle.result_record_summary.get("method_threshold_digest_map", {})
@@ -3114,9 +3114,9 @@ def _result_records_ready(bundle: ResultClosureGateInput) -> bool:
 
     scale = bundle.expected_paper_claim_scale
     summary_ready_fields = (
-        "pilot_paper_template_coverage_ready",
-        "pilot_paper_result_import_ready",
-        "pilot_paper_claim_record_ready",
+        "paper_template_coverage_ready",
+        "paper_result_import_ready",
+        "paper_claim_record_ready",
         "supports_paper_claim",
     )
     expected_schema = _expected_common_protocol_schema(bundle)
@@ -3131,7 +3131,7 @@ def _result_records_ready(bundle: ResultClosureGateInput) -> bool:
     ):
         return False
     try:
-        validation_report = validate_pilot_paper_result_import_rows(
+        validation_report = validate_paper_result_import_rows(
             bundle.result_records,
             expected_schema,
             require_existing_evidence=False,
@@ -3141,20 +3141,20 @@ def _result_records_ready(bundle: ResultClosureGateInput) -> bool:
     expected_record_count = len(expected_coverage)
     accepted_records = validation_report.get("accepted_records")
     validation_report_ready = (
-        validation_report.get("pilot_paper_result_import_ready") is True
-        and validation_report.get("pilot_paper_claim_record_ready") is True
+        validation_report.get("paper_result_import_ready") is True
+        and validation_report.get("paper_claim_record_ready") is True
         and validation_report.get("supports_paper_claim") is True
         and _int_value(validation_report.get("input_record_count"))
         == expected_record_count
-        and _int_value(validation_report.get("accepted_pilot_paper_import_count"))
+        and _int_value(validation_report.get("accepted_paper_import_count"))
         == expected_record_count
         and _int_value(
-            validation_report.get("accepted_pilot_paper_claim_record_count")
+            validation_report.get("accepted_paper_claim_record_count")
         )
         == expected_record_count
-        and _int_value(validation_report.get("rejected_pilot_paper_import_count"))
+        and _int_value(validation_report.get("rejected_paper_import_count"))
         == 0
-        and _int_value(validation_report.get("pilot_paper_import_issue_count"))
+        and _int_value(validation_report.get("paper_import_issue_count"))
         == 0
         and isinstance(accepted_records, list)
         and len(accepted_records) == expected_record_count
@@ -3168,13 +3168,13 @@ def _result_records_ready(bundle: ResultClosureGateInput) -> bool:
         and validation_report == bundle.result_record_validation_report
         and normalized_coverage == expected_coverage
         and _all_true(bundle.result_record_summary, summary_ready_fields)
-        and _int_value(bundle.result_record_summary.get("pilot_paper_result_record_count")) == len(bundle.result_records)
-        and _int_value(bundle.result_record_summary.get("pilot_paper_template_record_count")) == len(bundle.result_records)
-        and _int_value(bundle.result_record_summary.get("pilot_paper_template_covered_count")) == len(bundle.result_records)
-        and _int_value(bundle.result_record_summary.get("accepted_pilot_paper_import_count")) == len(bundle.result_records)
-        and _int_value(bundle.result_record_summary.get("accepted_pilot_paper_claim_record_count"))
+        and _int_value(bundle.result_record_summary.get("paper_result_record_count")) == len(bundle.result_records)
+        and _int_value(bundle.result_record_summary.get("paper_template_record_count")) == len(bundle.result_records)
+        and _int_value(bundle.result_record_summary.get("paper_template_covered_count")) == len(bundle.result_records)
+        and _int_value(bundle.result_record_summary.get("accepted_paper_import_count")) == len(bundle.result_records)
+        and _int_value(bundle.result_record_summary.get("accepted_paper_claim_record_count"))
         == len(bundle.result_records)
-        and _int_value(bundle.result_record_summary.get("pilot_paper_template_missing_count")) == 0
+        and _int_value(bundle.result_record_summary.get("paper_template_missing_count")) == 0
         and all(
             _all_true(row, ("strict_formal_result_ready", "supports_paper_claim"))
             and _record_digest_ready(row)
@@ -3184,19 +3184,19 @@ def _result_records_ready(bundle: ResultClosureGateInput) -> bool:
         and _result_record_manifest_config_ready(bundle)
         and _manifest_ready(
             bundle.result_record_manifest,
-            artifact_id="pilot_paper_fixed_fpr_result_records_manifest",
+            artifact_id="paper_fixed_fpr_result_records_manifest",
             required_output_suffixes=(
-                f"outputs/pilot_paper_fixed_fpr_results/{scale}/pilot_paper_result_records.jsonl",
-                f"outputs/pilot_paper_fixed_fpr_results/{scale}/pilot_paper_result_import_validation_report.json",
-                f"outputs/pilot_paper_fixed_fpr_results/{scale}/pilot_paper_result_template_coverage.csv",
-                f"outputs/pilot_paper_fixed_fpr_results/{scale}/pilot_paper_result_record_summary.json",
-                f"outputs/pilot_paper_fixed_fpr_results/{scale}/manifest.local.json",
+                f"outputs/paper_fixed_fpr_results/{scale}/paper_result_records.jsonl",
+                f"outputs/paper_fixed_fpr_results/{scale}/paper_result_import_validation_report.json",
+                f"outputs/paper_fixed_fpr_results/{scale}/paper_result_template_coverage.csv",
+                f"outputs/paper_fixed_fpr_results/{scale}/paper_result_record_summary.json",
+                f"outputs/paper_fixed_fpr_results/{scale}/manifest.local.json",
             ),
         )
         and _metadata_matches(
             bundle.result_record_manifest,
             bundle.result_record_summary,
-            ("paper_claim_scale", "pilot_paper_result_import_ready", "supports_paper_claim"),
+            ("paper_claim_scale", "paper_result_import_ready", "supports_paper_claim"),
         )
     )
 
@@ -3208,24 +3208,22 @@ def _common_protocol_ready(bundle: ResultClosureGateInput) -> bool:
     ready_fields = (
         "paper_run_allows_paper_claim",
         "strict_formal_evidence_required",
-        "pilot_paper_common_protocol_ready",
+        "paper_common_protocol_ready",
         "paper_run_workflow_validation_ready",
-        "pilot_paper_prompt_split_ready",
         "paper_prompt_split_ready",
-        "pilot_paper_result_import_ready",
-        "pilot_paper_claim_record_ready",
+        "paper_result_import_ready",
+        "paper_claim_record_ready",
         "paper_run_result_import_coverage_ready",
         "paper_run_template_registry_unique",
-        "pilot_paper_evidence_coverage_ready",
+        "paper_evidence_coverage_ready",
         "point_estimate_effect_direction_ready",
         "paired_superiority_ready",
         "paired_superiority_exact_set_ready",
         "overall_paired_superiority_ready",
-        "pilot_paper_effectiveness_gate_ready",
+        "paper_effectiveness_gate_ready",
         "slm_wm_fixed_fpr_boundary_ready",
         "paper_run_claim_ready",
         "paper_run_supports_superiority_claim",
-        "paper_claim_ready",
     )
     zero_fields = (
         "paper_run_result_missing_template_count",
@@ -3249,25 +3247,25 @@ def _common_protocol_ready(bundle: ResultClosureGateInput) -> bool:
         and str(bundle.common_protocol_summary.get("test_prompt_id_digest", ""))
         == bundle.expected_test_prompt_id_digest
         and _int_value(bundle.common_protocol_summary.get("paper_prompt_count")) == bundle.expected_prompt_count
-        and _int_value(bundle.common_protocol_summary.get("pilot_paper_import_template_count"))
+        and _int_value(bundle.common_protocol_summary.get("paper_import_template_count"))
         == len(bundle.result_records)
-        and _int_value(bundle.common_protocol_summary.get("accepted_pilot_paper_import_count"))
+        and _int_value(bundle.common_protocol_summary.get("accepted_paper_import_count"))
         == len(bundle.result_records)
-        and _int_value(bundle.common_protocol_summary.get("accepted_pilot_paper_claim_record_count"))
+        and _int_value(bundle.common_protocol_summary.get("accepted_paper_claim_record_count"))
         == len(bundle.result_records)
         and _manifest_ready(
             bundle.common_protocol_manifest,
-            artifact_id="pilot_paper_fixed_fpr_common_protocol_manifest",
+            artifact_id="paper_fixed_fpr_common_protocol_manifest",
             required_output_suffixes=(
-                f"outputs/pilot_paper_fixed_fpr_common_protocol/{scale}/pilot_paper_result_import_schema.json",
-                f"outputs/pilot_paper_fixed_fpr_common_protocol/{scale}/pilot_paper_common_protocol_summary.json",
-                f"outputs/pilot_paper_fixed_fpr_common_protocol/{scale}/manifest.local.json",
+                f"outputs/paper_fixed_fpr_common_protocol/{scale}/paper_result_import_schema.json",
+                f"outputs/paper_fixed_fpr_common_protocol/{scale}/paper_common_protocol_summary.json",
+                f"outputs/paper_fixed_fpr_common_protocol/{scale}/manifest.local.json",
             ),
         )
         and _metadata_matches(
             bundle.common_protocol_manifest,
             bundle.common_protocol_summary,
-            ("paper_claim_scale", "paper_run_claim_ready", "paper_claim_ready"),
+            ("paper_claim_scale", "paper_run_claim_ready"),
         )
     )
 
@@ -3373,14 +3371,14 @@ def _result_analysis_ready(bundle: ResultClosureGateInput) -> bool:
         )
         and _manifest_ready(
             bundle.result_analysis_manifest,
-            artifact_id="pilot_paper_result_analysis_manifest",
+            artifact_id="paper_result_analysis_manifest",
             required_output_suffixes=(
-                f"outputs/pilot_paper_result_analysis/{scale}/confidence_interval_table.csv",
-                f"outputs/pilot_paper_result_analysis/{scale}/per_attack_superiority_table.csv",
-                f"outputs/pilot_paper_result_analysis/{scale}/failure_case_records.jsonl",
-                f"outputs/pilot_paper_result_analysis/{scale}/failure_case_figure.svg",
-                f"outputs/pilot_paper_result_analysis/{scale}/result_analysis_summary.json",
-                f"outputs/pilot_paper_result_analysis/{scale}/manifest.local.json",
+                f"outputs/paper_result_analysis/{scale}/confidence_interval_table.csv",
+                f"outputs/paper_result_analysis/{scale}/per_attack_superiority_table.csv",
+                f"outputs/paper_result_analysis/{scale}/failure_case_records.jsonl",
+                f"outputs/paper_result_analysis/{scale}/failure_case_figure.svg",
+                f"outputs/paper_result_analysis/{scale}/result_analysis_summary.json",
+                f"outputs/paper_result_analysis/{scale}/manifest.local.json",
             ),
         )
         and _metadata_matches(

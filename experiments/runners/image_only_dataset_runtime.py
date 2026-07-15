@@ -64,7 +64,7 @@ from experiments.runtime.scientific_unit_provenance import (
     aggregate_scientific_unit_provenance,
 )
 from experiments.runtime.diffusion.regeneration_attacks import default_diffusion_attack_specs
-from experiments.runtime.diffusion.semantic_features import (
+from main.methods.semantic import (
     JOINT_FEATURE_WIDTH,
     SEMANTIC_FEATURE_SCHEMA,
     SEMANTIC_FEATURE_WIDTH,
