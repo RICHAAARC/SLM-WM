@@ -42,12 +42,12 @@ def freeze_module_parameters(module: Any) -> None:
 
 
 def _assert_tensor_condition(condition: Any, message: str) -> None:
-    """用可被 ``torch.func`` 追踪的算子核验 Tensor 数据值条件。
+    """用可被 ``torch.func`` 追踪的算子核验 Tensor 数据值条件.
 
     ``torch.func.linearize`` 不允许通过 Python ``bool`` 读取追踪 Tensor 的
-    数据值。此处保留原有 fail-closed 数值门禁, 同时让完整716维特征算子可
-    直接复用于精确 JVP/VJP。该结构可复用于其他需要在自动微分变换内部执行
-    数据值断言的核心 Tensor 算子。
+    数据值. 此处保留原有 fail-closed 数值门禁, 同时让完整716维特征算子可
+    直接复用于精确 JVP/VJP. 该结构可复用于其他需要在自动微分变换内部执行
+    数据值断言的核心 Tensor 算子.
     """
 
     import torch
