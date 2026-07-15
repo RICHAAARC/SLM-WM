@@ -763,7 +763,7 @@ def flatten_environment_versions(environment_report: dict[str, Any]) -> dict[str
         "diffusers_version": package_versions["diffusers"],
         "transformers_version": package_versions["transformers"],
         "accelerate_version": package_versions["accelerate"],
-        "huggingface_hub_version": package_versions["huggingface_hub"],
+        "huggingface_hub_version": package_versions["huggingface-hub"],
         "tokenizers_version": package_versions["tokenizers"],
         "safetensors_version": package_versions["safetensors"],
         "sentencepiece_version": package_versions["sentencepiece"],

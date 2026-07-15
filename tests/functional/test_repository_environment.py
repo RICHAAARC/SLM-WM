@@ -20,6 +20,7 @@ from experiments.runtime.repository_environment import (
     FormalExecutionLockError,
     build_formal_execution_lock,
     build_runtime_environment_report,
+    flatten_environment_versions,
     normalize_formal_git_commit,
     publish_formal_execution_lock,
     require_published_formal_execution_lock,
@@ -28,6 +29,7 @@ from experiments.runtime.repository_environment import (
     validate_formal_execution_lock_record,
     verify_formal_execution_lock_code_version,
 )
+from experiments.runtime.dependency_profiles import parse_exact_requirement_spec
 from main.core.digest import build_stable_digest
 from paper_workflow.colab_utils.paper_run_environment import (
     configure_paper_run_environment,
@@ -58,6 +60,44 @@ class _TorchRuntime:
     """提供运行环境报告所需的最小 torch 外形."""
 
     cuda = _CudaRuntime()
+
+
+def test_environment_version_flattening_uses_canonical_distribution_name() -> None:
+    """运行版本摘要必须读取依赖检查实际产生的规范化包名."""
+
+    normalized_name = parse_exact_requirement_spec(
+        "huggingface_hub==1.20.1"
+    ).normalized_name
+    assert normalized_name == "huggingface-hub"
+    package_versions = {
+        "accelerate": "1.14.0",
+        "diffusers": "0.38.0",
+        normalized_name: "1.20.1",
+        "numpy": "2.0.2",
+        "pillow": "11.3.0",
+        "protobuf": "7.35.1",
+        "safetensors": "0.8.0",
+        "sentencepiece": "0.2.1",
+        "tokenizers": "0.22.2",
+        "torch": "2.11.0+cu128",
+        "transformers": "5.12.1",
+    }
+
+    flattened = flatten_environment_versions(
+        {"package_versions": package_versions}
+    )
+
+    assert flattened["huggingface_hub_version"] == "1.20.1"
+    legacy_package_versions = {
+        name: version
+        for name, version in package_versions.items()
+        if name != normalized_name
+    }
+    legacy_package_versions["huggingface_hub"] = package_versions[normalized_name]
+    with pytest.raises(KeyError, match="huggingface-hub"):
+        flatten_environment_versions(
+            {"package_versions": legacy_package_versions}
+        )
 
 
 def _git(repository: Path, *arguments: str) -> str:
