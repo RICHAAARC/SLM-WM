@@ -4,6 +4,7 @@
 
 ## 正式入口
 
+- `gpu_method_qualification_run.ipynb`: 正式批量实验前的单 Prompt GPU 方法资格化与 Google Drive 诊断落盘入口。
 - `semantic_watermark_image_only_run.ipynb`: 主方法、仅图像检测、共同攻击、正式 Inception FID / KID 与正式消融入口。
 - `external_baseline_*_run.ipynb`: Tree-Ring、Gaussian Shading、Shallow Diffuse 三个 common-backbone baseline 的单方法独占 SD3.5 入口。
 - `official_reference_t2smark_run.ipynb`: T2SMark 独立正式复现入口。
@@ -22,6 +23,8 @@
 | `full_paper` | 7000 | 3400 | 0.001 |
 
 每个 Notebook 在拉取仓库前必须由 `SLM_WM_REPOSITORY_COMMIT` 提供精确40位小写 Git SHA。正式结果入口只以 `python -I scripts/run_formal_workflow_host.py` 调用宿主 launcher, 不在 Colab 系统解释器中导入 repository helper 或直接安装依赖。launcher 先复验 clean detached checkout, 再从固定 SHA-256 的 `uv` wheel 创建 registry 指定的精确 CPython 3.12.13, 按已提交完整哈希锁准备 CPU 父 `workflow_orchestrator`, 最后由该解释器调用 `scripts/formal_workflow_entry.py`。该内层入口再选择 GPU workflow 或单 repeat 证据封装入口, 不引用 `paper_workflow/`。GPU workflow 只准备当前职责对应的一个 CUDA 科学子 profile。正式运行与打包边界仍实时复验 Git 锁、依赖身份和科学执行证据。
+
+`gpu_method_qualification_run.ipynb` 使用同一宿主入口的 `qualification` 子命令, 复用真实单 Prompt 主方法路径, 不在 Notebook 中实现资格化事实或资源门禁。每次会话的本地目录位于 `outputs/gpu_method_qualification/<论文层级>/<提交>/<Prompt ID>/<UTC 会话>/`, 宿主结束后先把该目录复制到 `/content/drive/MyDrive/SLM/gpu_method_qualification/` 的同身份位置并逐文件复验 SHA-256, 再传播宿主退出码。失败诊断也会落盘, 但所有单 Prompt 资格化结果固定不支持论文结论。
 
 主方法 Notebook 只选择公开 GPU route, 精确父解释器随后调用 `scripts.semantic_watermark_scientific_workflow`. 该内层 workflow 对 `sd35_method_runtime_gpu` 调用一次 `execute_isolated_scientific_command`, 子解释器入口固定为 `experiments.runtime.semantic_watermark_scientific_session`, 并顺序执行主方法、正式 FID / KID 和按需消融. 完成产物以独立 `scientific_execution_binding.json` 绑定 profile、完整哈希锁、正式执行锁、科学执行报告、依赖环境报告、逐命令报告以及科学 runner 输出的摘要和 manifest 摘要; workflow 随后复用该子解释器重新打包并仅镜像新归档. 该绑定补充执行来源, 不修改科学 runner 已完成的摘要或 manifest, 也不单独支持论文 claim.
 

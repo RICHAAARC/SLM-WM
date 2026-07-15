@@ -15,8 +15,29 @@ python -I scripts/run_formal_workflow_host.py --repository-commit <40位提交> 
 
 活动随机化 Notebook 只声明论文层级、登记的 repeat ID 和公开路由; 3个跨 repeat 不变 official-reference Notebook 不声明 repeat。Notebook 不导入 repository workflow helper, 也不保存包名、版本约束、安装命令、解释器创建或依赖诊断实现。宿主入口使用固定 `uv` wheel 创建 registry 指定的精确父解释器, 再执行 `scripts/formal_workflow_entry.py`; 该内层入口使用 `scripts/formal_workflow_environment.py` 配置并选择唯一科学 profile。单 repeat 证据封装使用同一宿主入口的 `repeat_evidence` 子命令。
 
+## 单 Prompt GPU 方法资格化入口
+
+`gpu_method_qualification_run.ipynb` 是正式批量实验前的薄入口。该 Notebook 默认选择 `probe_paper` 的一个受治理 Prompt, 挂载 Google Drive, 检出精确 clean detached commit, 读取 `HF_TOKEN`, 核验当前 Colab 提供真实 GPU, 然后只调用:
+
+```bash
+python -I scripts/run_formal_workflow_host.py --repository-commit <40位提交> qualification \
+  --paper-run-name probe_paper --prompt-id <受治理 Prompt ID> \
+  --qualification-output-root outputs/gpu_method_qualification/<会话>/scientific_evidence \
+  --result-path outputs/gpu_method_qualification/<会话>/workflow_result.json
+```
+
+科学方法、依赖准备和资格化门禁全部位于 repository 服务器路径。Notebook 只在宿主结束后复制本次会话目录, 并要求本地与 Drive 的相对路径集合及逐文件 SHA-256 完全一致。最终目录为:
+
+```text
+/content/drive/MyDrive/SLM/gpu_method_qualification/
+  <论文层级>/<精确提交>/<Prompt ID>/<UTC 会话>/
+```
+
+宿主返回非零状态时, Notebook 仍先保存 stdout、stderr 和已经生成的受治理诊断, 完成 Drive 复验后再失败。该入口不形成 Prompt 总体统计、论文结果包或任何 supported claim。
+
 | Notebook 职责 | 父解释器 `profile_id` | 科学子解释器 `profile_id` |
 |---|---|---|
+| 单 Prompt GPU 方法资格化 | `workflow_orchestrator` | `sd35_method_runtime_gpu` |
 | 主方法图像盲检运行 | `workflow_orchestrator` | `sd35_method_runtime_gpu` |
 | Tree-Ring、Gaussian Shading、Shallow Diffuse 的 SD3.5 method-faithful 运行 | `workflow_orchestrator` | `sd35_method_runtime_gpu` |
 | T2SMark SD3.5 正式复现 | `workflow_orchestrator` | `t2smark_sd35_gpu` |
@@ -86,9 +107,10 @@ python scripts/write_reviewed_scientific_dependency_hash_locks.py \
 
 正式运行顺序:
 
-1. `semantic_watermark_image_only_run.ipynb`。
-2. 三个 `external_baseline_*_run.ipynb`、`official_reference_t2smark_run.ipynb` 和补充方法忠实度所需的其他 `official_reference_*_run.ipynb`。
-3. `randomization_repeat_evidence_run.ipynb`。
+1. `gpu_method_qualification_run.ipynb`。
+2. `semantic_watermark_image_only_run.ipynb`。
+3. 三个 `external_baseline_*_run.ipynb`、`official_reference_t2smark_run.ipynb` 和补充方法忠实度所需的其他 `official_reference_*_run.ipynb`。
+4. `randomization_repeat_evidence_run.ipynb`。
 
 权威9个 repeat 全部完成后, CPU 汇总环境必须使用层内
 `paper_experiments.runners.randomization_aggregate_provenance` 入口显式绑定9个

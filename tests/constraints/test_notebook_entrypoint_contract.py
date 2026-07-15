@@ -13,6 +13,7 @@ NOTEBOOK_DIR = Path("paper_workflow/notebooks")
 REQUIRED_NOTEBOOKS = {
     "colab_drive_cold_start_smoke.ipynb",
     "dependency_lock_review_run.ipynb",
+    "gpu_method_qualification_run.ipynb",
     "semantic_watermark_image_only_run.ipynb",
     "randomization_repeat_evidence_run.ipynb",
     "external_baseline_tree_ring_run.ipynb",
@@ -188,6 +189,21 @@ def test_probe_routes_cover_nine_gpu_workflows_and_repeat_evidence() -> None:
         "randomization_repeat_evidence_run.ipynb"
     ]
     assert '"gpu"' in sources["semantic_watermark_image_only_run.ipynb"]
+
+
+@pytest.mark.quick
+def test_gpu_method_qualification_notebook_uses_host_and_persists_diagnostics() -> None:
+    """单 Prompt 资格化入口必须调用宿主并复验 Drive 诊断副本."""
+
+    source = _code_source(NOTEBOOK_DIR / "gpu_method_qualification_run.ipynb")
+    assert '"qualification"' in source
+    assert '"--prompt-id"' in source
+    assert '"--qualification-output-root"' in source
+    assert 'Path("/content/drive/MyDrive/SLM")' in source
+    assert '/ "gpu_method_qualification"' in source
+    assert "shutil.copytree(local_session_root, drive_staging_dir)" in source
+    assert "drive_file_digests != local_file_digests" in source
+    assert "host_process.returncode != 0" in source
 
 
 @pytest.mark.quick
