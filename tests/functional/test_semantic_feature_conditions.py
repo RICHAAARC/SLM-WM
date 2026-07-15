@@ -814,6 +814,125 @@ def test_complete_feature_vector_supports_exact_jvp_and_vjp() -> None:
 
 
 @pytest.mark.quick
+def test_real_feature_runtime_supports_reusable_exact_jvp_and_vjp() -> None:
+    """真实运行时形态的 VAE、视觉编码和数值门禁必须支持精确线性化."""
+
+    class _TraceableVae(torch.nn.Module):
+        """用可微解码保持正式 VAE 接口, 不替代被测特征运行时逻辑."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.anchor = torch.nn.Parameter(torch.zeros(()))
+            self.config = SimpleNamespace(
+                scaling_factor=1.0,
+                shift_factor=0.0,
+            )
+
+        def decode(
+            self,
+            latent: torch.Tensor,
+            return_dict: bool,
+        ) -> tuple[torch.Tensor]:
+            """将前三个 latent 通道作为可微 RGB 解码结果."""
+
+            assert return_dict is False
+            return (latent[:, :3],)
+
+    class _TraceableVisionModel(torch.nn.Module):
+        """输出真实梯度连接的512维投影嵌入."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.anchor = torch.nn.Parameter(torch.zeros(()))
+
+        def forward(
+            self,
+            pixel_values: torch.Tensor,
+            output_hidden_states: bool,
+        ) -> SimpleNamespace:
+            """从预处理图像直接选择512个坐标形成可微投影输出."""
+
+            assert output_hidden_states is True
+            flattened = pixel_values.reshape(pixel_values.shape[0], -1)
+            return SimpleNamespace(
+                image_embeds=flattened[:, :SEMANTIC_FEATURE_WIDTH]
+            )
+
+    runtime = DifferentiableSemanticFeatureRuntime(
+        vae=_TraceableVae(),
+        vision_model=_TraceableVisionModel(),
+    )
+    latent = torch.linspace(
+        -0.5,
+        0.5,
+        steps=4 * 8 * 8,
+        dtype=torch.float32,
+    ).reshape(1, 4, 8, 8)
+
+    linearization = build_exact_jacobian_linearization(
+        runtime.full_joint_feature_vector,
+        latent,
+    )
+    direction = torch.linspace(-1.0, 1.0, steps=latent.numel()).reshape_as(
+        latent
+    )
+    cotangent = torch.linspace(
+        -0.5,
+        0.5,
+        steps=JOINT_FEATURE_WIDTH,
+    )
+    tangent = linearization.apply(direction)
+    transpose_tangent = linearization.transpose_apply(cotangent)
+
+    assert linearization.linearization_mode == "torch_func_exact_jvp_vjp"
+    assert linearization.output_width == JOINT_FEATURE_WIDTH
+    assert tangent.shape == (JOINT_FEATURE_WIDTH,)
+    assert transpose_tangent.shape == latent.shape
+    assert torch.allclose(
+        torch.dot(tangent, cotangent),
+        torch.sum(direction * transpose_tangent),
+        rtol=1e-4,
+        atol=1e-5,
+    )
+
+
+@pytest.mark.quick
+def test_traceable_tensor_assertion_still_rejects_nonfinite_latent() -> None:
+    """可追踪数值断言不得放宽 VAE 解码输入的有限性门禁."""
+
+    class _Vae(torch.nn.Module):
+        """提供最小冻结 VAE 接口以核验输入门禁."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.anchor = torch.nn.Parameter(torch.zeros(()))
+            self.config = SimpleNamespace(
+                scaling_factor=1.0,
+                shift_factor=0.0,
+            )
+
+        def decode(
+            self,
+            latent: torch.Tensor,
+            return_dict: bool,
+        ) -> tuple[torch.Tensor]:
+            """返回输入以保持测试只观察有限性断言."""
+
+            assert return_dict is False
+            return (latent[:, :3],)
+
+    runtime = DifferentiableSemanticFeatureRuntime(
+        vae=_Vae(),
+        vision_model=torch.nn.Identity(),
+    )
+
+    with pytest.raises(RuntimeError, match="必须全部有限"):
+        runtime.decode_latent(
+            torch.full((1, 4, 8, 8), float("nan"))
+        )
+
+
+@pytest.mark.quick
 def test_actual_combined_latent_uses_full_feature_preservation_gate() -> None:
     """有限更新门禁必须检查完整特征, 而不只信局部 Jacobian 残差。"""
 

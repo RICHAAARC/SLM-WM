@@ -41,6 +41,20 @@ def freeze_module_parameters(module: Any) -> None:
         parameter.requires_grad_(False)
 
 
+def _assert_tensor_condition(condition: Any, message: str) -> None:
+    """用可被 ``torch.func`` 追踪的算子核验 Tensor 数据值条件。
+
+    ``torch.func.linearize`` 不允许通过 Python ``bool`` 读取追踪 Tensor 的
+    数据值。此处保留原有 fail-closed 数值门禁, 同时让完整716维特征算子可
+    直接复用于精确 JVP/VJP。该结构可复用于其他需要在自动微分变换内部执行
+    数据值断言的核心 Tensor 算子。
+    """
+
+    import torch
+
+    torch._assert_async(condition, message)
+
+
 @dataclass
 class DifferentiableSemanticFeatureRuntime:
     """封装 VAE 解码、CLIP 语义特征和手工结构统计约束."""
@@ -59,18 +73,24 @@ class DifferentiableSemanticFeatureRuntime:
 
         import torch
 
-        if not bool(torch.isfinite(latent).all()):
-            raise RuntimeError("VAE 解码输入 latent 必须全部有限")
+        _assert_tensor_condition(
+            torch.isfinite(latent).all(),
+            "VAE 解码输入 latent 必须全部有限",
+        )
         scaling_factor = float(self.vae.config.scaling_factor)
         shift_factor = float(self.vae.config.shift_factor)
         vae_dtype = next(self.vae.parameters()).dtype
         scaled_latent = (latent / scaling_factor + shift_factor).to(dtype=vae_dtype)
-        if not bool(torch.isfinite(scaled_latent).all()):
-            raise RuntimeError("VAE 解码缩放后的 latent 必须全部有限")
+        _assert_tensor_condition(
+            torch.isfinite(scaled_latent).all(),
+            "VAE 解码缩放后的 latent 必须全部有限",
+        )
         decoded = self.vae.decode(scaled_latent, return_dict=False)[0]
         image = (decoded.float() / 2.0 + 0.5).clamp(0.0, 1.0)
-        if not bool(torch.isfinite(image).all()):
-            raise RuntimeError("VAE 解码图像必须全部有限")
+        _assert_tensor_condition(
+            torch.isfinite(image).all(),
+            "VAE 解码图像必须全部有限",
+        )
         return image
 
     def clip_pixels(self, image: Any) -> Any:
@@ -139,14 +159,23 @@ class DifferentiableSemanticFeatureRuntime:
         values = image_embeds.float()
         if values.ndim != 2 or int(values.shape[-1]) != SEMANTIC_FEATURE_WIDTH:
             raise RuntimeError("投影后 CLIP image_embeds 必须具有冻结的二维宽度")
-        if not bool(torch.isfinite(values).all()):
-            raise RuntimeError("投影后 CLIP image_embeds 必须全部有限")
+        _assert_tensor_condition(
+            torch.isfinite(values).all(),
+            "投影后 CLIP image_embeds 必须全部有限",
+        )
         norms = torch.linalg.vector_norm(values, dim=-1, keepdim=True)
-        if not bool(torch.isfinite(norms).all()) or bool((norms == 0.0).any()):
-            raise RuntimeError("投影后 CLIP image_embeds 必须具有有限非零能量")
+        _assert_tensor_condition(
+            torch.logical_and(
+                torch.isfinite(norms).all(),
+                torch.ne(norms, 0.0).all(),
+            ),
+            "投影后 CLIP image_embeds 必须具有有限非零能量",
+        )
         normalized = values / norms
-        if not bool(torch.isfinite(normalized).all()):
-            raise RuntimeError("投影后 CLIP image_embeds 归一化结果必须全部有限")
+        _assert_tensor_condition(
+            torch.isfinite(normalized).all(),
+            "投影后 CLIP image_embeds 归一化结果必须全部有限",
+        )
         return normalized
 
     def handcrafted_structure_features(self, latent: Any) -> Any:
@@ -168,8 +197,10 @@ class DifferentiableSemanticFeatureRuntime:
             or int(image.shape[1]) != 3
         ):
             raise ValueError("204维结构坐标要求单样本 RGB 图像 tensor")
-        if not bool(torch.isfinite(image).all()):
-            raise RuntimeError("204维结构坐标输入图像必须全部有限")
+        _assert_tensor_condition(
+            torch.isfinite(image).all(),
+            "204维结构坐标输入图像必须全部有限",
+        )
         horizontal = image[:, :, :, 1:] - image[:, :, :, :-1]
         vertical = image[:, :, 1:, :] - image[:, :, :-1, :]
         pooled = functional.adaptive_avg_pool2d(
@@ -187,11 +218,12 @@ class DifferentiableSemanticFeatureRuntime:
                 pooled.reshape(-1),
             )
         )
-        if (
-            features.numel() != HANDCRAFTED_STRUCTURE_FEATURE_WIDTH
-            or not bool(torch.isfinite(features).all())
-        ):
+        if features.numel() != HANDCRAFTED_STRUCTURE_FEATURE_WIDTH:
             raise RuntimeError("204维结构坐标宽度或有限性不满足冻结协议")
+        _assert_tensor_condition(
+            torch.isfinite(features).all(),
+            "204维结构坐标宽度或有限性不满足冻结协议",
+        )
         return features
 
     def joint_features(self, latent: Any) -> tuple[Any, Any]:
@@ -228,8 +260,10 @@ class DifferentiableSemanticFeatureRuntime:
             raise RuntimeError(
                 "完整 Jacobian 特征宽度与冻结 CLIP/手工结构 schema 不一致"
             )
-        if not bool(torch.isfinite(vector).all()):
-            raise RuntimeError("完整 Jacobian 特征向量必须全部有限")
+        _assert_tensor_condition(
+            torch.isfinite(vector).all(),
+            "完整 Jacobian 特征向量必须全部有限",
+        )
         return vector
 
     def feature_schema_record(self) -> dict[str, Any]:

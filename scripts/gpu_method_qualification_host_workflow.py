@@ -83,6 +83,24 @@ def _invocation_record(stdout: str) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _scientific_child_failure_diagnostic(execution: Mapping[str, Any]) -> str:
+    """提取科学子进程最后一条异常, 避免宿主错误掩盖真实失败原因."""
+
+    stderr_lines = [
+        line.strip()
+        for line in str(execution.get("stderr", "")).splitlines()
+        if line.strip()
+    ]
+    for line in reversed(stderr_lines):
+        exception_name, separator, _detail = line.partition(":")
+        normalized_name = exception_name.rsplit(".", 1)[-1]
+        if separator and normalized_name.endswith(("Error", "Exception")):
+            return line[-2000:]
+    if stderr_lines:
+        return stderr_lines[-1][-2000:]
+    return f"return_code={execution.get('return_code')}"
+
+
 def _validate_qualification_evidence(
     *,
     root: Path,
@@ -145,7 +163,11 @@ def _validate_qualification_evidence(
         raise ValueError("隔离科学执行报告身份或执行前后复验证据无效")
     invocation = _invocation_record(str(execution.get("stdout", "")))
     if invocation is None:
-        raise ValueError("GPU 方法资格化子进程未输出结构化报告索引")
+        diagnostic = _scientific_child_failure_diagnostic(execution)
+        raise ValueError(
+            "GPU 方法资格化子进程未输出结构化报告索引; "
+            f"科学子进程失败原因: {diagnostic}"
+        )
     expected_invocation_fields = {
         "report_schema",
         "schema_version",

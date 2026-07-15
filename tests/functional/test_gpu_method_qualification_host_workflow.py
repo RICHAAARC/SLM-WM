@@ -411,6 +411,56 @@ def test_host_workflow_rejects_report_digest_mismatch(
 
 
 @pytest.mark.quick
+def test_host_reports_scientific_child_exception_before_invocation_exists() -> None:
+    """科学子进程提前失败时, 宿主必须透传真实异常而非只报告索引缺失."""
+
+    isolated_report = {
+        "report_schema": "isolated_scientific_execution_report",
+        "schema_version": 1,
+        "profile_id": workflow.SCIENTIFIC_PROFILE_ID,
+        "profile_digest": "b" * 64,
+        "direct_requirements_digest": "c" * 64,
+        "complete_hash_lock_digest": "d" * 64,
+        "complete_hash_lock_dependency_count": 10,
+        "dependency_environment_report_valid": True,
+        "dependency_environment_report_digest": "e" * 64,
+        "python_executable_sha256": "f" * 64,
+        "formal_execution_commit": "a" * 40,
+        "formal_execution_lock_ready": True,
+        "formal_execution_lock_revalidated_before_child": True,
+        "formal_execution_lock_revalidated_after_child": True,
+        "python_executable_revalidated_before_child": True,
+        "python_executable_revalidated_after_child": True,
+        "dependency_environment_report_revalidated_before_child": True,
+        "dependency_environment_report_revalidated_after_child": True,
+        "execution": {
+            "return_code": 1,
+            "stdout": "模型加载日志\n",
+            "stderr": (
+                "Traceback (most recent call last):\n"
+                "  File \"runtime.py\", line 62, in decode_latent\n"
+                "RuntimeError: aten._local_scalar_dense.default\n"
+            ),
+        },
+        "decision": "fail",
+        "supports_paper_claim": False,
+    }
+
+    with pytest.raises(
+        ValueError,
+        match=r"科学子进程失败原因: RuntimeError: .*_local_scalar_dense",
+    ):
+        workflow._validate_qualification_evidence(
+            root=Path.cwd(),
+            repository_commit="a" * 40,
+            paper_run_name="probe_paper",
+            prompt_id="probe_prompt_0001",
+            qualification_output_root=Path.cwd() / "outputs",
+            isolated_report=isolated_report,
+        )
+
+
+@pytest.mark.quick
 def test_formal_entry_main_returns_nonzero_for_operator_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
