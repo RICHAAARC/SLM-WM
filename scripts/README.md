@@ -29,6 +29,7 @@
 - `run_runtime_rerun_ablations.py`: `experiments.ablations.mechanism_ablation_workload` 的薄 CLI。内层工作负载对同一完整 Prompt 集执行真实机制消融, 每个变体使用自己的 calibration split 冻结阈值。
 - `semantic_watermark_scientific_workflow.py`: 主方法的可脱离 Notebook 父编排实现。它创建一次隔离科学执行, 写入产物级执行绑定, 复用同一受验证子解释器完成绑定打包, 并按调用者显式提供的目标目录镜像本次归档。
 - `run_semantic_watermark_scientific_session.py`: 仅转发到 `experiments.runtime.semantic_watermark_scientific_session` 的薄命令入口。科学 session 实现在同一 `sd35_method_runtime_gpu` 子解释器中顺序运行主方法、质量评估和按需消融, 或在互斥的绑定打包模式中验证产物后重新归档。
+- `run_gpu_method_qualification.py`: 在 `sd35_method_runtime_gpu` 精确子解释器中执行单 Prompt 真实主方法。加载 SD3.5 前先用当前设备上的小张量真实执行 `torch._assert_async`、`torch.func.linearize` 与 `torch.func.vjp`, 以提前拒绝目标 PyTorch 或 CUDA 后端不兼容；该轻量记录绑定到最终资格化报告, 但不替代716维 VAE/CLIP 真实计算图证据, 且 `supports_paper_claim=false`。
 - `write_gpu_method_qualification_report.py`: 从单 Prompt 真实运行结果、更新 JSONL 和检测 JSONL 写出方法算子资格化报告, 并可选消费资源观测与登记预算。`gpu_operator_preflight_ready` 与 `gpu_resource_budget_ready` 独立判定, 资源超限不改变方法算子真实性结论。
 - `build_external_baseline_command_plan.py`、`run_external_baseline_command_plan.py` 与 `validate_external_baseline_evidence.py`: 完整论文实验层相应模块的薄 CLI。可复用实现位于 `paper_experiments/baselines/command_plan_builder.py`、`command_plan_execution.py` 与 `evidence_validation_cli.py`。
 

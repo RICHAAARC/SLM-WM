@@ -3636,7 +3636,14 @@ Notebook 与 repository module 的跨边界数据
 | known_answer_report_digest | provenance | none | false | true | true | 当前平台重建公开 PRG uniform/Gaussian 固定向量报告的稳定摘要。 |
 | gpu_operator_preflight_report_digest | provenance | none | false | true | true | 不含资源预算判定的方法算子资格化报告摘要。 |
 | gpu_resource_budget_report_digest | provenance | none | false | true | true | 独立资源预算报告摘要。 |
-| qualification_binding_digest | provenance | none | false | true | true | 精确 Git commit、依赖 profile 与完整锁、SD3.5/VAE/CLIP revision、Prompt 输入及真实运行文件摘要的联合稳定摘要。 |
+| torch_func_compatibility | provenance | none | false | true | true | 单 Prompt 资格化在加载 SD3.5 前执行的目标 PyTorch 小张量算子兼容记录。该记录只证明依赖后端支持项目采用的变换组合, 不替代716维真实模型图资格化。 |
+| assert_operator | provenance | none | false | true | true | 资格化兼容记录实际执行的有限值断言算子, 当前固定为 `torch._assert_async`。 |
+| forward_transform_operator | provenance | none | false | true | true | 资格化兼容记录实际执行的前向变换算子, 当前固定为 `torch.func.linearize`。 |
+| reverse_transform_operator | provenance | none | false | true | true | 资格化兼容记录实际执行的反向变换算子, 当前固定为 `torch.func.vjp`。 |
+| adjoint_absolute_error | metric | none | false | true | true | 小张量 JVP 与 VJP 伴随恒等式两侧的绝对误差, 仅用于依赖算子兼容门禁。 |
+| operator_compatibility_ready | governance | none | false | true | true | 目标 PyTorch 是否完成有限值、JVP、VJP 和伴随一致性轻量检查。该字段不支持论文主张。 |
+| compatibility_report_digest | provenance | none | false | true | true | 移除自身摘要字段后对 PyTorch 算子兼容记录计算的稳定摘要。 |
+| qualification_binding_digest | provenance | none | false | true | true | 精确 Git commit、依赖 profile 与完整锁、SD3.5/VAE/CLIP revision、Prompt 输入、PyTorch 算子兼容记录及真实运行文件摘要的联合稳定摘要。 |
 | runtime_artifact_sha256 | provenance | none | false | true | true | 单 Prompt runtime、更新、检测、图像和 manifest 文件的逐文件 SHA-256 映射。 |
 | registered_over_wrong_key_content_score_gain | metric | none | false | true | true | 同一 watermarked 图像上注册密钥内容分数减 wrong-key 内容分数的单 Prompt 归因增益, 资格化要求严格大于0。 |
 

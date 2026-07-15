@@ -150,6 +150,8 @@ python -I scripts/run_formal_workflow_host.py \
 
 父编排入口调用 `execute_isolated_scientific_command(...)` 物化并复验 `sd35_method_runtime_gpu`, 随后由该隔离解释器执行 `scripts/run_gpu_method_qualification.py`.宿主再次复验隔离执行报告、解释器摘要、依赖报告摘要、资格化报告文件摘要、资格化稳定摘要、Git commit、Prompt 身份和进程状态码。`gpu_operator_preflight_ready=false` 必须逐层返回非零状态; `gpu_resource_budget_ready=false` 不得改变方法真实性状态码.
 
+科学子解释器在加载 SD3.5 前先用当前 CUDA 设备上的小张量真实执行 `torch._assert_async`、`torch.func.linearize` 和 `torch.func.vjp`, 并验证 JVP/VJP 伴随一致性。该检查用于提前发现精确 PyTorch wheel、CUDA 后端与项目算子组合不兼容, 避免已经确定的依赖错误在大型模型加载后才暴露。兼容记录必须绑定正式环境中的 `torch_version`、`torch_cuda_version` 和 `execution_device_name`, 并进入 `qualification_binding_digest`; 其 `supports_paper_claim` 始终为 false。该检查不运行 VAE 或 CLIP, 因而不能替代716维真实计算图、PSD-CG、latent 写回和 Q/K 归因资格化。
+
 Notebook 或业务路径不得包含 `%pip`、`--upgrade`、可漂移版本、自由 requirements 列表或自行拼装的依赖安装实现。`main/`、`experiments/` 和 `paper_experiments/` 不得导入 `scripts/`; 薄脚本可以依赖内层模块, 内层不能反向引用脚本或 Notebook。
 
 ## 9. 当前隔离执行拓扑

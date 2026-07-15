@@ -77,6 +77,9 @@ def test_gpu_qualification_binding_covers_commit_models_dependency_and_prompt() 
         "dependency_profile_id": "sd35_method_runtime_gpu",
         "dependency_profile_digest": "c" * 64,
         "complete_hash_lock_digest": "d" * 64,
+        "torch_version": "2.11.0+cu128",
+        "torch_cuda_version": "12.8",
+        "execution_device_name": "cuda:0",
     }
     runtime_result = {
         "metadata": {
@@ -89,6 +92,23 @@ def test_gpu_qualification_binding_covers_commit_models_dependency_and_prompt() 
                 "revision": config.vision_model_revision,
             },
         }
+    }
+    compatibility_core = {
+        "report_schema": "torch_func_transform_compatibility_v1",
+        "schema_version": 1,
+        "torch_version": environment["torch_version"],
+        "torch_cuda_version": environment["torch_cuda_version"],
+        "execution_device_name": environment["execution_device_name"],
+        "assert_operator": "torch._assert_async",
+        "forward_transform_operator": "torch.func.linearize",
+        "reverse_transform_operator": "torch.func.vjp",
+        "adjoint_absolute_error": 0.0,
+        "operator_compatibility_ready": True,
+        "supports_paper_claim": False,
+    }
+    compatibility = {
+        **compatibility_core,
+        "compatibility_report_digest": build_stable_digest(compatibility_core),
     }
     core = {
         "code_version": environment["formal_execution_commit"],
@@ -111,6 +131,7 @@ def test_gpu_qualification_binding_covers_commit_models_dependency_and_prompt() 
                 semantic_watermark_runtime_config_digest(config)
             ),
         },
+        "torch_func_compatibility": compatibility,
     }
     binding = {**core, "qualification_binding_digest": build_stable_digest(core)}
 
@@ -226,6 +247,15 @@ def test_gpu_qualification_entry_uses_real_writer_and_operator_exit_gate(
             "supports_paper_claim": False,
         },
     )
+    monkeypatch.setattr(
+        entry,
+        "_evaluate_torch_func_compatibility",
+        lambda *_args: {
+            "report_schema": "torch_func_transform_compatibility_v1",
+            "operator_compatibility_ready": True,
+            "supports_paper_claim": False,
+        },
+    )
     fake_torch = SimpleNamespace(
         cuda=SimpleNamespace(
             is_available=lambda: True,
@@ -270,3 +300,27 @@ def test_gpu_qualification_entry_uses_real_writer_and_operator_exit_gate(
     assert invocation["gpu_method_qualification_report_digest"] == "d" * 64
     assert invocation["gpu_operator_preflight_ready"] is operator_ready
     assert invocation["supports_paper_claim"] is False
+
+
+def test_torch_func_compatibility_executes_linearize_vjp_and_async_assert() -> None:
+    """轻量检查必须真实执行项目依赖的 PyTorch 变换组合."""
+
+    import torch
+
+    report = entry._evaluate_torch_func_compatibility(torch, "cpu")
+
+    assert report["report_schema"] == "torch_func_transform_compatibility_v1"
+    assert report["execution_device_name"] == "cpu"
+    assert report["assert_operator"] == "torch._assert_async"
+    assert report["forward_transform_operator"] == "torch.func.linearize"
+    assert report["reverse_transform_operator"] == "torch.func.vjp"
+    assert report["adjoint_absolute_error"] <= 1e-5
+    assert report["operator_compatibility_ready"] is True
+    assert report["supports_paper_claim"] is False
+
+
+def test_torch_func_compatibility_rejects_missing_async_assert() -> None:
+    """目标 PyTorch 缺少异步断言时必须在加载大型模型前失败."""
+
+    with pytest.raises(RuntimeError, match="torch._assert_async"):
+        entry._evaluate_torch_func_compatibility(SimpleNamespace(), "cpu")

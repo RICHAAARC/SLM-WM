@@ -142,6 +142,17 @@ def _qualification_binding_ready(
     model_revisions = (
         model_revisions if isinstance(model_revisions, Mapping) else {}
     )
+    torch_func_compatibility = resolved.get("torch_func_compatibility")
+    torch_func_compatibility = (
+        torch_func_compatibility
+        if isinstance(torch_func_compatibility, Mapping)
+        else {}
+    )
+    compatibility_digest_payload = {
+        field_name: value
+        for field_name, value in torch_func_compatibility.items()
+        if field_name != "compatibility_report_digest"
+    }
     digest_payload = {
         field_name: value
         for field_name, value in resolved.items()
@@ -175,6 +186,24 @@ def _qualification_binding_ready(
         == build_stable_digest({"prompt": config.prompt})
         and input_summary.get("method_runtime_config_digest")
         == semantic_watermark_runtime_config_digest(config)
+        and torch_func_compatibility.get("report_schema")
+        == "torch_func_transform_compatibility_v1"
+        and torch_func_compatibility.get("torch_version")
+        == execution_environment.get("torch_version")
+        and torch_func_compatibility.get("torch_cuda_version")
+        == str(execution_environment.get("torch_cuda_version"))
+        and torch_func_compatibility.get("execution_device_name")
+        == execution_environment.get("execution_device_name")
+        and torch_func_compatibility.get("assert_operator")
+        == "torch._assert_async"
+        and torch_func_compatibility.get("forward_transform_operator")
+        == "torch.func.linearize"
+        and torch_func_compatibility.get("reverse_transform_operator")
+        == "torch.func.vjp"
+        and torch_func_compatibility.get("operator_compatibility_ready") is True
+        and torch_func_compatibility.get("supports_paper_claim") is False
+        and torch_func_compatibility.get("compatibility_report_digest")
+        == build_stable_digest(compatibility_digest_payload)
         and resolved.get("qualification_binding_digest")
         == build_stable_digest(digest_payload)
     )

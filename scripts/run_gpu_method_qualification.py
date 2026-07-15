@@ -122,12 +122,107 @@ def _registered_prompt(root: Path, paper_run_name: str, prompt_id: str) -> Any:
     return matches[0]
 
 
+def _evaluate_torch_func_compatibility(
+    torch_module: Any,
+    device_name: str,
+) -> dict[str, Any]:
+    """在小张量上验证正式方法依赖的 JVP、VJP 和异步断言组合.
+
+    该检查只验证目标 PyTorch 运行时是否支持项目已经采用的算子组合, 不替代
+    真实716维 VAE 与 CLIP 计算图资格化. 使用小张量可以在加载 SD3.5 前快速
+    发现依赖版本或设备后端不兼容, 避免为确定性兼容错误消耗模型加载时间和显存.
+    """
+
+    assert_async = getattr(torch_module, "_assert_async", None)
+    if not callable(assert_async):
+        raise RuntimeError("正式 PyTorch 运行时缺少 torch._assert_async")
+    if not hasattr(torch_module, "func"):
+        raise RuntimeError("正式 PyTorch 运行时缺少 torch.func")
+
+    primal = torch_module.tensor(
+        [0.25, -0.5, 0.75, 1.25],
+        dtype=torch_module.float32,
+        device=device_name,
+    )
+    tangent = torch_module.tensor(
+        [1.0, -0.25, 0.5, -0.75],
+        dtype=torch_module.float32,
+        device=device_name,
+    )
+
+    def feature(candidate: Any) -> Any:
+        """构造同时经过异步有限值断言的可微小型特征向量."""
+
+        assert_async(
+            torch_module.isfinite(candidate).all(),
+            "torch.func 兼容检查输入必须为有限值",
+        )
+        return torch_module.stack(
+            (
+                candidate.square().sum(),
+                torch_module.sin(candidate).sum(),
+            )
+        )
+
+    output, jvp_function = torch_module.func.linearize(feature, primal)
+    jvp = jvp_function(tangent)
+    cotangent = torch_module.tensor(
+        [0.75, -0.25],
+        dtype=torch_module.float32,
+        device=device_name,
+    )
+    _, vjp_function = torch_module.func.vjp(feature, primal)
+    (vjp,) = vjp_function(cotangent)
+    if str(primal.device).startswith("cuda"):
+        torch_module.cuda.synchronize(primal.device)
+
+    finite_ready = bool(
+        torch_module.isfinite(
+            torch_module.cat((output.reshape(-1), jvp.reshape(-1), vjp.reshape(-1)))
+        )
+        .all()
+        .detach()
+        .cpu()
+        .item()
+    )
+    adjoint_absolute_error = float(
+        (
+            (jvp * cotangent).sum() - (tangent * vjp).sum()
+        )
+        .abs()
+        .detach()
+        .cpu()
+        .item()
+    )
+    if not finite_ready or adjoint_absolute_error > 1e-5:
+        raise RuntimeError("正式 PyTorch JVP/VJP 兼容检查未满足有限值或伴随一致性")
+
+    report = {
+        "report_schema": "torch_func_transform_compatibility_v1",
+        "schema_version": 1,
+        "torch_version": str(torch_module.__version__),
+        "torch_cuda_version": str(getattr(torch_module.version, "cuda", None)),
+        "execution_device_name": str(primal.device),
+        "assert_operator": "torch._assert_async",
+        "forward_transform_operator": "torch.func.linearize",
+        "reverse_transform_operator": "torch.func.vjp",
+        "adjoint_absolute_error": adjoint_absolute_error,
+        "operator_compatibility_ready": True,
+        "supports_paper_claim": False,
+    }
+    return {
+        **report,
+        "compatibility_report_digest": build_stable_digest(report),
+    }
+
+
 def _qualification_binding(
     *,
     root: Path,
     runtime_result: Mapping[str, Any],
     config: Any,
     prompt_record: Any,
+    torch_func_compatibility: Mapping[str, Any],
 ) -> dict[str, Any]:
     """绑定 Git、依赖锁、模型 revision、Prompt 和真实运行文件摘要."""
 
@@ -180,6 +275,7 @@ def _qualification_binding(
                 semantic_watermark_runtime_config_digest(config)
             ),
         },
+        "torch_func_compatibility": dict(torch_func_compatibility),
         "runtime_artifact_paths": runtime_paths,
         "runtime_artifact_sha256": artifact_sha256,
     }
@@ -247,6 +343,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if not torch.cuda.is_available() or not config.device_name.startswith("cuda"):
         raise RuntimeError("GPU 方法资格化禁止在 CPU 或伪 CUDA 环境运行")
+    torch_func_compatibility = _evaluate_torch_func_compatibility(
+        torch,
+        config.device_name,
+    )
     torch.cuda.reset_peak_memory_stats()
     started_at = time.perf_counter()
     result = write_semantic_watermark_runtime_outputs(config, root=root)
@@ -260,6 +360,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         runtime_result=runtime_result,
         config=config,
         prompt_record=prompt_record,
+        torch_func_compatibility=torch_func_compatibility,
     )
     probe_method_only_gpu_hours = (
         wall_time_seconds
