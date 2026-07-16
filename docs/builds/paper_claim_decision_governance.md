@@ -48,6 +48,8 @@ evidence_incomplete
 
 `registered_claim_set_supported` 只能由 `configs/paper_claim_registry.json` 登记的全部 `required_claims` 派生。兼容字段 `supports_paper_claim` 只能等于对应登记主张集合的派生结果，不得由 writer、manifest 或 Notebook 自行写成原始事实。集中构造与校验职责位于 `paper_experiments/analysis/paper_claim_decisions.py`。
 
+主投稿结论的 profile 作用域固定为 `pilot_paper`。当且仅当 pilot 自身四项 required claims 均由完整证据支持时，才允许形成 pilot 作用域内的 `registered_claim_set_supported=true` 和投稿就绪候选。`full_paper` 是可选扩展，不进入 pilot required-claim conjunction；其未运行或 `evidence_incomplete` 不改变 pilot 决策。若论文正文报告 FPR=0.001 或 full 规模结论，则必须由 full 自身四项决策独立支持，不能引用 pilot 状态代替。
+
 质量结论必须消费 Prompt 条件 KID、配对感知质量、独立视觉内容质量、逐攻击质量和跨攻击质量的受治理统计。任一必需原子或区间缺失时，`quality_preservation` 必须为 `evidence_incomplete`，不得由诊断代理、同源机制一致性分数或旧兼容状态替代。
 
 ## 四、运行流程就绪边界
@@ -64,7 +66,7 @@ workflow_transfer_ready = (
 
 `workflow_transfer_ready=true` 只说明同一实现、决策程序和产物契约可以从 `probe_paper` 迁移到另外两个规模，不表示更严格 FPR 下的科学结论成立。即使 `probe_paper` 的某项主张为 `measured_not_supported`，只要真实正式步骤执行完成、产物完整且三档协议同构，流程迁移结论仍可成立。
 
-`scientific_scope_by_profile` 必须分别保存三个工作点的科学作用域。只有具有自身正式结果的 profile 才能产生该 profile 的科学支持结论；不存在自身结果时必须记录 `evidence_incomplete`、`scientific_support=null` 和 `scientific_support_transferred_from_probe=false`。
+`scientific_scope_by_profile` 必须分别保存三个工作点的科学作用域。只有具有自身正式结果的 profile 才能产生该 profile 的科学支持结论；不存在自身结果时必须记录 `evidence_incomplete`、`scientific_support=null` 和 `scientific_support_transferred_from_probe=false`。submission readiness 只要求 probe 流程同构门禁和 pilot 正式证据闭合；full 状态作为扩展证据单独报告，不得参与 pilot 就绪布尔值。
 
 ## 五、分层职责
 

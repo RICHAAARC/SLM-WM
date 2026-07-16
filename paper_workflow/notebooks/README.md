@@ -112,7 +112,7 @@ python scripts/write_reviewed_scientific_dependency_hash_locks.py \
 3. 三个 `external_baseline_*_run.ipynb`、`official_reference_t2smark_run.ipynb` 和补充方法忠实度所需的其他 `official_reference_*_run.ipynb`。
 4. `randomization_repeat_evidence_run.ipynb`。
 
-权威9个 repeat 全部完成后, CPU 汇总环境必须使用层内
+权威5个 repeat 全部完成后, CPU 汇总环境必须使用层内
 `paper_experiments.runners.randomization_aggregate_provenance` 入口显式绑定9个
 component 和3个跨 repeat 不变包。该聚合与后续统计不属于 Notebook 职责。
 
@@ -136,7 +136,7 @@ progress 文件只描述剩余工作, 永远不能充当完成科学单元。未
 
 五个 CUDA profile 的隔离子执行入口均由 repository 实现。锁候选可以在无 GPU Linux x86_64 host 完成目标 Python 与 wheel index 解析; 已提交锁的真实安装、torch/CUDA identity、CUDA 可用性和科学执行只能由匹配的 Colab GPU 环境形成正式运行资格。
 
-主方法和 baseline 可在独立 Colab 会话并行运行, 结果闭合必须等待全部受治理结果包到达。所有 Notebook 唯一默认使用 `probe_paper`; 运行者可通过 `SLM_WM_PAPER_RUN_NAME` 显式切换到 `pilot_paper` 或 `full_paper`, 但不允许改变方法机制或实验门禁。
+主方法和 baseline 可在独立 Colab 会话并行运行, 结果闭合必须等待当前 profile 的全部受治理结果包到达。所有 Notebook 唯一默认使用 `probe_paper`; 运行者可通过 `SLM_WM_PAPER_RUN_NAME` 显式切换到主投稿 `pilot_paper` 或可选扩展 `full_paper`, 但不允许改变方法机制或实验门禁。full 未运行不阻断 pilot 结果闭合。
 
 运行者必须先把 `SLM_WM_REPOSITORY_COMMIT` 设置为本次正式实验使用的精确40位小写 Git SHA。全部 Notebook 先 checkout 该 detached commit 并验证 clean worktree, 再安装依赖和配置 workflow; 不接受 `main`、其他分支名、短 SHA 或带空白的宽松输入。入口校验只是第一次检查, 正式运行和打包函数仍会在各自起止边界实时复验。
 

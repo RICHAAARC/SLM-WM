@@ -1662,8 +1662,8 @@ Notebook 与 repository module 的跨边界数据
 | formal_import_ready_count | metric | none | false | false | false | 已通过正式导入 validator 的小样本候选记录数量。|
 | formal_import_ready_ids | protocol | none | false | false | false | 已通过正式导入 validator 的 baseline id 集合。|
 | formal_import_blocking_reasons | governance | none | true | false | false | 单条候选记录未通过正式导入 validator 的原因集合。|
-| formal_full_paper_run_requested | governance | none | false | false | false | 当前流程是否请求正式 full paper 规模运行。|
-| formal_full_paper_run_permitted | governance | none | false | false | false | 当前项目边界是否允许正式 full paper 规模运行。|
+| formal_full_paper_run_requested | governance | none | false | false | false | 当前流程是否请求可选的正式 full paper 扩展运行；false 不阻断 pilot 主投稿证据。|
+| formal_full_paper_run_permitted | governance | none | false | false | false | 当前项目边界和资源预算是否允许可选 full paper 扩展运行；不得作为 pilot 投稿就绪前置。|
 | excluded_operating_points | protocol | none | false | false | false | 当前小样本边界显式排除的论文级 operating point 集合。|
 | paper_claim_ready | governance | none | false | false | false | 当前证据是否允许支持论文级 claim。|
 | candidate_records_path | artifact | none | false | false | false | 小样本证据写出脚本读取的候选记录路径。|
@@ -1812,11 +1812,11 @@ Notebook 与 repository module 的跨边界数据
 | audited_method_count | metric | none | false | false | false | 统一 fixed-FPR 阈值审计实际核验的方法数量。 |
 | method_identity_ready | governance | none | false | false | false | 实际方法标识是否无重复且与受治理方法集合完全相等。 |
 | all_method_thresholds_ready | governance | none | false | false | false | 主方法与四个外部 baseline 是否全部通过各自的独立阈值重算门禁。 |
-| method_observation_source_sha256_map | provenance | none | true | true | false | 五方法身份到实际 observation 文件字节 SHA-256 的精确映射。 |
+| method_observation_source_sha256_map | provenance | none | true | true | false | 主方法与四个外部 baseline 身份到实际 observation 文件字节 SHA-256 的精确映射。 |
 | threshold_audit_rows_digest | provenance | none | true | true | false | 对按方法身份规范排序的完整 fixed-FPR 阈值审计行计算的稳定 SHA-256 摘要。 |
-| threshold_observation_binding_ready | governance | none | false | false | false | 五方法身份、observation 文件字节摘要与冻结阈值摘要是否形成无缺失且格式有效的精确绑定。 |
-| fixed_fpr_threshold_audit_ready | governance | none | false | false | false | 五个方法的身份、目标 FPR、冻结阈值和逐条判定是否共同完成正式证据审计。 |
-| paper_common_protocol_ready | governance | none | false | false | false | pilot_paper 级 fixed-FPR 共同协议是否完成运行前治理冻结。|
+| threshold_observation_binding_ready | governance | none | false | false | false | 主方法与四个外部 baseline 身份、observation 文件字节摘要与冻结阈值摘要是否形成无缺失且格式有效的精确绑定。 |
+| fixed_fpr_threshold_audit_ready | governance | none | false | false | false | 主方法与四个外部 baseline 的身份、目标 FPR、冻结阈值和逐条判定是否共同完成正式证据审计。 |
+| paper_common_protocol_ready | governance | none | false | false | false | pilot_paper 主投稿级 fixed-FPR 共同协议是否完成运行前治理冻结。|
 | paper_prompt_count | metric | none | false | false | false | 当前论文运行层级 prompt split 中的 prompt 数量。|
 | paper_prompt_split_ready | governance | none | false | false | false | 当前论文运行层级 prompt split 是否可供共同协议使用。|
 | paper_target_fpr | protocol | none | false | false | false | 论文 profile 共同协议使用的 fixed-FPR 目标值，由 profile registry 唯一派生。|
@@ -1852,9 +1852,9 @@ Notebook 与 repository module 的跨边界数据
 | paper_run_result_unexpected_template_count | metric | none | false | false | false | 当前论文运行已接受结果中额外的 method × attack 模板数。|
 | paper_run_result_duplicate_template_count | metric | none | false | false | false | 当前论文运行已接受结果中重复的 method × attack 模板行数。|
 | paper_run_template_registry_unique | governance | none | false | false | false | 当前论文运行的正式导入模板注册表是否无重复键。|
-| paper_run_supports_superiority_claim | governance | none | false | false | false | 当前论文运行层级结果是否允许在 pilot_paper 样本规模边界内支撑方法优越性主张。|
-| paper_claim_scale | governance | none | false | false | false | 当前结果或协议允许支撑的论文主张规模, 例如 pilot_paper 或 full_paper。|
-| paper_run_claim_type | governance | none | false | false | false | 当前论文运行层级对应的正式主张类型, 正式主张作用域直接使用 probe_paper、pilot_paper 与 full_paper，不维护历史 claim 别名。|
+| paper_run_supports_superiority_claim | governance | none | false | false | false | 当前论文运行层级结果是否允许在自身作用域内支撑方法优越性主张；主投稿以 pilot_paper 为准，full_paper 只增加可选扩展作用域。|
+| paper_claim_scale | governance | none | false | false | false | 当前结果或协议允许支撑的论文主张规模；pilot_paper 是主投稿作用域，full_paper 是可选扩展作用域。|
+| paper_run_claim_type | governance | none | false | false | false | 当前论文运行层级对应的正式主张类型；直接使用 probe_paper、pilot_paper 与 full_paper，且不把 full_paper 缺失解释为 pilot_paper 主张失败。|
 | strict_formal_evidence_required | governance | none | false | false | false | 当前共同协议是否要求结果记录只能来自正式真实测量证据。|
 | strict_formal_result_ready | governance | none | true | false | false | 单条共同协议结果记录是否已经通过正式真实测量证据门禁。|
 | nonformal_evidence_rejection_policy | governance | none | false | false | false | 非正式证据进入共同协议结果导入时的拒绝策略。|
@@ -1935,7 +1935,7 @@ Notebook 与 repository module 的跨边界数据
 | per_attack_ci_coverage_ready | governance | none | true | false | false | 所有正式结果记录是否均形成完整、自洽且可审计的逐攻击置信区间行。|
 | per_attack_superiority_evaluation_ready | governance | none | true | false | false | 每个正式攻击是否均形成可审计的 SLM-WM 与最强主表 baseline 比较行。|
 | universal_per_attack_superiority_claim_ready | governance | none | true | false | false | 是否每个正式攻击的保守置信区间均支持 SLM-WM 显著胜出; 该字段只限定全攻击普遍优势主张。|
-| all_test_negative_populations_fixed_fpr_ready | governance | none | true | false | false | 是否由样本级原始判定重建的精确9个 seed-key 重复中, 所有方法的未攻击 clean negatives、主方法 wrong-key negatives 以及每项正式攻击下的 attacked negatives 均通过逐重复单侧 Wilson 95% 上界的最不利值门禁。|
+| all_test_negative_populations_fixed_fpr_ready | governance | none | true | false | false | 是否由样本级原始判定重建的精确5个 seed-key 重复中, 所有方法的未攻击 clean negatives、主方法 wrong-key negatives 以及每项正式攻击下的 attacked negatives 均通过逐重复单侧 Wilson 95% 上界的最不利值门禁。|
 | failure_case_record_count | metric | none | true | false | false | 失败案例图绑定的真实攻击检测失败记录数量。|
 | failure_case_figure_ready | governance | none | true | false | false | 失败案例图是否已由受治理攻击记录和实际攻击图像重建。|
 | missing_result_record_examples | governance | none | true | false | false | 结果模板覆盖报告中的缺失键示例。|
@@ -2155,17 +2155,17 @@ Notebook 与 repository module 的跨边界数据
 | leaf_package_set_digest | provenance | none | true | false | false | 8个 leaf package 身份、成员路径、代码版本与执行锁摘要记录集合的稳定摘要。 |
 | component_content_digest | provenance | none | true | false | false | 排除生成时间和外部绝对路径后, 单 repeat 身份、代码版本、8个 leaf package 字节摘要与结论边界的稳定内容摘要。 |
 | randomization_repeat_evidence_manifest_digest | provenance | none | true | false | false | 单 repeat 自包含证据 manifest 在移除自身摘要字段后的稳定内容摘要。 |
-| randomization_aggregate_ready | governance | none | true | false | false | 是否已经精确覆盖权威9个 repeat、3个跨 repeat 不变包并完成全部嵌套来源生产复验。该字段只表示聚合输入就绪, 不单独支持论文 claim。单 repeat component 固定为 false。 |
-| randomization_aggregate_schema_version | protocol | none | true | false | false | 精确9+3随机化 aggregate payload 与 manifest 共同采用的整数 schema 版本。 |
-| randomization_repeat_ids | protocol | none | true | false | false | 随机化 aggregate 按权威注册表顺序保存的精确9个 repeat ID。 |
-| randomization_repeat_components | artifact | none | true | false | false | 随机化 aggregate 按权威顺序保存的9个自包含 repeat ZIP 身份、规范成员路径和内容摘要记录。 |
+| randomization_aggregate_ready | governance | none | true | false | false | 是否已经精确覆盖权威5个 repeat、3个跨 repeat 不变包并完成全部嵌套来源生产复验。该字段只表示聚合输入就绪, 不单独支持论文 claim。单 repeat component 固定为 false。 |
+| randomization_aggregate_schema_version | protocol | none | true | false | false | 精确5+3随机化 aggregate payload 与 manifest 共同采用的整数 schema 版本。 |
+| randomization_repeat_ids | protocol | none | true | false | false | 随机化 aggregate 按权威注册表顺序保存的精确5个 repeat ID。 |
+| randomization_repeat_components | artifact | none | true | false | false | 随机化 aggregate 按权威顺序保存的5个自包含 repeat ZIP 身份、规范成员路径和内容摘要记录。 |
 | invariant_packages | artifact | none | true | false | false | 随机化 aggregate 按固定 family 顺序保存的3个跨 repeat 不变官方参考 ZIP 及其执行锁摘要记录。 |
-| randomization_aggregate_digest | provenance | none | true | false | false | 排除生成时间和自身摘要后, 对 run、FPR、随机化注册表、9个 repeat、3个不变包、共同代码版本与结论边界计算的稳定 SHA-256。 |
+| randomization_aggregate_digest | provenance | none | true | false | false | 排除生成时间和自身摘要后, 对 run、FPR、随机化注册表、5个 repeat、3个不变包、共同代码版本与结论边界计算的稳定 SHA-256。 |
 | payload_member | artifact | none | true | false | false | 聚合 ZIP 内版本化 payload JSON 的规范 POSIX 成员路径。 |
 | payload_path | artifact | none | true | false | false | 已验证随机化 aggregate payload 旁路文件路径; 独立 ZIP 无旁路文件时使用 ZIP 成员定位串。 |
 | payload_sha256 | provenance | none | true | false | false | 聚合 ZIP 内 payload JSON 权威原始字节的 SHA-256。 |
 | manifest_sha256 | provenance | none | true | false | false | 聚合 ZIP 内 manifest JSON 权威原始字节的 SHA-256。 |
-| randomization_repeat_component_count | metric | none | true | false | false | 聚合 manifest metadata 登记的自包含 repeat 组件数量, 固定为9。 |
+| randomization_repeat_component_count | metric | none | true | false | false | 聚合 manifest metadata 登记的自包含 repeat 组件数量, 固定为5。 |
 | invariant_package_count | metric | none | true | false | false | 聚合 manifest metadata 登记的跨 repeat 不变官方参考包数量, 固定为3。 |
 | invariant_package_families | protocol | none | true | false | false | 聚合 manifest config 按规范顺序绑定的3个跨 repeat 不变官方参考 package family。 |
 | randomization_scope | protocol | none | true | false | false | 上游包在随机化证据中的职责, 取值为 active_repeat_component 或 cross_repeat_invariant。 |
@@ -2188,33 +2188,33 @@ Notebook 与 repository module 的跨边界数据
 | observation_archive_member | artifact | none | true | true | false | 当前方法重复实际用于阈值重算的 observation 成员规范路径。 |
 | observation_rows_digest | provenance | none | true | true | false | 按原始顺序对当前方法重复全部 observation object 计算的稳定摘要。 |
 | allowed_calibration_false_positive_count | metric | none | true | true | false | 当前 calibration 样本数与目标 FPR 按冻结 conformal 规则允许的最大假正例数量。 |
-| fairness_identity_match_ready | governance | none | true | false | false | 同一 Prompt 和 repeat 下五个方法的生成 seed、水印 key 与基础 latent 身份是否逐字段完全一致。 |
-| fairness_record_digest | provenance | none | true | true | false | 单个 Prompt-repeat 五方法公平随机身份记录的稳定摘要。 |
+| fairness_identity_match_ready | governance | none | true | false | false | 同一 Prompt 和 repeat 下主方法与四个外部 baseline 的生成 seed、水印 key 与基础 latent 身份是否逐字段完全一致。 |
+| fairness_record_digest | provenance | none | true | true | false | 单个 Prompt-repeat 主方法与四个外部 baseline 公平随机身份记录的稳定摘要。 |
 | fairness_identity_digest | provenance | none | true | true | false | 单个 repeat 全部 Prompt 公平身份记录的有序联合摘要。 |
 | calibration_prompt_ids_digest | provenance | none | true | true | false | 当前方法重复精确 calibration Prompt ID 集合的稳定摘要。 |
 | test_prompt_ids_digest | provenance | none | true | true | false | 当前方法重复精确 test Prompt ID 集合的稳定摘要。 |
 | method_repeat_threshold_record_digest | provenance | none | true | true | false | 单个方法重复的阈值、Prompt、随机身份和完整嵌套来源摘要联合记录的稳定摘要。 |
-| threshold_records_digest | provenance | none | true | true | false | 按权威 repeat 与方法顺序排列的45个阈值记录联合摘要。 |
-| fairness_records_digest | provenance | none | true | true | false | 全部 Prompt-repeat 五方法公平身份记录的联合摘要。 |
-| repeat_fairness_identity_digest_map | provenance | none | true | true | false | 权威9个 repeat ID 到各自 Prompt 公平身份联合摘要的精确映射。 |
-| expected_threshold_record_count | metric | none | true | false | false | 当前正式协议要求的方法重复阈值记录数量, 固定为45。 |
-| expected_randomization_repeat_ids | protocol | none | true | false | false | 当前正式协议按权威顺序要求的9个随机化重复 ID。 |
+| threshold_records_digest | provenance | none | true | true | false | 按权威 repeat 与方法顺序排列的25个阈值记录联合摘要。 |
+| fairness_records_digest | provenance | none | true | true | false | 全部 Prompt-repeat 主方法与四个外部 baseline 公平身份记录的联合摘要。 |
+| repeat_fairness_identity_digest_map | provenance | none | true | true | false | 权威5个 repeat ID 到各自 Prompt 公平身份联合摘要的精确映射。 |
+| expected_threshold_record_count | metric | none | true | false | false | 当前正式协议要求的方法重复阈值记录数量, 固定为25。 |
+| expected_randomization_repeat_ids | protocol | none | true | false | false | 当前正式协议按权威顺序要求的5个随机化重复 ID。 |
 | expected_base_seed | protocol | none | true | false | false | 用于逐 Prompt 重建公开生成 seed 的冻结基础整数种子。 |
 | threshold_record_count | metric | none | true | true | false | 从精确 aggregate 原始 observation 实际重算得到的阈值记录数量。 |
 | repeat_threshold_counts | metric | none | true | true | false | 权威 repeat ID 到独立方法阈值数量的映射, 每个 repeat 必须精确为5。 |
-| method_repeat_fixed_fpr_recomputation_ready | governance | none | true | false | false | 纯分析层的45个方法重复是否全部通过 Prompt exact-set、独立阈值重算、producer 声明、共同模型和公平随机身份一致性检查；该字段只表示调用方提供的数据内部可重算, 不认证 aggregate 来源, 也不支持论文结论。 |
-| runtime_source_record_map | provenance | none | true | true | false | 权威9个 repeat ID 到 Prompt runtime 成员路径、成员 SHA、leaf SHA 和 repeat component 摘要链的精确映射。 |
-| runtime_source_records_digest | provenance | none | true | true | false | 按权威 repeat 顺序排列的9个 Prompt runtime 来源记录联合摘要。 |
-| exact_runtime_source_count | metric | none | true | true | false | 完成 Prompt exact-set 重建并纳入摘要链的 runtime 成员数量, 固定为9。 |
-| canonical_base_latent_identity_count | metric | none | true | true | false | CPU 端从版本化 PRG 重新生成并通过字节摘要核对的唯一 Prompt-generation-seed 基础 latent 数量, 等于 Prompt 数量乘3。 |
+| method_repeat_fixed_fpr_recomputation_ready | governance | none | true | false | false | 纯分析层的25个方法重复是否全部通过 Prompt exact-set、独立阈值重算、producer 声明、共同模型和公平随机身份一致性检查；该字段只表示调用方提供的数据内部可重算, 不认证 aggregate 来源, 也不支持论文结论。 |
+| runtime_source_record_map | provenance | none | true | true | false | 权威5个 repeat ID 到 Prompt runtime 成员路径、成员 SHA、leaf SHA 和 repeat component 摘要链的精确映射。 |
+| runtime_source_records_digest | provenance | none | true | true | false | 按权威 repeat 顺序排列的5个 Prompt runtime 来源记录联合摘要。 |
+| exact_runtime_source_count | metric | none | true | true | false | 完成 Prompt exact-set 重建并纳入摘要链的 runtime 成员数量, 固定为5。 |
+| canonical_base_latent_identity_count | metric | none | true | true | false | CPU 端从版本化 PRG 重新生成并通过字节摘要核对的唯一 Prompt-generation-seed 基础 latent 数量, 等于当前5个预登记配对中互异 generation seed 的数量乘 Prompt 数量。 |
 | canonical_base_latent_identity_digest | provenance | none | true | true | false | 按冻结 generation seed 与 Prompt 顺序排列的规范基础 latent 重建身份联合摘要。 |
-| exact_method_repeat_fixed_fpr_ready | governance | none | true | false | false | 仅聚合桥接层在复验 aggregate、9个 runtime 来源、45个 observation/声明、规范 Prompt、冻结模型、真实 seed/key/base latent 和纯阈值重算后给出的就绪状态；该状态仍固定不单独支持论文结论。 |
-| reconstruction_report_digest | provenance | none | true | true | false | 聚合来源到精确45阈值重建报告在加入自身摘要前的稳定摘要。 |
-| method_repeat_fixed_fpr_report_digest | provenance | none | true | true | false | 精确45阈值汇总报告在加入自身摘要前的稳定摘要。 |
-| threshold_records | artifact | none | true | true | false | 按权威 repeat 与方法顺序返回的45个逐方法逐重复阈值事实记录。 |
-| fairness_records | artifact | none | true | true | false | 按权威 repeat 与 Prompt 顺序返回的五方法随机身份公平性事实记录。 |
+| exact_method_repeat_fixed_fpr_ready | governance | none | true | false | false | 仅聚合桥接层在复验 aggregate、5个 runtime 来源、25个 observation/声明、规范 Prompt、冻结模型、真实 seed/key/base latent 和纯阈值重算后给出的就绪状态；该状态仍固定不单独支持论文结论。 |
+| reconstruction_report_digest | provenance | none | true | true | false | 聚合来源到精确25阈值重建报告在加入自身摘要前的稳定摘要。 |
+| method_repeat_fixed_fpr_report_digest | provenance | none | true | true | false | 精确25阈值汇总报告在加入自身摘要前的稳定摘要。 |
+| threshold_records | artifact | none | true | true | false | 按权威 repeat 与方法顺序返回的25个逐方法逐重复阈值事实记录。 |
+| fairness_records | artifact | none | true | true | false | 按权威 repeat 与 Prompt 顺序返回的主方法与四个外部 baseline 随机身份公平性事实记录。 |
 | report | artifact | none | true | true | false | 纯分析层返回的逐方法逐重复 fixed-FPR 汇总报告对象。 |
-| reconstruction_report | artifact | none | true | true | false | 聚合桥接层返回的 runtime、Prompt、基础 latent 与45阈值来源重建报告对象。 |
+| reconstruction_report | artifact | none | true | true | false | 聚合桥接层返回的 runtime、Prompt、基础 latent 与25阈值来源重建报告对象。 |
 | declared_threshold_protocol | protocol | none | true | true | false | 单个方法重复从 producer 声明成员规范化得到、等待原始 observation 独立核对的阈值协议。 |
 | observation_rows | artifact | none | true | true | false | 单个方法重复从已验证 leaf 成员读取并保持原始顺序的 observation 对象序列。 |
 | image_record_source | provenance | none | true | true | false | 质量图像记录所属规范成员及完整 aggregate 摘要链描述符。 |
@@ -2222,7 +2222,7 @@ Notebook 与 repository module 的跨边界数据
 | image_record | artifact | none | true | true | false | 质量 feature 联接中当前数据集图像的受治理原始记录。 |
 | source_feature_record | artifact | none | true | true | false | 与质量图像记录唯一联接的 source 图像 Inception feature 原始记录。 |
 | comparison_feature_record | artifact | none | true | true | false | 与质量图像记录唯一联接的 comparison 图像 Inception feature 原始记录。 |
-| runtime_randomization_identity_count | metric | none | true | true | false | 从9个 runtime 配置重建并锚定到主方法 observation 的 Prompt-repeat 随机身份数量。 |
+| runtime_randomization_identity_count | metric | none | true | true | false | 从5个预登记 runtime 配置重建并锚定到主方法 observation 的 Prompt-repeat 随机身份数量。 |
 | runtime_randomization_identity_digest_random | random | _digest_random | true | false | false | 按权威 repeat 与 Prompt 顺序排列的 runtime seed、key 和正式随机身份映射摘要。 |
 | prompt_file_member | artifact | none | true | true | false | 当前 repeat 的主方法 leaf 内受治理 Prompt 文件规范成员路径。 |
 | selection_manifest_member | artifact | none | true | true | false | 当前 repeat 的主方法 leaf 内7000条 Prompt 选择清单规范成员路径。 |
@@ -2231,9 +2231,9 @@ Notebook 与 repository module 的跨边界数据
 | prompt_source_registry_digest | provenance | none | true | true | false | Prompt 来源注册表排除自身摘要字段后的稳定内容摘要。 |
 | packaged_prompt_source_audit_digest | provenance | none | true | true | false | 包内来源注册表、选择清单和当前层级 Prompt 字节联合审计记录摘要。 |
 | prompt_rows_digest | provenance | none | true | true | false | 从包内 Prompt 原始字节重建的有序 Prompt、split 与语义字段记录摘要。 |
-| prompt_source_record_map | provenance | none | true | true | false | 权威9个 repeat ID 到三份包内 Prompt 来源成员及完整摘要链的映射。 |
-| prompt_source_records_digest | provenance | none | true | true | false | 按权威 repeat 顺序排列的9组包内 Prompt 来源记录联合摘要。 |
-| prompt_source_contract_ready | governance | none | true | false | false | 包内来源注册表、冻结选择清单、Prompt 文件字节与9份 runtime 逐条文本是否形成唯一可重建契约。 |
+| prompt_source_record_map | provenance | none | true | true | false | 权威5个 repeat ID 到三份包内 Prompt 来源成员及完整摘要链的映射。 |
+| prompt_source_records_digest | provenance | none | true | true | false | 按权威 repeat 顺序排列的5组包内 Prompt 来源记录联合摘要。 |
+| prompt_source_contract_ready | governance | none | true | false | false | 包内来源注册表、冻结选择清单、Prompt 文件字节与5份 runtime 逐条文本是否形成唯一可重建契约。 |
 | prompt_source_contract_digest | provenance | none | true | true | false | 包内 Prompt 来源契约报告在加入自身摘要前的稳定摘要。 |
 | source_registry_ready | governance | none | true | false | false | Prompt 来源注册表是否通过冻结原始字节、完整内容摘要和来源身份校验。 |
 | selection_manifest_ready | governance | none | true | false | false | Prompt 选择清单是否通过冻结 SHA、记录摘要、来源比例、顺序和唯一性校验。 |
@@ -2259,7 +2259,7 @@ Notebook 与 repository module 的跨边界数据
 | check_area | governance | none | true | false | false | 单项结果闭合语义检查所属的证据领域。 |
 | check_status | governance | none | true | false | false | 单项结果闭合语义检查的 pass 或 blocked 状态。 |
 | source_artifacts | artifact | none | true | false | false | 单项结果闭合检查实际消费的受治理证据对象集合。 |
-| threshold_audit_digest | provenance | none | false | false | false | 五方法统一 fixed-FPR 阈值审计输入的稳定摘要。 |
+| threshold_audit_digest | provenance | none | false | false | false | 主方法与四个外部 baseline 统一 fixed-FPR 阈值审计输入的稳定摘要。 |
 | baseline_comparison_digest | provenance | none | false | false | false | 外部 baseline 正式比较报告与 manifest 的稳定摘要。 |
 | result_records_digest | provenance | none | false | false | false | 当前运行层级正式结果 records 的稳定摘要。 |
 | common_protocol_digest | provenance | none | false | false | false | 当前运行层级共同协议 summary 与 schema 的稳定摘要。 |
@@ -2293,7 +2293,7 @@ Notebook 与 repository module 的跨边界数据
 | require_existing_evidence | protocol | none | false | false | false | result record 构造时是否要求每个 evidence path 已存在, 并进入 manifest 配置摘要。 |
 | test_prompt_id_digest | provenance | none | true | false | false | 共同协议从受治理 Prompt 文件当前 test split 独立重算的标识集合摘要。 |
 | dataset_quality_feature_records_sha256 | provenance | none | false | false | false | 结果闭合门禁对规范正式特征 JSONL 文件独立计算的字节摘要。 |
-| common_code_version | provenance | none | true | false | false | 最终聚合所消费9个 repeat component 与3个不变官方参考包共享的精确40位小写 clean Git 提交 SHA。 |
+| common_code_version | provenance | none | true | false | false | 最终聚合所消费5个 repeat component 与3个不变官方参考包共享的精确40位小写 clean Git 提交 SHA。 |
 | closure_source_file_sha256 | provenance | none | false | false | false | 结果闭合门禁全部实际读取文件的规范路径到文件字节 SHA-256 映射。 |
 | closure_source_file_digest | provenance | none | false | false | false | 对结果闭合门禁输入文件字节摘要映射执行规范序列化后得到的 SHA-256。 |
 | result_closure_gate_report_digest | provenance | none | false | false | false | 完整结果打包前从 gate manifest 读取并对 gate 报告重算的稳定摘要。 |
@@ -2495,17 +2495,17 @@ Notebook 与 repository module 的跨边界数据
 | formal_watermark_key_plan_protocol | protocol | none | true | false | false | 在任何正式运行前冻结3个水印 key 身份的预注册计划协议。 |
 | formal_watermark_key_plan_digest | provenance | none | true | true | false | 按 key index 排列的3个预注册 key seed 与 key material 摘要联合承诺。 |
 | watermark_key_records | protocol | none | true | true | false | 预注册3-key 计划中按 key index 排列的 seed 与 material 摘要记录。 |
-| formal_randomization_repeat_registry_digest | provenance | none | true | false | false | 仅对权威9个 repeat 身份记录按规范顺序计算的稳定摘要。 |
+| formal_randomization_repeat_registry_digest | provenance | none | true | false | false | 仅对权威5个 repeat 身份记录按规范顺序计算的稳定摘要。 |
 | formal_randomization_repeat_coverage_digest | provenance | none | true | false | false | 对实际 repeat 记录、权威注册表摘要、协议摘要和覆盖状态计算的稳定摘要。 |
-| exact_repeat_registry_ready | governance | none | true | false | false | 实际 repeat 记录是否无遗漏、无重复、无额外身份且逐字段匹配权威9重复注册表。 |
+| exact_repeat_registry_ready | governance | none | true | false | false | 实际 repeat 记录是否无遗漏、无重复、无额外身份且逐字段匹配权威5重复注册表。 |
 | observed_repeat_count | metric | none | true | false | false | 当前 component 或 aggregate 证据实际覆盖的互异 repeat 数量。 |
 | observed_repeat_ids | protocol | none | true | false | false | 按权威注册表顺序排列的实际 repeat ID 集合。 |
 | formal_randomization_repeat_count | metric | none | true | false | false | 论文运行要求完成并汇总的正式交叉重复总数。 |
-| generation_seed_repeat_count | metric | none | true | false | false | 正式交叉重复协议登记的生成种子重复数。 |
-| watermark_key_repeat_count | metric | none | true | false | false | 正式交叉重复协议登记的水印密钥重复数。 |
-| crossed_repeat_count | metric | none | true | false | false | 生成种子与水印密钥笛卡尔积形成的重复单元数。 |
-| repeat_records | protocol | none | true | false | false | 按稳定顺序登记的全部生成种子与水印密钥交叉重复记录。 |
-| formal_randomization_plan | protocol | none | true | true | false | 顶层运行 manifest 唯一保存的9重复、3密钥、基础 seed 与基础 latent 完整计划正文。 |
+| generation_seed_repeat_count | metric | none | true | false | false | 正式协议5个预登记配对中互异生成种子身份的数量。 |
+| watermark_key_repeat_count | metric | none | true | false | false | 正式协议5个预登记配对中互异水印密钥身份的数量。 |
+| crossed_repeat_count | metric | none | true | false | false | 正式随机化登记表中的有序 seed-key 配对数量, 固定为5；不表示两个身份集合的笛卡尔积。 |
+| repeat_records | protocol | none | true | false | false | 按稳定顺序登记的5个生成种子与水印密钥配对记录。 |
+| formal_randomization_plan | protocol | none | true | true | false | 顶层运行 manifest 唯一保存的5个预登记 seed-key 配对、基础 seed 与基础 latent 完整计划正文。 |
 | formal_runtime_randomization_plan_digest_random | random | _digest_random | true | true | false | 顶层完整随机身份计划排除自摘要字段后的稳定摘要。 |
 | randomization_repeat_id | protocol | none | true | false | false | 当前科学运行唯一选择的交叉重复标识。 |
 | generation_seed_index | protocol | none | true | false | false | 当前交叉重复使用的生成种子索引。 |
@@ -2685,7 +2685,7 @@ Notebook 与 repository module 的跨边界数据
 | embedding_pair_ssim_gap | metric | none | true | true | false | SLM-WM 未攻击 pair SSIM 减 baseline 未攻击 pair SSIM 的有符号差值。 |
 | absolute_embedding_pair_ssim_gap | metric | none | true | true | false | 两方法未攻击 pair SSIM 差值的绝对值。 |
 | quality_match_caliper | protocol | none | true | true | false | 每个注册 repeat 的质量匹配允许的最大绝对 SSIM 差, 正式值为0.02。 |
-| quality_matched | governance | none | true | true | false | 当前 repeat-Prompt 的绝对 SSIM 差是否不超过冻结 caliper; Prompt 只有在9个 repeat 均为 true 时才进入子集。 |
+| quality_matched | governance | none | true | true | false | 当前 repeat-Prompt 的绝对 SSIM 差是否不超过冻结 caliper; Prompt 只有在5个 repeat 均为 true 时才进入子集。 |
 | proposed_quality_record_digest | provenance | none | true | true | false | SLM-WM 未攻击质量记录及其完整随机身份的稳定摘要。 |
 | baseline_quality_record_digest | provenance | none | true | true | false | Baseline 未攻击质量记录及其完整随机身份的稳定摘要。 |
 | proposed_clean_image_digest | provenance | none | true | true | false | 当前质量记录绑定的 SLM-WM clean 图像文件 SHA-256。 |
@@ -2693,24 +2693,24 @@ Notebook 与 repository module 的跨边界数据
 | baseline_clean_image_digest | provenance | none | true | true | false | 当前质量记录绑定的 baseline clean 图像文件 SHA-256。 |
 | baseline_watermarked_image_digest | provenance | none | true | true | false | 当前质量记录绑定的 baseline watermarked 图像文件 SHA-256。 |
 | quality_matching_record_digest | provenance | none | true | true | false | 单条 repeat-baseline-Prompt 质量配对记录的稳定摘要。 |
-| quality_matching_record_count | metric | none | true | true | false | 精确9重复质量记录数量, 等于 9 x 4 x 完整 test Prompt 数。 |
+| quality_matching_record_count | metric | none | true | true | false | 精确5重复质量记录数量, 等于 5 x 4 x 完整 test Prompt 数。 |
 | quality_matching_record_set_digest | provenance | none | true | true | false | 按 repeat、baseline 与 Prompt 规范排序后的完整质量记录集合摘要。 |
 | minimum_matched_prompt_fraction | protocol | none | true | true | false | 单个 baseline 质量匹配子集要求覆盖的最低 test Prompt 比例, 正式值为0.80。 |
 | total_quality_prompt_count | metric | none | true | true | false | 单个 baseline 参与质量 caliper 判定的唯一 test Prompt 总数。 |
 | minimum_matched_prompt_count | metric | none | true | true | false | 按最低覆盖比例向上取整得到的最少匹配 Prompt 数量。 |
 | registered_repeat_membership_rule | protocol | none | true | true | false | Prompt 质量 membership 规则, 固定为 all_registered_repeats_within_caliper。 |
-| matched_prompt_count | metric | none | true | true | false | 单个 baseline 的9个注册 repeat 全部通过 caliper 的唯一 Prompt 数量。 |
+| matched_prompt_count | metric | none | true | true | false | 单个 baseline 的5个注册 repeat 全部通过 caliper 的唯一 Prompt 数量。 |
 | unmatched_prompt_count | metric | none | true | true | false | 单个 baseline 至少有一个注册 repeat 未通过 caliper 的唯一 Prompt 数量。 |
 | matched_prompt_fraction | metric | none | true | true | false | 单个 baseline 实际通过质量 caliper 的 Prompt 比例。 |
 | quality_matched_prompt_id_digest | provenance | none | true | true | false | 单个 baseline 的质量匹配 Prompt ID 规范序列摘要。 |
 | quality_matched_prompt_ids_by_baseline | protocol | none | true | true | false | 4个 baseline 各自的质量匹配 Prompt ID 映射, 只由质量记录生成。 |
 | quality_matched_prompt_membership_digest | provenance | none | true | true | false | 4个 baseline 质量 membership 映射的稳定摘要, 不依赖检测标签。 |
-| proposed_embedding_pair_ssim_mean | metric | none | true | true | false | 当前 baseline 比较中 SLM-WM 在完整9重复与完整 test Prompt 上的 SSIM 均值。 |
-| baseline_embedding_pair_ssim_mean | metric | none | true | true | false | 当前 baseline 在完整9重复与完整 test Prompt 上的 SSIM 均值。 |
-| mean_embedding_pair_ssim_gap | metric | none | true | true | false | 当前 baseline 比较中完整9重复与完整 test Prompt 的有符号 SSIM 差均值。 |
+| proposed_embedding_pair_ssim_mean | metric | none | true | true | false | 当前 baseline 比较中 SLM-WM 在完整5重复与完整 test Prompt 上的 SSIM 均值。 |
+| baseline_embedding_pair_ssim_mean | metric | none | true | true | false | 当前 baseline 在完整5重复与完整 test Prompt 上的 SSIM 均值。 |
+| mean_embedding_pair_ssim_gap | metric | none | true | true | false | 当前 baseline 比较中完整5重复与完整 test Prompt 的有符号 SSIM 差均值。 |
 | max_absolute_embedding_pair_ssim_gap | metric | none | true | true | false | 当前 baseline 比较中所有 repeat-Prompt 绝对 SSIM 差的最大值。 |
 | quality_match_coverage_ready | governance | none | true | true | false | 单个 baseline 的质量匹配 Prompt 覆盖是否达到预注册最低比例。 |
-| quality_matched_randomization_repeat_count | metric | none | true | true | false | 质量匹配检测效应完整覆盖的注册重复数量, 固定为9。 |
+| quality_matched_randomization_repeat_count | metric | none | true | true | false | 质量匹配检测效应完整覆盖的注册重复数量, 固定为5。 |
 | quality_matched_attack_count | metric | none | true | true | false | 每个质量匹配 Prompt 完整覆盖的正式攻击数量。 |
 | quality_matched_observation_count | metric | none | true | true | false | 单个 baseline 质量匹配子集覆盖的 Prompt x registered-repeat x attack 原子观测数量, 不作为推断样本量。 |
 | quality_matched_statistical_unit | protocol | none | true | true | false | 质量匹配推断的独立统计单位, 固定为 prompt_cluster。 |
@@ -2731,10 +2731,10 @@ Notebook 与 repository module 的跨边界数据
 | quality_matched_confidence_level | protocol | none | true | false | false | 质量匹配 Prompt bootstrap 的置信水平。 |
 | quality_matched_bootstrap_resample_count | protocol | none | true | false | false | 质量匹配 Prompt bootstrap 重采样次数, 正式固定为100000。 |
 | quality_matched_bootstrap_seed_digest_random | random | _digest_random | true | false | false | 由匹配 Prompt 集、完整 outcome、攻击、repeat 与冻结统计配置确定的 bootstrap 随机源摘要。 |
-| quality_matched_bootstrap_analysis_schema | protocol | none | true | false | false | 质量匹配9重复 Prompt bootstrap 分析规范。 |
+| quality_matched_bootstrap_analysis_schema | protocol | none | true | false | false | 质量匹配5重复 Prompt bootstrap 分析规范。 |
 | quality_matched_bootstrap_bit_generator | protocol | none | true | false | false | 质量匹配 bootstrap 使用的 NumPy bit generator, 固定为 PCG64。 |
 | quality_matched_bootstrap_quantile_method | protocol | none | true | false | false | 质量匹配 percentile CI 的 NumPy quantile 算法, 固定为 linear。 |
-| quality_matched_statistics_ready | governance | none | true | true | false | 精确9重复质量记录、Prompt membership 与完整检测块是否完成可重建统计; 不等价于效果通过。 |
+| quality_matched_statistics_ready | governance | none | true | true | false | 精确5重复质量记录、Prompt membership 与完整检测块是否完成可重建统计; 不等价于效果通过。 |
 | quality_matched_superiority_ready | governance | none | true | true | false | 单个 baseline 是否同时达到质量覆盖、正效应、正 CI 下界和校正显著性门禁。 |
 | quality_matched_row_digest | provenance | none | true | true | false | 单个 baseline 质量匹配统计行的稳定摘要。 |
 | quality_matched_row_count | metric | none | true | true | false | 质量匹配统计实际包含的主表 baseline 行数, 闭合值为4。 |
@@ -2749,11 +2749,11 @@ Notebook 与 repository module 的跨边界数据
 | proposed_method_threshold_digest | provenance | none | true | true | false | 单条配对 outcome 中 SLM-WM 实际使用的审计冻结阈值摘要。 |
 | baseline_method_threshold_digest | provenance | none | true | true | false | 单条配对 outcome 中对应主表 baseline 实际使用的审计冻结阈值摘要。 |
 | paired_prompt_count | metric | none | true | true | false | 单个主表 baseline 参与总体配对统计的唯一 test Prompt 数量。 |
-| randomization_repeat_count | metric | none | true | true | false | 正式配对统计实际覆盖的注册 seed-key 交叉重复数量, 当前固定为9。 |
+| randomization_repeat_count | metric | none | true | true | false | 正式配对统计实际覆盖的注册 seed-key 配对数量, 当前固定为5。 |
 | paired_attack_count | metric | none | true | true | false | 单个主表 baseline 对每个 Prompt 完整覆盖的攻击条件数量。 |
 | paired_observation_count | metric | none | true | true | false | 单个主表 baseline 参与总体统计的原子 Prompt x registered-repeat x attack 配对观测数量; 该数量不是独立推断样本量。 |
-| statistical_unit | protocol | none | true | true | false | 正式总体优势推断使用的独立统计单位, 固定为 prompt_cluster; 同一 Prompt 的9重复和完整攻击观测作为一个整体。 |
-| mean_paired_true_positive_rate_difference | metric | none | true | true | false | 先在每个 Prompt 的单 repeat 内跨完整攻击集合求均值, 再对同一 Prompt 的9个注册 repeat 等权平均, 最后跨 Prompt 聚合得到的 SLM-WM 相对 baseline 平均二元检测差值。 |
+| statistical_unit | protocol | none | true | true | false | 正式总体优势推断使用的独立统计单位, 固定为 prompt_cluster; 同一 Prompt 的5重复和完整攻击观测作为一个整体。 |
+| mean_paired_true_positive_rate_difference | metric | none | true | true | false | 先在每个 Prompt 的单 repeat 内跨完整攻击集合求均值, 再对同一 Prompt 的5个注册 repeat 等权平均, 最后跨 Prompt 聚合得到的 SLM-WM 相对 baseline 平均二元检测差值。 |
 | mean_paired_difference_ci_low | metric | none | true | true | false | Prompt-clustered bootstrap 对总体平均配对差值给出的 percentile CI 下界。 |
 | mean_paired_difference_ci_high | metric | none | true | true | false | Prompt-clustered bootstrap 对总体平均配对差值给出的 percentile CI 上界。 |
 | positive_prompt_cluster_count | metric | none | true | true | false | 平均配对差值大于0的 Prompt 聚类数量。 |
@@ -2763,27 +2763,27 @@ Notebook 与 repository module 的跨边界数据
 | one_sided_exact_prompt_cluster_sign_flip_p_value | metric | none | true | true | false | 通过整数动态规划精确计算的 Prompt-cluster sign-flip sharp-null 诊断 p 值。 |
 | exact_prompt_cluster_sign_flip_p_value_is_diagnostic | governance | none | true | false | false | 明确标识 exact sign-flip 仅检验 sharp null, 不用于均值优势 claim 门禁。 |
 | sharp_null_diagnostic_method | protocol | none | true | false | false | sharp-null 诊断方法, 正式值为 exact_prompt_cluster_sign_flip_dp。 |
-| claim_p_value_method | protocol | none | true | false | false | 精确9重复配对优势使用的均值检验方法, 正式值为 bounded_hoeffding_prompt_cluster_registered_repeat_mean; 推断样本量只取 test Prompt 数量, 不得扩张为9倍 repeat-Prompt 数量。 |
+| claim_p_value_method | protocol | none | true | false | false | 精确5重复配对优势使用的均值检验方法, 正式值为 bounded_hoeffding_prompt_cluster_registered_repeat_mean; 推断样本量只取 test Prompt 数量, 不得扩张为5倍 repeat-Prompt 数量。 |
 | holm_adjusted_p_value | metric | none | true | true | false | 对4个主表 baseline 的单侧 bounded Hoeffding claim p 值执行 Holm 校正后的结果。 |
 | bootstrap_resample_count | protocol | none | true | false | false | Prompt-clustered bootstrap 的重采样次数, 正式闭合固定为100000。 |
 | bootstrap_seed_digest_random | random | _digest_random | true | false | false | 仅由固定分析 schema、baseline、规范 Prompt 集、攻击 registry、注册 repeat 集、outcome 集、置信度和重采样次数确定的 bootstrap 随机源摘要。 |
-| bootstrap_analysis_schema | protocol | none | true | false | false | 精确9重复 bootstrap 固定分析规范, 正式值为 paired_prompt_cluster_registered_repeat_mean_bootstrap。 |
+| bootstrap_analysis_schema | protocol | none | true | false | false | 精确5重复 bootstrap 固定分析规范, 正式值为 paired_prompt_cluster_registered_repeat_mean_bootstrap。 |
 | bootstrap_bit_generator | protocol | none | true | false | false | bootstrap 使用的 NumPy bit generator, 正式值为 PCG64。 |
 | bootstrap_quantile_method | protocol | none | true | false | false | percentile CI 的 NumPy quantile 算法, 正式值为 linear。 |
 | paired_attack_registry_digest | provenance | none | true | true | false | 配对 outcome 共同覆盖的正式攻击身份、资源档位与配置摘要 registry 的稳定摘要。 |
-| registered_repeat_ids_digest | provenance | none | true | true | false | 对精确9个正式 randomization repeat ID 按冻结顺序计算的稳定摘要。 |
-| proposed_method_repeat_threshold_map_digest | provenance | none | true | true | false | 单个 baseline 统计行中 SLM-WM 的9个 repeat 独立 fixed-FPR 阈值映射摘要。 |
-| baseline_method_repeat_threshold_map_digest | provenance | none | true | true | false | 单个 baseline 统计行中该 baseline 的9个 repeat 独立 fixed-FPR 阈值映射摘要。 |
+| registered_repeat_ids_digest | provenance | none | true | true | false | 对精确5个正式 randomization repeat ID 按冻结顺序计算的稳定摘要。 |
+| proposed_method_repeat_threshold_map_digest | provenance | none | true | true | false | 单个 baseline 统计行中 SLM-WM 的5个 repeat 独立 fixed-FPR 阈值映射摘要。 |
+| baseline_method_repeat_threshold_map_digest | provenance | none | true | true | false | 单个 baseline 统计行中该 baseline 的5个 repeat 独立 fixed-FPR 阈值映射摘要。 |
 | protocol_digest | provenance | none | true | true | false | 单行配对统计绑定规范 threshold 行、审计报告与审计 manifest 配置摘要的统一 fixed-FPR 协议摘要。 |
-| randomization_paired_statistics_ready | governance | none | true | true | false | 精确9重复、4个 baseline、完整 test Prompt 与攻击笛卡尔积是否已完成可重建统计; 该字段不等价于质量匹配后的论文 claim readiness。 |
+| randomization_paired_statistics_ready | governance | none | true | true | false | 精确5重复、4个 baseline、完整 test Prompt 与攻击笛卡尔积是否已完成可重建统计; 该字段不等价于质量匹配后的论文 claim readiness。 |
 | paired_superiority_ready | governance | none | true | true | false | 单个主表 baseline 是否同时满足正平均差值、正 CI 下界和 Holm 校正后显著性门禁。 |
 | paired_superiority_row_count | metric | none | true | true | false | 配对总体优势表实际包含的主表 baseline 统计行数, 闭合值为4。 |
 | paired_superiority_ready_ids | governance | none | true | true | false | 已通过单方法配对总体优势门禁的主表 baseline 身份序列。 |
 | paired_superiority_exact_set_ready | governance | none | true | true | false | 配对总体优势统计是否无缺失、无额外且无重复地覆盖4个主表 baseline。 |
 | overall_paired_superiority_ready | governance | none | true | true | false | 4个主表 baseline 是否全部通过 Prompt 聚类配对总体优势门禁。 |
 | paired_superiority_rows_digest | provenance | none | true | true | false | 对按主表 baseline 稳定排序的4行总体配对统计计算的稳定摘要。 |
-| method_repeat_threshold_digest_map | provenance | none | true | true | false | 精确9个 repeat 到 SLM-WM 与4个 baseline 独立 fixed-FPR 阈值摘要的规范映射。 |
-| method_repeat_threshold_map_digest | provenance | none | true | true | false | 对完整45项 method-repeat 阈值摘要映射计算的稳定摘要。 |
+| method_repeat_threshold_digest_map | provenance | none | true | true | false | 精确5个 repeat 到 SLM-WM 与4个 baseline 独立 fixed-FPR 阈值摘要的规范映射。 |
+| method_repeat_threshold_map_digest | provenance | none | true | true | false | 对完整25项 method-repeat 阈值摘要映射计算的稳定摘要。 |
 | conclusion_decision | governance | none | true | true | true | 兼容三态结论字段, 只能等于 `registered_claim_set_decision`, 不得把证据缺失写成 measured_not_supported。 |
 | claim_decisions | governance | none | true | true | false | 以预登记主张标识为键保存各项论文主张三态决策的映射, 不保存未经重建的人工结论。 |
 | registered_claim_ids | governance | none | true | true | false | 冻结主张登记表中全部必要与可选论文主张的稳定顺序集合。 |
@@ -2830,7 +2830,7 @@ Notebook 与 repository module 的跨边界数据
 | cross_attack_quality_decision | governance | none | false | true | true | 只能由完整逐攻击质量决策集合派生的跨攻击三态结论。 |
 | quality_preservation_claim_decision | governance | none | false | true | true | 三类质量子主张和跨攻击决策共同派生的总体质量保持决策。 |
 | distributional_preservation_inference | artifact | none | false | true | true | Prompt 条件 KID 的 Prompt 聚类均值与区间记录。 |
-| prompt_distribution_record_digest | provenance | none | true | false | true | 单个 Prompt 内9个 repeat 条件 KID 记录的稳定摘要。 |
+| prompt_distribution_record_digest | provenance | none | true | false | true | 单个 Prompt 内5个 repeat 条件 KID 记录的稳定摘要。 |
 | prompt_distribution_records_digest | provenance | none | false | true | true | 完整 Prompt 条件 KID 记录集合的稳定摘要。 |
 | probe_workflow_closed | governance | none | true | false | false | `probe_paper` 是否真实执行全部正式步骤并形成完整受治理产物, 不表达科学效果。 |
 | protocol_isomorphism_ready | governance | none | true | false | false | 三个论文 profile 删除允许变化的规模字段后是否具有相同协议语义。 |
@@ -2907,7 +2907,7 @@ Notebook 与 repository module 的跨边界数据
 | paired_test_prompt_count | metric | none | true | true | false | 4个主表 baseline 共享的规范 test Prompt 集合大小。 |
 | paired_test_prompt_id_digest | provenance | none | true | true | false | 对4个主表 baseline 共享的规范 test Prompt 身份集合排序后计算的稳定摘要。 |
 | expected_attack_count | protocol | none | true | false | false | 当前论文层级必须完整覆盖的正式攻击配置数量。 |
-| method_observation_source_path_map | provenance | none | true | false | false | 五方法身份到 fixed-FPR 审计和配对统计实际读取的 observation 文件路径映射。 |
+| method_observation_source_path_map | provenance | none | true | false | false | 主方法与四个外部 baseline 身份到 fixed-FPR 审计和配对统计实际读取的 observation 文件路径映射。 |
 | paired_superiority_scale_ready | governance | none | true | true | false | 配对结果是否覆盖当前论文运行要求的完整 test Prompt 数量与同一非空攻击集合。 |
 | point_estimate_effect_direction_ready | governance | none | true | true | false | 正式结果记录中 SLM-WM 的跨攻击平均 TPR 是否高于最强主表 baseline。 |
 | official_reference_fidelity_digest | provenance | none | false | true | false | 结果闭合门禁对三方法 official-reference records、summary 与 manifest 计算的组合摘要。 |
@@ -3199,29 +3199,29 @@ Notebook 与 repository module 的跨边界数据
 | kid_subset_std_is_standard_error | protocol | none | true | true | false | KID std 是否是均值标准误, 正式协议固定为 false。 |
 | kid_output_scale | protocol | none | true | false | false | KID 输出缩放系数, 当前固定为1并保留原始尺度。 |
 | kid_full_sample_subset_std | protocol | none | true | true | false | 子集覆盖完整集合时显式记录的 KID 总体标准差, 当前固定为0。 |
-| prompt_count_per_repeat | metric | none | true | true | false | 精确9重复数据集质量统计中每个 repeat 必须覆盖的完整 Prompt 数量, 对 probe、pilot、full 分别为70、700、7000。 |
-| aggregate_quality_pair_count | metric | none | true | true | false | 精确9重复 FID/KID 联合计算实际使用的 source/comparison 图像对数量, 等于9乘当前层级完整 Prompt 数量。 |
-| aggregate_feature_record_count | metric | none | true | true | false | 精确9重复 FID/KID 联合计算实际使用的原始 Inception feature record 数量, 等于质量图像对数量的2倍。 |
-| prompt_id_set_digest | provenance | none | true | true | false | 精确9重复质量成员共同使用的完整 Prompt ID 集合摘要。 |
+| prompt_count_per_repeat | metric | none | true | true | false | 精确5重复数据集质量统计中每个 repeat 必须覆盖的完整 Prompt 数量, 对 probe、pilot、full 分别为70、700、7000。 |
+| aggregate_quality_pair_count | metric | none | true | true | false | 精确5重复 FID/KID 联合计算实际使用的 source/comparison 图像对数量, 等于5乘当前层级完整 Prompt 数量。 |
+| aggregate_feature_record_count | metric | none | true | true | false | 精确5重复 FID/KID 联合计算实际使用的原始 Inception feature record 数量, 等于质量图像对数量的2倍。 |
+| prompt_id_set_digest | provenance | none | true | true | false | 精确5重复质量成员共同使用的完整 Prompt ID 集合摘要。 |
 | quality_feature_membership_digest | provenance | none | true | true | false | repeat、Prompt、质量记录和 source/comparison 图像摘要组成的规范成员关系集合摘要。 |
 | quality_feature_records_digest | provenance | none | true | true | false | 按 repeat、Prompt 和 source/comparison 角色规范排序的原始 Inception feature records 集合摘要。 |
-| fid_kid_metric_rows_digest | provenance | none | true | true | false | 从精确9重复原始 Inception 特征联合重建的 FID、KID mean 与 KID std 三行摘要。 |
-| registered_repeat_count | metric | none | true | false | false | 精确9重复 FID/KID 数值协议中冻结的注册 repeat 数量, 当前为9。 |
-| feature_population_rule | protocol | none | true | false | false | 精确9重复 FID/KID 以全部注册 repeat 的原始 Inception feature rows 构造联合分布, 不平均单 repeat 派生指标。 |
-| prompt_weighting_rule | protocol | none | true | false | false | 每个 Prompt 通过精确 repeat 笛卡尔积获得相同的9次分布样本权重。 |
-| aggregate_sample_pair_count_by_paper_run | protocol | none | true | false | false | probe、pilot、full 的精确9重复联合质量样本对数量映射, 分别为630、6300、63000。 |
-| randomization_kid_effective_subset_size_by_paper_run | protocol | none | true | false | false | 精确9重复联合 KID 的实际子集大小映射, probe、pilot、full 分别为630、1000、1000。 |
-| base_formal_metric_protocol_digest | provenance | none | true | false | false | 精确9重复质量协议所复用的单分布 FID/KID 算子协议摘要。 |
+| fid_kid_metric_rows_digest | provenance | none | true | true | false | 从精确5重复原始 Inception 特征联合重建的 FID、KID mean 与 KID std 三行摘要。 |
+| registered_repeat_count | metric | none | true | false | false | 精确5重复 FID/KID 数值协议中冻结的注册 repeat 数量, 当前为5。 |
+| feature_population_rule | protocol | none | true | false | false | 精确5重复 FID/KID 以全部注册 repeat 的原始 Inception feature rows 构造联合分布, 不平均单 repeat 派生指标。 |
+| prompt_weighting_rule | protocol | none | true | false | false | 每个 Prompt 通过精确5个预登记 seed-key 配对获得相同的5次分布样本权重。 |
+| aggregate_sample_pair_count_by_paper_run | protocol | none | true | false | false | probe、pilot、full 的精确5重复联合质量样本对数量映射, 分别为350、3500、35000。 |
+| randomization_kid_effective_subset_size_by_paper_run | protocol | none | true | false | false | 精确5重复联合 KID 的实际子集大小映射, probe、pilot、full 分别为350、1000、1000。 |
+| base_formal_metric_protocol_digest | provenance | none | true | false | false | 精确5重复质量协议所复用的单分布 FID/KID 算子协议摘要。 |
 | randomization_dataset_quality_metric_protocol_digest | provenance | none | true | true | false | 注册 repeat 联合特征总体、Prompt 等权规则、样本数量和 KID 子集大小协议摘要。 |
-| quality_metric_names | protocol | none | true | true | false | 精确9重复数据集质量表要求的指标名称有序集合, 固定为 fid、kid_mean、kid_std。 |
-| quality_metric_status | governance | none | true | true | false | 精确9重复 FID/KID 三行是否完成真实数值测量, 正式可重建结果固定为 measured。 |
-| randomization_dataset_quality_statistics_ready | governance | none | true | true | false | 9个注册 repeat、完整 Prompt 成员、两类特征角色和 FID/KID 数值是否全部可从原始特征重建；不表示质量效果主张自动获支持。 |
-| randomization_dataset_quality_summary_digest | provenance | none | true | true | false | 精确9重复 FID/KID 重建摘要在加入自身摘要前的稳定摘要。 |
-| repeat_source_records | provenance | none | true | false | false | 9个注册 repeat 各自使用的质量图像记录成员与原始 Inception 特征成员来源表。 |
+| quality_metric_names | protocol | none | true | true | false | 精确5重复数据集质量表要求的指标名称有序集合, 固定为 fid、kid_mean、kid_std。 |
+| quality_metric_status | governance | none | true | true | false | 精确5重复 FID/KID 三行是否完成真实数值测量, 正式可重建结果固定为 measured。 |
+| randomization_dataset_quality_statistics_ready | governance | none | true | true | false | 5个注册 repeat、完整 Prompt 成员、两类特征角色和 FID/KID 数值是否全部可从原始特征重建；不表示质量效果主张自动获支持。 |
+| randomization_dataset_quality_summary_digest | provenance | none | true | true | false | 精确5重复 FID/KID 重建摘要在加入自身摘要前的稳定摘要。 |
+| repeat_source_records | provenance | none | true | false | false | 5个注册 repeat 各自使用的质量图像记录成员与原始 Inception 特征成员来源表。 |
 | quality_image_source | provenance | none | true | false | false | 单个 repeat 的正式质量图像记录成员、文件摘要和上游 leaf 身份。 |
 | quality_feature_source | provenance | none | true | false | false | 单个 repeat 的正式 Inception feature records 成员、文件摘要和上游 leaf 身份。 |
-| repeat_source_records_digest | provenance | none | true | true | false | 9个 repeat 最小质量来源表的稳定摘要。 |
-| randomization_dataset_quality_report_digest | provenance | none | true | true | false | 精确9重复数据集质量来源报告在加入自身摘要前的稳定摘要。 |
+| repeat_source_records_digest | provenance | none | true | true | false | 5个 repeat 最小质量来源表的稳定摘要。 |
+| randomization_dataset_quality_report_digest | provenance | none | true | true | false | 精确5重复数据集质量来源报告在加入自身摘要前的稳定摘要。 |
 | branch_risk_mode | method | none | true | false | false | 载体路由使用分支特定风险场或共享全局风险对照的真实机制模式。 |
 | local_contrast_risk_weight | method | none | true | false | false | 灰度相对反射填充5x5局部均值绝对偏离在分支风险中的非负权重。 |
 | adjacent_step_instability_weight | method | none | true | false | false | 当前与紧邻上一 scheduler 步解码 RGB 不稳定度在分支风险中的非负权重。 |
@@ -3770,12 +3770,12 @@ Notebook 与 repository module 的跨边界数据
 | independent_semantic_source_feature_digest | provenance | none | true | false | true | 配对独立视觉内容指标引用的 source DINOv2 CLS 向量稳定摘要；字段名保留兼容标识符。 |
 | independent_semantic_comparison_feature_digest | provenance | none | true | false | true | 配对独立视觉内容指标引用的 comparison DINOv2 CLS 向量稳定摘要；字段名保留兼容标识符。 |
 | independent_semantic_quality_protocol_digest | provenance | none | true | true | true | 独立视觉内容评估器的 DINOv2 模型 ID、精确 revision、预处理、特征层、归一化和依赖锁联合摘要；字段名保留兼容标识符。 |
-| paired_quality_independent_semantic_feature_records_digest | provenance | none | false | true | true | 单 repeat 或9-repeat 独立视觉内容原始特征集合的稳定摘要；字段名中的 `independent_semantic` 是兼容标识符。 |
+| paired_quality_independent_semantic_feature_records_digest | provenance | none | false | true | true | 单 repeat 或5-repeat 独立视觉内容原始特征集合的稳定摘要；字段名中的 `independent_semantic` 是兼容标识符。 |
 | paired_quality_metric_record_id | provenance | none | true | false | true | base 或逐攻击 SSIM、诊断 CLIP 与独立视觉内容配对原始记录标识。 |
 | paired_quality_metric_record_digest | provenance | none | true | false | true | 配对质量指标、图像摘要、estimand scope 及两套冻结特征摘要的稳定摘要。 |
-| attack_prompt_distribution_record_digest | provenance | none | true | false | true | 单一注册攻击和 Prompt 下9个 repeat 的无偏 Prompt 条件 KID 记录摘要。 |
+| attack_prompt_distribution_record_digest | provenance | none | true | false | true | 单一注册攻击和 Prompt 下5个 repeat 的无偏 Prompt 条件 KID 记录摘要。 |
 | attack_conditioned_quality_component_ready | governance | none | false | true | true | 单 repeat 是否完整产生 test Prompt 乘注册攻击的四图、Inception、诊断 CLIP、独立 DINOv2 和配对指标证据。 |
-| attack_conditioned_quality_statistics_ready | governance | none | false | true | true | 9-repeat 聚合是否完成逐攻击 Prompt bootstrap 与跨攻击质量决策。 |
+| attack_conditioned_quality_statistics_ready | governance | none | false | true | true | 5-repeat 聚合是否完成逐攻击 Prompt bootstrap 与跨攻击质量决策。 |
 | gpu_operator_preflight_ready | governance | none | false | true | true | 单 Prompt 真实 CUDA 方法算子、数值门禁、三图保持、Q/K 归因和 PRG 固定向量是否全部通过。 |
 | gpu_resource_budget_ready | governance | none | false | true | true | 已登记 GPU 资源上限是否覆盖显存、单 Prompt 时间和估计总 GPU 小时。该字段不改变方法算子结论。 |
 | qualification_report_digest | provenance | none | false | true | true | 移除自身摘要字段后对 GPU 方法资格化报告规范内容计算的稳定摘要。 |

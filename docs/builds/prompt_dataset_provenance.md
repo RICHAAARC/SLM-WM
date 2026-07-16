@@ -80,6 +80,11 @@ FPR=0.01 与 FPR=0.001。三层运行共享同一方法、检测器、攻击、b
 统计代码与证据结构, Prompt 和 test 数量只控制样本规模, FPR 则定义各层独立的
 错误接受率要求。
 
+证据职责上，`pilot_paper` 是主投稿规模，`full_paper` 是可选扩展。由于 Prompt、ID
+和 split 前缀稳定，完整 provenance 匹配时可以复用共同 Prompt 的 profile-invariant
+图像、普通攻击和公开特征；每层仍必须独立建立 calibration population、冻结阈值、
+重建决策和统计。未执行 full 不改变 pilot Prompt 总体或其投稿证据资格。
+
 ## 四、构建与复验
 
 从已下载的冻结来源构建候选配置。命令只写入 `outputs/`, 不直接覆盖受治理配置：

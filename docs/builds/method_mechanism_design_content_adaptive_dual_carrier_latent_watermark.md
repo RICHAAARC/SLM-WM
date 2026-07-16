@@ -607,7 +607,7 @@ rescue_margin_low <= raw_content_score - content_threshold < 0
 
 ### 6.2 `paper_experiments/`
 
-`paper_experiments/` 只负责9重复聚合、Prompt 聚类置信区间、主张决策、baseline 对比和论文产物重建。它必须分别聚合 clean detection rate、逐攻击 attacked detection rate、clean/attacked/wrong-key FPR、救回增益与质量指标，但不得重新计算水印分数、修改几何恢复结果或用聚合逻辑推断缺失的 `rescue_applied`。
+`paper_experiments/` 只负责5重复聚合、Prompt 聚类置信区间、主张决策、baseline 对比和论文产物重建。它必须分别聚合 clean detection rate、逐攻击 attacked detection rate、clean/attacked/wrong-key FPR、救回增益与质量指标，但不得重新计算水印分数、修改几何恢复结果或用聚合逻辑推断缺失的 `rescue_applied`。
 
 ### 6.3 `scripts/` 与 Notebook
 
@@ -869,11 +869,26 @@ pilot_paper = 0.01
 full_paper = 0.001
 ```
 
-三档使用完全相同且精确为9的 seed-key 交叉重复集合与顺序。允许变化的字段只能来自 profile 登记的 Prompt / 样本数量、上述目标 FPR 和由二者派生的统计强度；操作输出路径只允许由 `profile_id` 确定性派生，不能成为独立协议变量。嵌入强度、几何预算、Q/K 关系公式、搜索参数、样本角色、攻击职责、质量指标、决策规则、最小6角色集合和产物 schema 均不得变化。三档的 `full_dual_chain` 不得关闭几何链或使用 content-only 快速路径；第7.1节登记的消融按其固定开关执行，不能替代主方法结果。
+三档使用完全相同且精确为5的 seed-key 交叉重复集合与顺序。5个重复由权威随机化登记表预先冻结为5个身份互异的 `(generation_seed_offset, watermark_key_index)` 有序配对，不构造 seed 与 key 的完整笛卡尔积，也不得按结果筛选。允许变化的字段只能来自 profile 登记的 Prompt / 样本数量、上述目标 FPR 和由二者派生的统计强度；操作输出路径只允许由 `profile_id` 确定性派生，不能成为独立协议变量。嵌入强度、几何预算、Q/K 关系公式、搜索参数、样本角色、攻击职责、质量指标、决策规则、最小6角色集合和产物 schema 均不得变化。三档的 `full_dual_chain` 不得关闭几何链或使用 content-only 快速路径；第7.1节登记的消融按其固定开关执行，不能替代主方法结果。
 
-每档都必须形成相同结论集合的闭合结果。`probe_paper` 通过可以证明 FPR=0.1 下同构全流程可执行，但不能替代 `pilot_paper` 和 `full_paper` 各自更低 FPR 所需的 calibration 与统计证据。
+三档的证据职责固定为：`probe_paper` 验证同构流程和初步可行性；`pilot_paper` 是主投稿证据 profile；`full_paper` 是更严格 FPR 和更大样本规模的可选扩展。实际执行的 profile 必须形成相同结论集合的自身闭合结果。`full_paper` 未运行或未闭合不阻断完整 `pilot_paper` 的结果闭合、投稿就绪和作用域内主张；任何较低层结果都不能替代更严格 profile 自身的 calibration 与统计证据。
 
 单 Prompt 和单 repeat 仅用于工程资格化，必须保持 `supports_paper_claim=false`。
+
+### 8.1 等价执行、缓存与并行接口
+
+正式 runtime 可以把6角色的执行图拆为“共享原子”和“角色/密钥/决策原子”，但必须保持单样本 schema 与统计总体不变：
+
+1. clean 图像按 generation identity 跨角色安全复用；同图像的 VAE latent、公开 Q/K、S/T/R/Q 内容观测和质量特征由一个只读 measurement package 提供。
+2. registered-key 与 wrong-key 共用 evaluated image 和密钥无关 measurement package；密钥模板、稳定 token、LF/HF 内容分数、几何目标、搜索、aligned 分数和最终判定必须重新计算。
+3. 普通攻击缓存键至少绑定 source image SHA-256、攻击 ID、完整配置、攻击种子、代码提交和科学依赖摘要；攻击结果必须逐字节复验，不能在不同 source image 间复用。
+4. 几何搜索保持惰性。test/application 只为冻结窗口内失败样本执行；calibration 每条负观测至多真实执行一次，窗口和阈值候选复用测量后重算布尔决策。
+5. Prompt-repeat 作为幂等 checkpoint 原子，只有全部预期记录和摘要验证通过才可跳过；failure 记录也是完成成员，不得采用成功导向重试。
+6. 样本级多 GPU worker 只领取确定性样本身份，保持 `batch_size=1`，使用原子发布和唯一 ownership；聚合前验证无遗漏、无重复、无额外身份和设备/依赖漂移。
+7. 三档嵌套 Prompt 的 profile-invariant 产物可复用；profile-specific calibration population、目标 FPR、阈值、决策和统计产物必须重建。
+8. Prompt embedding、empty-text 条件、公开探针、LF/HF 形状模板和几何 pair-sign 等与图像无关且由完整身份确定的原子可缓存；图像依赖 stable token、内容路由和密钥依赖模板不得跨图像复用。
+
+可选的共享生成前缀接口在 callback 索引10保存同一 Prompt-repeat 的条件状态、scheduler 状态、`z_9`、`z_10`、随机状态和完整 runtime identity，然后为6角色分别执行后缀。该接口只是性能实现，必须先通过“共享前缀运行 versus 六次独立运行”的逐角色等价性测试；等价性不成立时不得用于正式证据。所有缓存/checkpoint manifest 必须记录输入身份、生产代码、依赖、schema、内容摘要和命中来源，并保持 `supports_paper_claim=false`。
 
 ---
 

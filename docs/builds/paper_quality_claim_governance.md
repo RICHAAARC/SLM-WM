@@ -4,6 +4,8 @@
 
 本文档是质量主张估计对象、统计单位、区间方向和非劣效判据的唯一规范。真实四图配对、逐攻击图像、独立视觉内容特征和 Inception 特征如何生产，由 `../paper_quality_evidence_governance.md` 约束；最终 `quality_preservation` 如何进入论文主张集合，由 `paper_claim_decision_governance.md` 约束。三份文档不得分别维护不同指标、阈值或文件名。
 
+三档使用相同质量 estimand 和判据，但分别形成自身决策。`pilot_paper` 的质量结论属于主投稿证据，`full_paper` 的质量结论属于可选扩展；full 缺失不阻断完整 pilot 质量主张。相同图像的受治理特征缓存可以减少重复计算，但不得跨 profile 复制区间、三态决策或 `quality_preservation` 结论。
+
 ## 一、结论对象
 
 质量保持不再由一个 `formal_fid_kid_ready` 布尔值代替，而是拆分为三个独立质量子主张，也就是唯一正式 claim `quality_preservation` 的三个决策分量：
@@ -16,11 +18,11 @@
 
 ## 二、估计对象与统计单位
 
-Prompt 是主要总体采样单位。每个 Prompt 下的9个 seed-key repeat 是嵌套随机化观测, 不按630个独立样本解释 `probe_paper`, 也不把9个 repeat 当作唯一的 `n=9`。
+Prompt 是主要总体采样单位。每个 Prompt 下的5个 seed-key repeat 是嵌套随机化观测, 不按350个独立样本解释 `probe_paper`, 也不把5个 repeat 当作唯一的 `n=5`。
 
-分布保持主分析先在每个 Prompt 内用9个 clean Inception 特征和9个 watermarked Inception 特征计算三阶多项式核的完整无偏 KID U-statistic, 得到一个 `prompt_conditional_kid`。随后只对 Prompt 级 KID 值执行冻结的 PCG64 bootstrap, 形成均值和95%区间。该估计对象是“对 Prompt 总体取期望的条件分布位移”, 其中 repeat 只刻画同一 Prompt 下的随机化变化。
+分布保持主分析先在每个 Prompt 内用5个 clean Inception 特征和5个 watermarked Inception 特征计算三阶多项式核的完整无偏 KID U-statistic, 得到一个 `prompt_conditional_kid`。随后只对 Prompt 级 KID 值执行冻结的 PCG64 bootstrap, 形成均值和95%区间。该估计对象是“对 Prompt 总体取期望的条件分布位移”, 其中 repeat 只刻画同一 Prompt 下的随机化变化。
 
-联合630/6300/63000行特征重建的 FID/KID 三行继续保留, 用于描述 clean 与 watermarked 图像总体分布位移和复验既有数学算子；这些行不再充当独立样本推断, 也不直接投票支持质量主张。
+联合350/3500/35000行特征重建的 FID/KID 三行继续保留, 用于描述 clean 与 watermarked 图像总体分布位移和复验既有数学算子；这些行不再充当独立样本推断, 也不直接投票支持质量主张。
 
 ## 三、解释边界
 
@@ -57,8 +59,8 @@ delta_kid = kid(watermarked, reference) - kid(clean, reference)
 
 1. 在 `configs/paper_quality_claim_protocol.json` 冻结 estimand、统计方向、区间和非劣效边界。
 2. 由 `experiments/` 从真实持久化图像生产配对 SSIM、独立视觉内容特征和 Inception 特征，不接受机制内部 CLIP 诊断值替代独立视觉内容质量。
-3. 由 `paper_experiments/analysis/randomization_dataset_quality.py` 按 Prompt 和9重复结构重建 clean 条件与逐攻击统计。
+3. 由 `paper_experiments/analysis/randomization_dataset_quality.py` 按 Prompt 和5重复结构重建 clean 条件与逐攻击统计。
 4. 由 `paper_experiments/analysis/paper_quality_decisions.py::build_quality_preservation_decisions` 形成三个质量子主张、逐攻击决策和跨攻击决策。
 5. 由 `scripts/paper_result_closure.py` 消费完整质量决策，禁止跳过原始记录直接写入最终状态。
 
-正向集成测试必须从真实 writer 格式的图像质量原子开始，经过单 repeat 包、9-repeat 聚合和 Prompt 聚类区间，最终得到三态质量决策。缺少记录应得到 `evidence_incomplete`；完整但未达到边界应得到 `measured_not_supported`；只有完整且达到边界才能得到 `supported`。
+正向集成测试必须从真实 writer 格式的图像质量原子开始，经过单 repeat 包、5-repeat 聚合和 Prompt 聚类区间，最终得到三态质量决策。缺少记录应得到 `evidence_incomplete`；完整但未达到边界应得到 `measured_not_supported`；只有完整且达到边界才能得到 `supported`。

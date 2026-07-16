@@ -4,7 +4,7 @@
 
 本文档说明 `probe_paper`、`pilot_paper` 与 `full_paper` 如何形成可机器复验的协议同构结论。该门禁比较代码与实验协议, 不比较效果数值, 也不把 probe 的科学结论外推到更严格 fixed-FPR 工作点。
 
-三个运行规模分别使用70、700和7000个 Prompt, 注册 FPR 分别为0.1、0.01和0.001。它们只允许改变登记的 Prompt / 样本规模、目标 FPR、统计强度和由规模派生的记录数量；核心方法、攻击、baseline、数据划分原则、阈值校准原则、指标语义、随机化、命令依赖图、产物 schema、gate 角色和主张决策结构必须完全一致。
+三个运行规模分别使用70、700和7000个 Prompt, 注册 FPR 分别为0.1、0.01和0.001。`probe_paper` 是流程与初步可行性 profile，`pilot_paper` 是主投稿证据 profile，`full_paper` 是可选扩展 profile。它们只允许改变登记的 Prompt / 样本规模、目标 FPR、统计强度和由规模派生的记录数量；核心方法、攻击、baseline、数据划分原则、阈值校准原则、指标语义、随机化、命令依赖图、产物 schema、gate 角色和主张决策结构必须完全一致。
 
 ## 二、唯一登记与实际来源
 
@@ -24,10 +24,10 @@
 - split 来自固定70条块内的 3:33:34 风险分层规则；
 - 阈值来自 calibration 中 clean negative、wrong-key negative 与登记 attacked negative 共同构成的完整决策器冻结协议；
 - 检测、配对优势和质量指标语义来自实际统计模块与冻结质量协议；
-- 随机化来自3个 seed 偏移和3个密钥索引形成的9重复注册表；
+- 随机化来自权威注册表预先冻结的5个互异 seed-key 有序配对；该集合不是 seed 与 key 的完整笛卡尔积；
 - 主张结构来自 `configs/paper_claim_registry.json`。
 
-这一实现属于通用工程写法：不能只比较 profile 名称或少量摘要, 而应把实际配置正文、执行依赖和结论规则共同纳入规范记录。SLM-WM 项目特定部分是上述 fixed-FPR、固定9重复、正式攻击、4个主表 baseline 和4项正式主张的具体绑定。
+这一实现属于通用工程写法：不能只比较 profile 名称或少量摘要, 而应把实际配置正文、执行依赖和结论规则共同纳入规范记录。SLM-WM 项目特定部分是上述 fixed-FPR、固定5重复、正式攻击、4个主表 baseline 和4项正式主张的具体绑定。
 
 ## 三、规范化记录
 
@@ -40,7 +40,7 @@ protocol_contract
 artifact_contract
 ```
 
-`scale_contract` 只保存允许变化的科学规模字段及其派生内容，包括 FPR、Prompt 文件与数量、各固定 split 的派生样本计数、三类样本角色的派生数量、质量图像数量和记录数量派生关系。Drive 结果根可以按 profile 派生，但它只是操作存储位置，不是科学协议变化字段；其派生规则必须同构。固定9重复不能在 profile 间变化。`protocol_contract` 保存所有必须一致的实验语义，包括三类样本角色、Q/K 关系公式、几何捕获域、生成式攻击职责和质量指标。`artifact_contract` 在三档比较视图中连接正式 claim 产物与非主张诊断产物的 writer、ready 字段和文件集合。机器登记以 `artifact_contract` 保存仅与四项 claim 一一对应的正式产物，以 `diagnostic_artifact_contract` 保存参数敏感性诊断产物；只有前者允许出现在 `gate_roles`。
+`scale_contract` 只保存允许变化的科学规模字段及其派生内容，包括 FPR、Prompt 文件与数量、各固定 split 的派生样本计数、三类样本角色的派生数量、质量图像数量和记录数量派生关系。Drive 结果根可以按 profile 派生，但它只是操作存储位置，不是科学协议变化字段；其派生规则必须同构。固定5重复不能在 profile 间变化。`protocol_contract` 保存所有必须一致的实验语义，包括三类样本角色、Q/K 关系公式、几何捕获域、生成式攻击职责和质量指标。`artifact_contract` 在三档比较视图中连接正式 claim 产物与非主张诊断产物的 writer、ready 字段和文件集合。机器登记以 `artifact_contract` 保存仅与四项 claim 一一对应的正式产物，以 `diagnostic_artifact_contract` 保存参数敏感性诊断产物；只有前者允许出现在 `gate_roles`。
 
 比较时不对任意 JSON 路径做宽松删除。实现只比较三个 profile 的完整 `protocol_contract` 与完整 `artifact_contract`, 因而未登记字段不能借“规模变化”名义被忽略。所有差异以结构化路径写入报告。
 
@@ -63,9 +63,15 @@ workflow_transfer_ready = (
 1. probe 结果为 `supported`：可以说明 FPR=0.1 下登记主张成立, 并在同构门禁通过时说明相同流程可迁移；不能说明 FPR=0.01或0.001下主张成立。
 2. probe 结果为 `measured_not_supported`：说明 FPR=0.1 下完整测量没有支持主张；若流程与产物仍完整且协议同构, `workflow_transfer_ready` 仍可为 true。
 
-没有 pilot 或 full 自身正式结果时, 报告将对应科学状态写成 `evidence_incomplete`、`scientific_support=null` 和 `scientific_support_transferred_from_probe=false`。这避免把工程可运行性误报为论文效果证据。
+没有 pilot 或 full 自身正式结果时, 报告将对应科学状态写成 `evidence_incomplete`、`scientific_support=null` 和 `scientific_support_transferred_from_probe=false`。其中 pilot 缺失会阻断主投稿证据闭合；full 缺失只表示可选扩展尚未建立，不阻断完整 pilot 作用域内的投稿就绪和主张。这避免把工程可运行性误报为论文效果证据，也避免把扩展实验误设为主投稿的硬前置。
 
-## 五、独立写出入口
+## 五、跨 profile 等价产物复用
+
+嵌套 Prompt 身份相同且完整 provenance 匹配时，三档可以复用 profile-invariant 的生成图像、普通攻击结果、公开 VAE/Q/K 原子和质量特征。复用记录必须绑定 source artifact digest、生产代码、模型 revision、预处理、dtype、依赖和缓存 schema，并逐成员验证。
+
+以下内容始终是 profile-specific，禁止从 probe 或 pilot 直接复制到更严格 profile：calibration population、经验预算、置信边界、`content_threshold`、`rescue_margin_low`、最终布尔决策、统计区间和主张决策。复用只减少重复测量，不改变每档独立证据责任。
+
+## 六、独立写出入口
 
 在与 probe 结果相同的 clean detached commit 中运行：
 
@@ -76,7 +82,7 @@ python -m scripts.write_paper_profile_protocol_isomorphism_report \
 
 writer 只在 `outputs/paper_profile_protocol_isomorphism/` 写出报告和 `manifest.local.json`。当前 Git 身份必须与 probe 闭合报告中的 `common_code_version` 精确相同；目录已存在时拒绝混入旧产物。该命令不运行 GPU 实验, 不修改结果, 也不进入 `main/`。
 
-## 六、方法迁移时的更新顺序与协议变更原子性
+## 七、方法迁移时的更新顺序与协议变更原子性
 
 方法、角色或证据 schema 发生受治理变更时，三档协议必须在同一变更单元中完成：
 

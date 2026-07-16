@@ -128,9 +128,23 @@ supports_paper_claim = false
 evidence_eligibility = intermediate_state_only
 ```
 
-完成 checkpoint 只表示“这些字节可以安全恢复并重新进入正式打包器”, 不表示已经形成论文结论.正式证据仍要求各 workflow 生成受治理 records、运行 manifest、package input manifest、archive summary、archive manifest 和 ZIP, 再由 CPU 结果闭合验证精确9+3聚合来源、fixed-FPR、方法比较和 claim-evidence 关系.
+完成 checkpoint 只表示“这些字节可以安全恢复并重新进入正式打包器”, 不表示已经形成论文结论.正式证据仍要求各 workflow 生成受治理 records、运行 manifest、package input manifest、archive summary、archive manifest 和 ZIP, 再由 CPU 结果闭合验证精确5+3聚合来源、fixed-FPR、方法比较和 claim-evidence 关系.
 
 恢复粒度以方法内部已经原子发布的完整科学单元为界。中断时正在计算的单个 source pair、攻击样本、T2SMark Prompt 或 official-reference 批次会从该单元起点重新执行; 其他已验证单元不会重放。项目不声称进程内列表、半写图像、任意 Python 指令或 GPU kernel 可以作为完成态续跑.
+
+## 主方法等价执行优化
+
+主方法正式运行允许采用以下可验证优化，所有命中记录和 checkpoint 本身仍是中间态：
+
+1. 以 Prompt-repeat 为最小幂等单元，完整保存6角色、三类样本角色、两种密钥关系、登记攻击和 failure 记录。恢复只跳过通过成员集合、配置身份和逐文件摘要复验的单元，不按结果得分选择重跑。
+2. clean 图像按 generation identity 跨方法角色复用；同一图像的 VAE latent、公开 Q/K、S/T/R/Q 观测和质量特征存入只读 measurement package。角色阈值、密钥模板和最终决策不进入该共享包。
+3. registered-key 与 wrong-key 共享图像和密钥无关测量；切换 scoring key 后重新计算密钥依赖载体、稳定 token、几何目标、搜索和判定。
+4. 普通攻击以 source image SHA-256、攻击完整配置、种子、代码和依赖为缓存身份。缓存发布和恢复沿用逐文件 SHA-256、manifest 自摘要和两阶段验证，不允许 clean 与 watermarked 图像因 Prompt 相同而共享结果。
+5. test/application 几何搜索保持近阈值惰性；calibration 每条负观测最多真实搜索一次，候选窗口与阈值只重算决策。
+6. 样本级多 GPU worker 使用预注册样本 identity 分片、唯一 ownership 和原子发布，保持单样本 `batch_size=1`。聚合前拒绝缺失、重复、额外 identity 或未登记环境漂移；GPU 设备信息保留为逐单元 provenance。
+7. profile 嵌套 Prompt 可复用 profile-invariant 图像、攻击和公开特征；各 profile 的 calibration、阈值、决策、统计和 claim audit 必须独立重建。
+
+可选共享生成前缀必须保存 callback 索引10以前的 Prompt 条件、scheduler、`z_9`、`z_10`、随机状态、模型和依赖身份，再为6角色分叉后缀。正式启用前必须用同一 Prompt-repeat 的六次独立运行作对照，验证逐角色图像、latent、测量和记录等价；验证失败时回退独立执行。缓存、共享前缀和多 GPU 调度不能改变正式样本集合、失败分母、随机化配对或统计单位。
 
 ## 可复用部分与项目特定部分
 

@@ -33,11 +33,11 @@ python -I validate_core_method_package.py --root .
 
 目标方法 registry 原子迁移前，两个外层论文代码包还必须携带迁移前方法不变量追踪文档，以闭合现有机器 `definition_pointer`；该文档只解释旧记录，不能覆盖两份无状态目标规范，也不能支持目标方法主张。目标 registry 切换后应与旧 pointer 同步退出。
 
-该包的必需入口同时包括 `scripts/run_gpu_server_result_closure.py` 和 `scripts/write_paper_profile_protocol_isomorphism_report.py`。前者从精确9重复聚合包重建论文统计与闭合结果, 后者从 probe 闭合报告重建三种运行规模的协议同构与流程迁移结论；两者都不导入 Notebook 或 Colab helper。
+该包的必需入口同时包括 `scripts/run_gpu_server_result_closure.py` 和 `scripts/write_paper_profile_protocol_isomorphism_report.py`。前者从精确5重复聚合包重建论文统计与闭合结果, 后者从 probe 闭合报告重建三种运行规模的协议同构与流程迁移结论；两者都不导入 Notebook 或 Colab helper。
 
 ## `paper_experiment_execution_package`
 
-用途: 在独立 CPU 或 GPU 运行环境中执行 probe_paper、pilot_paper 或 full_paper 的同一正式实验协议。三个论文运行层级只改变登记的 Prompt / 样本数量、目标 FPR 和统计强度；目标 FPR 分别固定为0.1、0.01和0.001。三档不改变方法、嵌入强度、几何预算、Q/K 公式、搜索参数、baseline、攻击、检测规则、产物 schema 或证据闭合要求。
+用途: 在独立 CPU 或 GPU 运行环境中执行 probe_paper、pilot_paper 或 full_paper 的同一正式实验协议。`pilot_paper` 是主投稿证据，`full_paper` 是可选扩展。三个论文运行层级只改变登记的 Prompt / 样本数量、目标 FPR 和统计强度；目标 FPR 分别固定为0.1、0.01和0.001。三档不改变方法、嵌入强度、几何预算、Q/K 公式、搜索参数、baseline、攻击、检测规则、产物 schema 或证据闭合要求。full 未执行不阻断 pilot 结果包和投稿就绪验证。
 
 该 profile 包含:
 
