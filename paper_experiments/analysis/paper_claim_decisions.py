@@ -55,10 +55,12 @@ def load_paper_claim_registry(
         payload.get("required_claims", ()),
         field_name="required_claims",
     )
-    optional = _nonempty_unique_strings(
-        payload.get("optional_claims", ()),
-        field_name="optional_claims",
-    )
+    optional_values = payload.get("optional_claims", ())
+    if not isinstance(optional_values, list):
+        raise ClaimDecisionGovernanceError("optional_claims 必须是列表")
+    optional = [str(value).strip() for value in optional_values]
+    if any(not value for value in optional) or len(optional) != len(set(optional)):
+        raise ClaimDecisionGovernanceError("optional_claims 不能包含空值或重复值")
     if set(required).intersection(optional) or set(required).union(optional) != set(registered):
         raise ClaimDecisionGovernanceError("required_claims 与 optional_claims 未精确覆盖登记集合")
     if tuple(payload.get("decision_states", ())) != CLAIM_DECISION_STATES:

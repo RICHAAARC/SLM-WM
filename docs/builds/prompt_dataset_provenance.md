@@ -58,9 +58,9 @@ Prompt UTF-8 摘要和整条记录自摘要。清单 SHA-256 固定为：
 | `pilot_paper` | 600 | 100 | 700 | `3a9d5f24d04974df362daacb2c75157d56fa143b56da1541d863b536bd6af858` |
 | `full_paper` | 6000 | 1000 | 7000 | `f4fcec11309545355c77814d1affb2a7054ee1eaada11709cb347aeea3cb84d8` |
 
-因此 `probe_paper` 的全部 Prompt 与顺序是 `pilot_paper` 的前70条,
-`pilot_paper` 又是 `full_paper` 的前700条。三级结果只改变统计强度与样本数量,
-不会因重新抽样而改变 Prompt 分布。
+因此 `probe_paper` 的全部 Prompt 与顺序是 `pilot_paper` 的前70条，
+`pilot_paper` 又是 `full_paper` 的前700条。Prompt 选择协议只改变样本数量，
+不会因重新抽样而改变 Prompt 分布；完整实验 profile 另按冻结登记改变目标 FPR 和统计强度。
 
 三级规模共享 3:33:34 的 dev、calibration、test 划分：
 

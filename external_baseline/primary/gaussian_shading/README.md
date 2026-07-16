@@ -17,11 +17,11 @@
 
 ChaCha20 算子采用仓库内最小实现, 字节输出由 IETF ChaCha20 官方测试向量约束。该路线没有 simple XOR 模式或兼容分支。
 
-Gaussian Shading 是独立 baseline, 不等同于 SLM-WM 的 `tail_robust` 分支。SLM-WM 对密钥高斯模板执行元素绝对幅值尾部截断, 没有空间频带定义, 也不复用 Gaussian Shading 的消息编码与 voting 检测协议。
+Gaussian Shading 是独立 baseline，不等同于 SLM-WM 的 HF-tail 分支。SLM-WM 目标 HF-tail 的精确定义以 `../../../docs/builds/algorithm_primitives_content_adaptive_dual_carrier_latent_watermark.md` 第7节为准；本 adapter 不复制其公式，也不复用 Gaussian Shading 的消息编码与 voting 检测协议。
 
 ## official reference 边界
 
-official reference 入口用于补充表方法忠实度审计, 不替代 SD3.5 Medium common-backbone 主表对比. 该入口在 `gaussian_shading_official_py38_cu117` 隔离子解释器中使用 CPython 3.8.20、CUDA 11.7 与登记依赖运行 `source/run_gaussian_shading.py`, 并把官方命令、stdout、stderr、`Identity.txt` 指标、schema、validation report、环境报告和压缩包写入 `outputs/gaussian_shading_official_reference/<paper_run_name>/` 及当前论文运行层级 Google Drive 根目录下的 `external_baseline_official_reference/` 目录. 当前运行资格由该 profile 的目标完整哈希锁审查门禁决定.
+official reference 入口用于补充表方法忠实度审计, 不替代 SD3.5 Medium common-backbone 主表对比. 该入口在 `gaussian_shading_official_py38_cu117` 隔离子解释器中使用 CPython 3.8.20、CUDA 11.7 与登记依赖运行 `source/run_gaussian_shading.py`, 并把官方命令、stdout、stderr、`Identity.txt` 指标、schema、validation report、环境报告和压缩包写入 `outputs/gaussian_shading_official_reference/<paper_run_name>/` 及当前论文运行层级 Google Drive 根目录下的 `external_baseline_official_reference/` 目录. 运行资格必须由该 profile 的完整哈希锁审查门禁决定。
 
 环境准备必须创建严格官方依赖环境。若官方依赖在当前包索引中存在不可满足冲突, 该运行只生成失败诊断, 不能进入三类正式 claim-ready 统计。
 
@@ -29,11 +29,11 @@ official reference 入口用于补充表方法忠实度审计, 不替代 SD3.5 M
 
 每批记录保留实际原始 argv, 并生成排除模型、checkpoint 与输出绝对路径的规范命令身份. 该身份绑定 Gaussian Shading 科学参数、官方模型仓库与 revision、模型快照内容摘要、OpenCLIP checkpoint SHA 与快照内容摘要, 因此可以在新的 Colab workspace 复验旧批次. 打包的完整相对文件白名单包含 `official_output/Identity.txt`; 任一必需事实缺失, 或出现额外文件、空目录、链接和特殊文件时均拒绝归档.
 
-## 当前可用入口
+## 受治理入口
 
 - adapter: `external_baseline/primary/gaussian_shading/adapter/run_slm_eval.py`
 - 方法忠实模式: `--adapter-mode method_faithful_sd35`
 - Notebook: `paper_workflow/notebooks/external_baseline_gaussian_shading_run.ipynb`
 - official reference Notebook: `paper_workflow/notebooks/official_reference_gaussian_shading_run.ipynb`
 - 输出边界: 只能写入 `outputs/` 下的 observation、manifest、候选记录和证据报告。
-- 论文主张: 是否进入 `probe_claim`、`pilot_claim` 或 `full_claim` 由 prompt 数量、fixed-FPR 校准、共同攻击矩阵检测和 formal import validator 共同决定。
+- 论文层级: 只有满足根目录 README 登记的三组负观测公平协议并通过正式导入与结果闭合，证据才可分别进入 `probe_paper`、`pilot_paper` 或 `full_paper`；实现状态只由项目构建状态文档登记。

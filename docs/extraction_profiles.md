@@ -12,9 +12,9 @@ python scripts/extract_release_package.py \
 
 用途: 发布最小论文方法代码。该 profile 只包含 `main/`、两个模型与方法配置、核心依赖身份、标准 Python 构建元数据、专用根 README 和包内只读验证入口; 不包含实验、论文结果、baseline、论文工作流脚本、测试、Notebook 或治理工具。
 
-这一层用于审阅“语义条件潜流形水印”的关键科学算子, 不承担实验编排或论文证据闭合。
+这一层目标上用于审阅“语义显著性自适应内容-几何双链潜空间水印”的关键科学算子，必须同时包含内容链和几何链，不承担实验编排或论文证据闭合。该 profile 同时携带两份无状态核心方法规范，使抽离包能够独立解释实现目标。抽离器不读取人类可读项目状态，也不把打包成功解释为方法一致性、GPU 资格或论文证据成立；这些结论必须由各自的受治理测试和报告给出。
 
-正式抽离要求开发仓库 clean, 随后在目标目录创建新的 clean detached Git 根。`docs/core_method_package_readme.md` 只作为专用发布说明源文件, 抽离后映射为包根 `README.md`; 开发仓库根 README 不进入最小包。`scripts/validate_core_method_package.py` 同理映射为包根 `validate_core_method_package.py`, 使验证命令不依赖开发仓库的 `scripts/` 层。
+最小包不携带有状态的 `project_construction_state.md`；论文产物重建包和论文实验执行包携带完整 `docs/builds/` 规范集合。正式抽离要求开发仓库 clean, 随后在目标目录创建新的 clean detached Git 根。`docs/core_method_package_readme.md` 只作为专用发布说明源文件, 抽离后映射为包根 `README.md`; 开发仓库根 README 不进入最小包。`scripts/validate_core_method_package.py` 同理映射为包根 `validate_core_method_package.py`, 使验证命令不依赖开发仓库的 `scripts/` 层。
 
 核心包不消费六个论文实验依赖锁。`configs/core_method_dependency_identity.json` 明确声明 Python 版本、与正式 GPU 锁一致的 PyTorch 2.11 可安装范围、构建后端和唯一 Python 包根, 并与 `pyproject.toml` 逐项复验。具体 CPU 或 CUDA wheel 由安装环境选择。独立验证命令为:
 
@@ -31,11 +31,13 @@ python -I validate_core_method_package.py --root .
 
 该 profile 包含核心方法、实验协议、论文分析、重建脚本、配置和必要文档, 但不包含外部 baseline 源码、开发测试、`paper_workflow/`、Notebook 或 Colab / Drive 包装。抽离命令会为该包创建独立 Git 根提交, 因而可在脱离开发仓库后使用自己的 clean detached commit 作为正式代码身份。
 
+目标方法 registry 原子迁移前，两个外层论文代码包还必须携带迁移前方法不变量追踪文档，以闭合现有机器 `definition_pointer`；该文档只解释旧记录，不能覆盖两份无状态目标规范，也不能支持目标方法主张。目标 registry 切换后应与旧 pointer 同步退出。
+
 该包的必需入口同时包括 `scripts/run_gpu_server_result_closure.py` 和 `scripts/write_paper_profile_protocol_isomorphism_report.py`。前者从精确9重复聚合包重建论文统计与闭合结果, 后者从 probe 闭合报告重建三种运行规模的协议同构与流程迁移结论；两者都不导入 Notebook 或 Colab helper。
 
 ## `paper_experiment_execution_package`
 
-用途: 在独立 CPU 或 GPU 运行环境中执行 probe_paper、pilot_paper 或 full_paper 的同一正式实验协议。三个论文运行层级只改变 Prompt / 样本数量和统计强度, 不改变方法、baseline、攻击、检测、固定 FPR 或证据闭合要求。
+用途: 在独立 CPU 或 GPU 运行环境中执行 probe_paper、pilot_paper 或 full_paper 的同一正式实验协议。三个论文运行层级只改变登记的 Prompt / 样本数量、目标 FPR 和统计强度；目标 FPR 分别固定为0.1、0.01和0.001。三档不改变方法、嵌入强度、几何预算、Q/K 公式、搜索参数、baseline、攻击、检测规则、产物 schema 或证据闭合要求。
 
 该 profile 包含:
 

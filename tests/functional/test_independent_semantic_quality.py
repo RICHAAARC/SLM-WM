@@ -147,6 +147,6 @@ def test_three_paper_profiles_share_one_independent_semantic_decision_rule() -> 
     quality_protocol = load_paper_quality_claim_protocol()
 
     assert len(protocol_digests) == 1
-    assert quality_protocol["semantic_alignment_noninferiority"][
+    assert quality_protocol["independent_visual_content_preservation_noninferiority"][
         "metric_name"
     ] == "independent_semantic_cosine"

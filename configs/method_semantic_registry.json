@@ -6,7 +6,7 @@
   "invariants": [
     {
       "invariant_id": "constructive_local_tangent_scope",
-      "definition_pointer": "docs/builds/method_semantic_invariants.md#constructive_local_tangent_scope",
+      "definition_pointer": "docs/legacy/method_semantic_invariants.md#constructive_local_tangent_scope",
       "formal_expression": [
         "T_z=kernel(J_F(z))",
         "joint_argmax_solved=false",
@@ -61,7 +61,7 @@
     },
     {
       "invariant_id": "frozen_model_operator_identity",
-      "definition_pointer": "docs/builds/method_semantic_invariants.md#frozen_model_operator_identity",
+      "definition_pointer": "docs/legacy/method_semantic_invariants.md#frozen_model_operator_identity",
       "formal_expression": [
         "operator_identity=(sd35_revision,clip_revision,vae_config,scheduler_class,transformer_class,latent_dtype,attention_layers,attention_operator_schedule_index,public_detection_schedule_index,formal_method_config_digest)",
         "vae_config_fields=required_explicit(scaling_factor,shift_factor)",
@@ -178,7 +178,7 @@
     },
     {
       "invariant_id": "branch_signal_origin",
-      "definition_pointer": "docs/builds/method_semantic_invariants.md#branch_signal_origin",
+      "definition_pointer": "docs/legacy/method_semantic_invariants.md#branch_signal_origin",
       "formal_expression": [
         "semantic_signal=clip((patch_cls_cosine+1)/2,0,1)",
         "texture_signal=clip(interpolate((abs(dx_gray)+abs(dy_gray))/2,bilinear,false),0,1)",
@@ -283,7 +283,7 @@
     },
     {
       "invariant_id": "branch_risk_bounds_written_update",
-      "definition_pointer": "docs/builds/method_semantic_invariants.md#branch_risk_bounds_written_update",
+      "definition_pointer": "docs/legacy/method_semantic_invariants.md#branch_risk_bounds_written_update",
       "formal_expression": [
         "texture_risk_lf=texture_signal",
         "texture_risk_tail=1-texture_signal",
@@ -435,7 +435,7 @@
     },
     {
       "invariant_id": "complete_716_feature_jacobian",
-      "definition_pointer": "docs/builds/method_semantic_invariants.md#complete_716_feature_jacobian",
+      "definition_pointer": "docs/legacy/method_semantic_invariants.md#complete_716_feature_jacobian",
       "formal_expression": [
         "decoded_rgb=clamp(vae_decode(latent/scaling_factor+shift_factor)/2+1/2,0,1)",
         "clip_input=normalize_channels(bicubic(decoded_rgb,224,align_corners_false,antialias_true),clip_mean,clip_std)",
@@ -529,7 +529,7 @@
     },
     {
       "invariant_id": "exact_jacobian_low_response_subspace",
-      "definition_pointer": "docs/builds/method_semantic_invariants.md#exact_jacobian_low_response_subspace",
+      "definition_pointer": "docs/legacy/method_semantic_invariants.md#exact_jacobian_low_response_subspace",
       "formal_expression": [
         "exact_autodiff_modes={torch_func_exact_jvp_vjp,torch_autograd_exact_jvp_vjp_reexecution}",
         "Jv=exact_jvp(F,z,v)",
@@ -651,7 +651,7 @@
     },
     {
       "invariant_id": "versioned_key_prg_reconstruction",
-      "definition_pointer": "docs/builds/method_semantic_invariants.md#versioned_key_prg_reconstruction",
+      "definition_pointer": "docs/legacy/method_semantic_invariants.md#versioned_key_prg_reconstruction",
       "formal_expression": [
         "uniform=open_interval_uint53(sha256_counter_stream(domain))",
         "gaussian=frozen_midpoint_inverse_normal_cdf_table20(consecutive_20bit_msb_counter_stream_word)",
@@ -748,7 +748,7 @@
     },
     {
       "invariant_id": "spatial_low_pass_and_amplitude_tail_carriers",
-      "definition_pointer": "docs/builds/method_semantic_invariants.md#spatial_low_pass_and_amplitude_tail_carriers",
+      "definition_pointer": "docs/legacy/method_semantic_invariants.md#spatial_low_pass_and_amplitude_tail_carriers",
       "formal_expression": [
         "lf_template=global_center_then_l2_normalize(avg_pool2d(keyed_gaussian,kernel=5,stride=1,padding=2,ceil_mode=false,count_include_pad=true,divisor_override=null))",
         "lf_boundary_mode=zero_padding",
@@ -912,7 +912,7 @@
     },
     {
       "invariant_id": "direct_qk_four_component_relation",
-      "definition_pointer": "docs/builds/method_semantic_invariants.md#direct_qk_four_component_relation",
+      "definition_pointer": "docs/legacy/method_semantic_invariants.md#direct_qk_four_component_relation",
       "formal_expression": [
         "logit_h=Q_h*K_h_T/sqrt(head_width)",
         "heads=explicit_positive_integer_attention_module_heads",
@@ -1069,7 +1069,7 @@
     },
     {
       "invariant_id": "direct_qk_monotonic_attention_update",
-      "definition_pointer": "docs/builds/method_semantic_invariants.md#direct_qk_monotonic_attention_update",
+      "definition_pointer": "docs/legacy/method_semantic_invariants.md#direct_qk_monotonic_attention_update",
       "formal_expression": [
         "A=mean_heads(softmax(Q*K_T/sqrt(head_dim),dim=key_axis))",
         "Q=attention_module.to_q(hidden_states)",
@@ -1224,7 +1224,7 @@
     },
     {
       "invariant_id": "three_branch_update_composition",
-      "definition_pointer": "docs/builds/method_semantic_invariants.md#three_branch_update_composition",
+      "definition_pointer": "docs/legacy/method_semantic_invariants.md#three_branch_update_composition",
       "formal_expression": [
         "combined_update=sum_in_fixed_order(delta_lf,delta_tail,delta_attention)",
         "candidate_latent=cast_dtype(float32(z)+common_scale*combined_update)",
@@ -1314,7 +1314,7 @@
     },
     {
       "invariant_id": "actual_dtype_write_revalidation",
-      "definition_pointer": "docs/builds/method_semantic_invariants.md#actual_dtype_write_revalidation",
+      "definition_pointer": "docs/legacy/method_semantic_invariants.md#actual_dtype_write_revalidation",
       "formal_expression": [
         "ordered_float32_update=sum_in_fixed_order(lf_content,tail_robust,attention_geometry)",
         "common_scale_k=quantized_budget_envelope_backtracking_factor^k",
@@ -1416,7 +1416,7 @@
     },
     {
       "invariant_id": "finite_feature_preservation",
-      "definition_pointer": "docs/builds/method_semantic_invariants.md#finite_feature_preservation",
+      "definition_pointer": "docs/legacy/method_semantic_invariants.md#finite_feature_preservation",
       "formal_expression": [
         "written_jacobian_ratio=norm2(J*written_update)/max(norm2(F(z)),null_space_numerical_epsilon)",
         "clip_cosine>=minimum_semantic_preservation_cosine",
@@ -1480,7 +1480,7 @@
     },
     {
       "invariant_id": "final_image_attention_attribution",
-      "definition_pointer": "docs/builds/method_semantic_invariants.md#final_image_attention_attribution",
+      "definition_pointer": "docs/legacy/method_semantic_invariants.md#final_image_attention_attribution",
       "formal_expression": [
         "blind_gain=score_blind(final_watermarked)-score_blind(final_carrier_only)>0.0001",
         "paired_gain=score_carrier_pairs(final_watermarked)-score_carrier_pairs(final_carrier_only)>0.0001",
@@ -1549,7 +1549,7 @@
     },
     {
       "invariant_id": "image_only_detection_boundary",
-      "definition_pointer": "docs/builds/method_semantic_invariants.md#image_only_detection_boundary",
+      "definition_pointer": "docs/legacy/method_semantic_invariants.md#image_only_detection_boundary",
       "formal_expression": [
         "measurement=measure(image,key,public_model_config)",
         "measurement_config_digest=sha256(threshold_independent_measurement_parameters)",
@@ -1791,7 +1791,7 @@
     },
     {
       "invariant_id": "same_threshold_geometry_rescue",
-      "definition_pointer": "docs/builds/method_semantic_invariants.md#same_threshold_geometry_rescue",
+      "definition_pointer": "docs/legacy/method_semantic_invariants.md#same_threshold_geometry_rescue",
       "formal_expression": [
         "calibration_source=registered_key_unattacked_clean_negatives_only",
         "partition_order=sort_by_sha256(partition_protocol_nul_prompt_id)",
@@ -2069,7 +2069,7 @@
     },
     {
       "invariant_id": "scientific_content_binding",
-      "definition_pointer": "docs/builds/method_semantic_invariants.md#scientific_content_binding",
+      "definition_pointer": "docs/legacy/method_semantic_invariants.md#scientific_content_binding",
       "formal_expression": [
         "tensor_identity=sha256(protocol_version,dtype,ordered_shape,contiguous_raw_bytes)",
         "image_identity=sha256(image_rgb_uint8_content_schema,width_uint64_be,height_uint64_be,rgb_uint8_pixels)",

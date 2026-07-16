@@ -12,6 +12,14 @@
     "maximum_prompt_conditional_kid_upper_confidence_bound": 0.001,
     "primary_metric": "prompt_conditional_kid_mean"
   },
+  "independent_visual_content_preservation_noninferiority": {
+    "estimand_interpretation": "paired_clean_image_visual_content_preservation_only",
+    "evaluator_id": "independent_visual_semantic_dinov2_base",
+    "metric_name": "independent_semantic_cosine",
+    "minimum_lower_confidence_bound": 0.995,
+    "prompt_text_encoded": false,
+    "threshold_basis": "preregistered_unit_vector_angular_bound_equivalent_to_maximum_l2_distance_0_1"
+  },
   "nested_sampling_unit": "registered_randomization_repeat_within_prompt",
   "paired_perceptual_quality_noninferiority": {
     "metric_name": "paired_ssim",
@@ -19,11 +27,5 @@
     "noninferiority_loss_margin_from_identity": 0.01
   },
   "primary_sampling_unit": "prompt",
-  "protocol_schema": "paper_quality_claim_protocol_v1",
-  "semantic_alignment_noninferiority": {
-    "evaluator_id": "independent_visual_semantic_dinov2_base",
-    "metric_name": "independent_semantic_cosine",
-    "minimum_lower_confidence_bound": 0.995,
-    "threshold_basis": "preregistered_unit_vector_angular_bound_equivalent_to_maximum_l2_distance_0_1"
-  }
+  "protocol_schema": "paper_quality_claim_protocol_v1"
 }

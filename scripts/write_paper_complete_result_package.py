@@ -42,6 +42,7 @@ from paper_experiments.analysis.result_analysis_payload import (
 from paper_experiments.runners.paper_claim_provenance import (
     require_exact9_randomization_aggregate_provenance,
 )
+from scripts.build_specification_inventory import BUILD_SPECIFICATION_PATHS
 from scripts.write_paper_result_records import WorkProgress
 
 CONSTRUCTION_UNIT_NAME = "paper_complete_result_package"
@@ -109,11 +110,7 @@ PACKAGE_EXTRA_PATHS = (
     "configs/dependency_profiles/gaussian_shading_official_py38_cu117_lock.txt",
     "configs/dependency_profiles/shallow_diffuse_official_py39_cu117_direct.txt",
     "configs/dependency_profiles/shallow_diffuse_official_py39_cu117_lock.txt",
-    "docs/builds/prompt_dataset_provenance.md",
-    "docs/builds/real_scientific_operator_implementation.md",
-    "docs/builds/algorithm_primitives_semantic_conditioned_latent_manifold_watermark.md",
-    "docs/builds/single_model_branch_risk_parameter_sensitivity.md",
-    "docs/builds/formal_dependency_environment.md",
+    *BUILD_SPECIFICATION_PATHS,
     "scripts/write_paper_result_records.py",
     "scripts/write_paper_fixed_fpr_common_protocol_outputs.py",
     "scripts/write_primary_baseline_result_candidates.py",

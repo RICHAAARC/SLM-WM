@@ -31,20 +31,21 @@
 `scripts/formal_workflow_entry.py`、`scripts/formal_workflow_environment.py` 与
 `scripts/run_gpu_server_workflow.py`。`paper_workflow/` 只调用这些入口, 不被其反向引用。
 
-## `main/` 最小结构
+## `main/` 目标最小结构
 
 ```text
 main/
   core/
   methods/
+    content/
     carrier/
     detection/
     geometry/
-    semantic/
-    subspace/
 ```
 
-实验协议、结果 schema、分析和 CLI 均位于外层。
+`content/` 负责 `S/T/R/Q` 观测与空间路由，`carrier/` 负责 LF/HF-tail 内容载体，`geometry/` 负责 Q/K 同步与有界恢复，`detection/` 负责仅图像内容评分和同阈值救回。通用摘要、PRG、张量类型和最小组合工具只能放在 `core/` 或职责明确的内部模块。实验协议、结果 schema、分析和 CLI 均位于外层。
+
+迁移前的语义特征大向量与 Null Space 子目录不属于目标最小结构；其实际移除顺序只由项目构建状态规范记录，外围目录文档不得把迁移前快照重新定义为发布目标。
 
 ## 输出规则
 

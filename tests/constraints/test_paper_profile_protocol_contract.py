@@ -7,7 +7,10 @@ import pytest
 from paper_experiments.analysis.paper_profile_protocol_isomorphism import (
     load_paper_profile_protocol_registry,
 )
-from scripts.paper_result_closure import _CLOSURE_ARTIFACT_SPECS
+from scripts.paper_result_closure import (
+    _CLOSURE_ARTIFACT_SPECS,
+    _OPTIONAL_DIAGNOSTIC_ARTIFACT_SPECS,
+)
 
 
 pytestmark = pytest.mark.constraint
@@ -16,7 +19,11 @@ pytestmark = pytest.mark.constraint
 def test_registered_artifact_contract_matches_result_closure_writers() -> None:
     """同构报告不得维护一套与真实结果闭合 writer 不同的产物 schema。"""
 
-    registered = load_paper_profile_protocol_registry()["artifact_contract"]
+    registry = load_paper_profile_protocol_registry()
+    registered = [
+        *registry["artifact_contract"],
+        *registry["diagnostic_artifact_contract"],
+    ]
     actual = [
         {
             "artifact_id": spec.artifact_id,
@@ -24,7 +31,10 @@ def test_registered_artifact_contract_matches_result_closure_writers() -> None:
             "ready_field": spec.ready_field,
             "file_names": list(spec.file_names),
         }
-        for spec in _CLOSURE_ARTIFACT_SPECS
+        for spec in (
+            *_CLOSURE_ARTIFACT_SPECS,
+            *_OPTIONAL_DIAGNOSTIC_ARTIFACT_SPECS,
+        )
     ]
 
     assert registered == actual

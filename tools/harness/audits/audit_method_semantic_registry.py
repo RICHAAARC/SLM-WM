@@ -36,7 +36,7 @@ def run_audit(root: str | Path) -> dict[str, Any]:
     checked_paths = [
         str(REGISTRY_RELATIVE_PATH),
         "configs/model_sd35.yaml",
-        "docs/builds/method_semantic_invariants.md",
+        "docs/legacy/method_semantic_invariants.md",
         "docs/field_registry.md",
         "main/methods/method_definition.py",
         "main/methods/semantic/feature_protocol.py",

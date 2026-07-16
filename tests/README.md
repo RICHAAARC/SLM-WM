@@ -1,19 +1,29 @@
-# Tests
+# 测试分层
 
-`tests/` 保存仓库约束、轻量功能测试、测试辅助函数和显式集成测试。默认 `pytest -q` 必须保持 CPU 可运行, 不应自动下载 SD3.5、CLIP、torch-fidelity 权重或启动大规模图像实验。
+- `tests/constraints/`：目录、配置、文档、schema 和依赖边界。
+- `tests/functional/`：轻量真实算子和正反例性质测试。
+- `tests/integration/`：完整闭环、slow 或 formal 测试，默认排除。
 
-## 子目录职责
+## 规范来源
 
-- `constraints/`: 检查目录边界、Notebook 入口、运行配置、发布层和方法文档契约。
-- `functional/`: 使用小张量、临时目录和受控 fixture 验证科学算子、协议、结果构建与 baseline adapter。
-- `integration/`: 保存需要显式环境或较高成本的集成验证入口。
-- `helpers/`: 保存测试共享辅助函数, 不进入业务运行路径。
-- `fixtures/`: 保存可提交的小型测试数据, 不保存模型权重或真实大规模实验结果。
+测试不得维护第二套方法公式、参数、角色集合或统计协议。目标方法性质只从以下权威文档生成断言：
 
-## 当前科学算子覆盖
+- `../docs/builds/algorithm_primitives_content_adaptive_dual_carrier_latent_watermark.md`。
+- `../docs/builds/method_mechanism_design_content_adaptive_dual_carrier_latent_watermark.md`。
 
-`test_branch_risk_formula.py` 验证解析风险信号、严格资格边界和显式三分支配置。`test_risk_bounded_composition.py` 验证 LF/tail 定义、方向与数值 epsilon 分离、逐位置风险硬包络、批间隔离、唯一固定顺序单次 cast、共同回溯公式及可重算合成证据。`test_attention_risk_step.py` 验证注意力分支直接消费风险有界单位方向并从最大允许步长执行冻结单调回溯。`test_real_scientific_operators.py` 验证完整特征 JVP/VJP、风险清理后逐分支 JVP、无阻尼 PSD-CG Null Space、投影能量、直接 Q/K 算子和仅图像检测。`test_semantic_feature_conditions.py` 验证716维完整 Jacobian 输入与最终成图累计保持门禁。`test_paper_run_config.py` 验证70/700/7000 Prompt 与34/340/3400 test 划分。
+文档生态、当前实现差距和验证进度只由 `../docs/builds/project_construction_state.md` 登记。本 README 只说明测试分层，不复制具体常量或角色全集。
 
-`test_method_semantic_registry_contract.py` 固定核心方法不变量的精确集合、权威定义指针、实现符号和运行证据字段，并禁止登记表自行写入通过结论。该约束只证明追踪关系完整, 不替代后续调用真实实现的跨模块 CPU 性质测试。
+## 验证边界
 
-GPU 正式结果必须通过 Colab 运行入口产生, 不应为了追求默认测试覆盖率把真实模型运行加入 `pytest -q`。
+1. CPU 性质测试验证可在小 Tensor 上确定性复验的公式、形状、反事实、身份绑定和失败关闭语义。
+2. GPU 资格化必须运行真实模型图，不能由 mock、fixture 或小张量兼容检查替代。
+3. 生产者到消费者测试必须从真实格式原始记录正向重建统计与决策，不能手工注入最终支持状态。
+4. release 测试必须比较真实 writer、结果闭合规格和 profile 登记，并验证抽离包内文档引用闭合。
+5. 迁移前测试只能证明旧实现回归稳定，不能支持目标方法完成状态。
+
+默认检查：
+
+```bash
+pytest -q
+python tools/harness/run_all_audits.py
+```

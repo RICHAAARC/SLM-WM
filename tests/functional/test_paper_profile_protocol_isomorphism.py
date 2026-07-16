@@ -14,9 +14,12 @@ from paper_experiments.analysis.paper_claim_decisions import (
     load_paper_claim_registry,
 )
 from paper_experiments.analysis.paper_profile_protocol_isomorphism import (
+    DEFAULT_PAPER_PROFILE_PROTOCOL_REGISTRY_PATH,
     PaperProfileProtocolError,
     build_paper_profile_protocol_isomorphism_report,
     build_paper_profile_protocol_records,
+    load_paper_profile_protocol_registry,
+    registered_artifact_contract,
     validate_paper_profile_protocol_isomorphism_report,
 )
 import scripts.write_paper_profile_protocol_isomorphism_report as writer_module
@@ -153,6 +156,54 @@ def test_artifact_contract_drift_blocks_transfer_independently() -> None:
     assert report["workflow_transfer_ready"] is False
 
 
+def test_diagnostic_artifact_contract_is_governed_without_claim_gate() -> None:
+    """参数诊断产物必须可查找并参与同构，但不得占用正式 gate。"""
+
+    registry = load_paper_profile_protocol_registry()
+    diagnostic = registry["diagnostic_artifact_contract"]
+    assert [record["artifact_id"] for record in diagnostic] == [
+        "single_model_parameter_sensitivity_diagnostic_manifest"
+    ]
+    assert all(
+        role["artifact_id"] != diagnostic[0]["artifact_id"]
+        for role in registry["gate_roles"]
+    )
+    assert registered_artifact_contract(diagnostic[0]["artifact_id"]) == diagnostic[0]
+
+    records = build_paper_profile_protocol_records(registry=registry)
+    records["pilot_paper"]["artifact_contract"][-1]["file_names"][0] = (
+        "drifted_diagnostic_records.csv"
+    )
+    report = build_paper_profile_protocol_isomorphism_report(
+        _probe_closure_report(scientific_support=True),
+        profile_records=records,
+    )
+    assert report["protocol_isomorphism_ready"] is True
+    assert report["artifact_contract_isomorphic"] is False
+    assert report["workflow_transfer_ready"] is False
+
+
+def test_registry_rejects_artifact_id_reused_across_formal_and_diagnostic(
+    tmp_path: Path,
+) -> None:
+    """正式与诊断产物不得通过不同职责登记同一个标识。"""
+
+    payload = json.loads(
+        DEFAULT_PAPER_PROFILE_PROTOCOL_REGISTRY_PATH.read_text(encoding="utf-8-sig")
+    )
+    payload["diagnostic_artifact_contract"][0]["artifact_id"] = payload[
+        "artifact_contract"
+    ][0]["artifact_id"]
+    registry_path = tmp_path / "profile_registry.json"
+    registry_path.write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PaperProfileProtocolError, match="跨职责重复"):
+        load_paper_profile_protocol_registry(registry_path)
+
+
 def test_allowed_scale_change_does_not_change_normalized_protocol() -> None:
     """Prompt 数量等允许字段只影响登记核验, 不伪造协议语义差异。"""
 
@@ -170,6 +221,44 @@ def test_allowed_scale_change_does_not_change_normalized_protocol() -> None:
     assert report["artifact_contract_isomorphic"] is True
     assert report["profile_scale_registration_ready"] is False
     assert report["scale_registration_difference_paths"]["pilot_paper"]
+
+
+def test_roles_schema_and_operational_path_are_strictly_governed() -> None:
+    """角色或联合 schema 漂移必须破坏同构, 操作路径不得伪装成规模字段."""
+
+    records = build_paper_profile_protocol_records()
+    protocol = records["pilot_paper"]["protocol_contract"]
+    assert protocol["formal_method_roles"]["role_ids"] == [
+        "full_dual_chain",
+        "uniform_content_routing",
+        "lf_only_content",
+        "hf_tail_only_content",
+        "content_chain_only",
+        "geometry_recovery_without_embedded_sync",
+    ]
+    assert protocol["formal_sample_roles"]["role_ids"] == [
+        "watermarked_positive",
+        "clean_negative",
+        "attacked_negative",
+    ]
+    assert protocol["formal_evaluation_schema"]["contract_digest"]
+
+    protocol["formal_method_roles"]["role_ids"].append("unregistered_role")
+    report = build_paper_profile_protocol_isomorphism_report(
+        _probe_closure_report(scientific_support=True),
+        profile_records=records,
+    )
+    assert report["protocol_isomorphism_ready"] is False
+
+    records = build_paper_profile_protocol_records()
+    records["pilot_paper"]["operational_metadata"]["drive_result_root"] = (
+        "/forged/output"
+    )
+    with pytest.raises(PaperProfileProtocolError, match="确定性派生"):
+        build_paper_profile_protocol_isomorphism_report(
+            _probe_closure_report(scientific_support=True),
+            profile_records=records,
+        )
 
 
 def test_report_validator_rejects_forged_transfer_state() -> None:

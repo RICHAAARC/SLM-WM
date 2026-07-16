@@ -14,13 +14,11 @@ from experiments.protocol.attacks import (
     default_attack_configs,
     formal_attack_seed_protocol_record,
 )
-from experiments.protocol.fixed_fpr_observation_audit import FORMAL_THRESHOLD_SOURCE
 from experiments.protocol.formal_randomization import (
     formal_randomization_protocol_record,
     formal_randomization_repeat_ids,
     formal_randomization_repeat_registry_digest,
 )
-from experiments.protocol.image_only_evidence import CALIBRATION_PARTITION_PROTOCOL
 from experiments.protocol.method_runtime_config import (
     formal_method_config_digest,
     formal_method_config_payload,
@@ -112,6 +110,48 @@ def load_paper_profile_protocol_registry(
         raise PaperProfileProtocolError("论文 profile 协议登记表 schema 不受支持")
     if tuple(payload.get("profile_ids", ())) != PAPER_PROFILE_IDS:
         raise PaperProfileProtocolError("论文 profile 集合或顺序发生漂移")
+    method_role_contract = payload.get("method_role_contract")
+    sample_role_contract = payload.get("sample_role_contract")
+    evaluation_schema_contract = payload.get("formal_evaluation_schema_contract")
+    if not all(
+        isinstance(value, dict)
+        for value in (
+            method_role_contract,
+            sample_role_contract,
+            evaluation_schema_contract,
+        )
+    ):
+        raise PaperProfileProtocolError("方法角色、样本角色和正式记录 schema 契约必须是对象")
+    if method_role_contract.get("contract_schema") != (
+        "dual_chain_method_role_contract_v1"
+    ) or _nonempty_unique_strings(
+        method_role_contract.get("role_ids", ()),
+        field_name="method_role_contract.role_ids",
+    ) != [
+        "full_dual_chain",
+        "uniform_content_routing",
+        "lf_only_content",
+        "hf_tail_only_content",
+        "content_chain_only",
+        "geometry_recovery_without_embedded_sync",
+    ]:
+        raise PaperProfileProtocolError("正式方法角色集合或顺序发生漂移")
+    if sample_role_contract.get("contract_schema") != (
+        "dual_chain_sample_role_contract_v1"
+    ) or _nonempty_unique_strings(
+        sample_role_contract.get("role_ids", ()),
+        field_name="sample_role_contract.role_ids",
+    ) != ["watermarked_positive", "clean_negative", "attacked_negative"]:
+        raise PaperProfileProtocolError("正式样本角色集合或顺序发生漂移")
+    if evaluation_schema_contract.get("schema_id") != (
+        "dual_chain_formal_evaluation_success_failure_v1"
+    ):
+        raise PaperProfileProtocolError("正式 success/failure 联合 schema 身份发生漂移")
+    for field_name in ("identity_fields", "union_fields"):
+        _nonempty_unique_strings(
+            evaluation_schema_contract.get(field_name, ()),
+            field_name=f"formal_evaluation_schema_contract.{field_name}",
+        )
     allowed_fields = _nonempty_unique_strings(
         payload.get("allowed_profile_variation_fields", ()),
         field_name="allowed_profile_variation_fields",
@@ -126,11 +166,14 @@ def load_paper_profile_protocol_registry(
     command_edges = payload.get("command_dependency_edges")
     gate_roles = payload.get("gate_roles")
     artifact_contract = payload.get("artifact_contract")
+    diagnostic_artifact_contract = payload.get("diagnostic_artifact_contract")
     if not all(
         isinstance(value, list) and value
         for value in (command_edges, gate_roles, artifact_contract)
-    ):
-        raise PaperProfileProtocolError("命令图、产物契约和 gate 角色不得为空")
+    ) or not isinstance(diagnostic_artifact_contract, list):
+        raise PaperProfileProtocolError(
+            "命令图、正式产物契约和 gate 角色不得为空, 诊断产物契约必须为列表"
+        )
     edge_keys: set[tuple[str, str]] = set()
     for edge in command_edges:
         if not isinstance(edge, dict) or set(edge) != {"producer", "consumer"}:
@@ -141,26 +184,33 @@ def load_paper_profile_protocol_registry(
         edge_keys.add(key)
 
     artifact_ids: set[str] = set()
-    for artifact in artifact_contract:
-        if not isinstance(artifact, dict) or set(artifact) != {
-            "artifact_id",
-            "writer_module",
-            "ready_field",
-            "file_names",
-        }:
-            raise PaperProfileProtocolError("产物契约字段集合发生漂移")
-        artifact_id = str(artifact["artifact_id"]).strip()
-        if not artifact_id or artifact_id in artifact_ids:
-            raise PaperProfileProtocolError("产物契约标识为空或重复")
-        artifact_ids.add(artifact_id)
-        _nonempty_unique_strings(
-            artifact.get("file_names", ()),
-            field_name=f"{artifact_id}.file_names",
-        )
-        if not str(artifact["writer_module"]).strip() or not str(
-            artifact["ready_field"]
-        ).strip():
-            raise PaperProfileProtocolError("产物 writer 或 ready 字段不得为空")
+    formal_artifact_ids: set[str] = set()
+    for contract_role, records in (
+        ("formal", artifact_contract),
+        ("diagnostic", diagnostic_artifact_contract),
+    ):
+        for artifact in records:
+            if not isinstance(artifact, dict) or set(artifact) != {
+                "artifact_id",
+                "writer_module",
+                "ready_field",
+                "file_names",
+            }:
+                raise PaperProfileProtocolError("产物契约字段集合发生漂移")
+            artifact_id = str(artifact["artifact_id"]).strip()
+            if not artifact_id or artifact_id in artifact_ids:
+                raise PaperProfileProtocolError("产物契约标识为空或跨职责重复")
+            artifact_ids.add(artifact_id)
+            if contract_role == "formal":
+                formal_artifact_ids.add(artifact_id)
+            _nonempty_unique_strings(
+                artifact.get("file_names", ()),
+                field_name=f"{artifact_id}.file_names",
+            )
+            if not str(artifact["writer_module"]).strip() or not str(
+                artifact["ready_field"]
+            ).strip():
+                raise PaperProfileProtocolError("产物 writer 或 ready 字段不得为空")
 
     gate_ids: set[str] = set()
     gate_artifact_ids: set[str] = set()
@@ -177,15 +227,15 @@ def load_paper_profile_protocol_registry(
         if (
             not gate_id
             or gate_id in gate_ids
-            or artifact_id not in artifact_ids
+            or artifact_id not in formal_artifact_ids
             or artifact_id in gate_artifact_ids
             or role.get("requirement_role") not in {"required_claim", "optional_claim"}
         ):
             raise PaperProfileProtocolError("gate 角色与产物契约未形成一一对应")
         gate_ids.add(gate_id)
         gate_artifact_ids.add(artifact_id)
-    if gate_artifact_ids != artifact_ids:
-        raise PaperProfileProtocolError("gate 角色未精确覆盖登记产物")
+    if gate_artifact_ids != formal_artifact_ids:
+        raise PaperProfileProtocolError("gate 角色未精确覆盖正式产物")
     claim_registry = load_paper_claim_registry()
     role_by_claim = {
         str(role["claim_id"]): str(role["requirement_role"])
@@ -217,11 +267,14 @@ def registered_artifact_contract(
     registry = load_paper_profile_protocol_registry(path)
     matches = [
         dict(record)
-        for record in registry["artifact_contract"]
+        for record in (
+            *registry["artifact_contract"],
+            *registry["diagnostic_artifact_contract"],
+        )
         if record["artifact_id"] == resolved_id
     ]
     if len(matches) != 1:
-        raise PaperProfileProtocolError("正式产物契约标识必须唯一存在")
+        raise PaperProfileProtocolError("受治理产物契约标识必须唯一存在")
     return deepcopy(matches[0])
 
 
@@ -278,6 +331,14 @@ def _shared_protocol_contract(
             "primary_baseline_records": _baseline_protocol_definitions(),
             "primary_baseline_ids": list(PRIMARY_BASELINE_IDS),
         },
+        "formal_method_roles": deepcopy(registry["method_role_contract"]),
+        "formal_sample_roles": deepcopy(registry["sample_role_contract"]),
+        "formal_evaluation_schema": {
+            **deepcopy(registry["formal_evaluation_schema_contract"]),
+            "contract_digest": build_stable_digest(
+                registry["formal_evaluation_schema_contract"]
+            ),
+        },
         "data_split_principle": {
             "split_names": list(SPLIT_NAMES),
             "dev_ratio": DEV_RATIO,
@@ -289,10 +350,18 @@ def _shared_protocol_contract(
             ),
         },
         "threshold_calibration_principle": {
-            "threshold_source": FORMAL_THRESHOLD_SOURCE,
-            "calibration_partition_protocol": CALIBRATION_PARTITION_PROTOCOL,
+            "threshold_source": "dual_chain_nested_three_negative_group_budget_v1",
+            "calibration_partition_protocol": "dual_chain_nested_calibration_v1",
             "confidence_level": PAPER_CONFIDENCE_LEVEL,
-            "calibration_source": "clean_negative_only",
+            "calibration_negative_roles": [
+                "clean_negative_registered",
+                "attacked_negative_registered",
+                "watermarked_wrong_key",
+            ],
+            "negative_role_budget_rule": (
+                "max(0,floor(target_fpr*(negative_role_sample_count+1))-1)"
+            ),
+            "negative_role_budget_scope": "each_role_independently",
             "threshold_reuse_scope": "same_method_same_repeat_calibration_to_test",
         },
         "metric_semantics": {
@@ -341,19 +410,31 @@ def _scale_contract(profile_id: str) -> dict[str, Any]:
         "prompt_count": prompt_count,
         "sample_count": str(defaults["sample_count"]),
         "split_counts": split_counts,
-        "minimum_clean_negative_count": derive_minimum_clean_negative_count(
-            prompt_count,
-            target_fpr,
-        ),
+        "minimum_negative_role_counts": {
+            role_id: derive_minimum_clean_negative_count(prompt_count, target_fpr)
+            for role_id in (
+                "clean_negative_registered",
+                "attacked_negative_registered",
+                "watermarked_wrong_key",
+            )
+        },
         "dataset_level_quality_minimum_count": (
             derive_dataset_level_quality_minimum_count(prompt_count)
         ),
-        "drive_result_root": str(defaults["drive_result_root"]),
         "record_count_derivation": {
             "prompt_primary_unit_count": prompt_count,
             "registered_repeat_count": len(formal_randomization_repeat_ids()),
             "test_prompt_count": int(split_counts["test"]),
         },
+    }
+
+
+def _operational_metadata(profile_id: str) -> dict[str, str]:
+    """从 profile 身份确定性派生输出位置, 不把路径计入科学规模契约."""
+
+    return {
+        "drive_result_root": str(RUN_DEFAULTS[profile_id]["drive_result_root"]),
+        "derivation_rule": "paper_run_defaults_by_profile_id",
     }
 
 
@@ -366,11 +447,17 @@ def build_paper_profile_protocol_records(
 
     resolved_registry = dict(registry or load_paper_profile_protocol_registry())
     shared_protocol = _shared_protocol_contract(root, resolved_registry)
-    artifact_contract = deepcopy(resolved_registry["artifact_contract"])
+    artifact_contract = deepcopy(
+        [
+            *resolved_registry["artifact_contract"],
+            *resolved_registry["diagnostic_artifact_contract"],
+        ]
+    )
     return {
         profile_id: {
             "profile_id": profile_id,
             "scale_contract": _scale_contract(profile_id),
+            "operational_metadata": _operational_metadata(profile_id),
             "protocol_contract": deepcopy(shared_protocol),
             "artifact_contract": deepcopy(artifact_contract),
         }
@@ -398,12 +485,15 @@ def _normalize_profile_records(
         if not isinstance(source, Mapping) or set(source) != {
             "profile_id",
             "scale_contract",
+            "operational_metadata",
             "protocol_contract",
             "artifact_contract",
         }:
             raise PaperProfileProtocolError("profile 协议记录字段集合发生漂移")
         if source.get("profile_id") != profile_id:
             raise PaperProfileProtocolError("profile 映射键与记录身份不一致")
+        if source.get("operational_metadata") != _operational_metadata(profile_id):
+            raise PaperProfileProtocolError("操作元数据未由 profile 身份确定性派生")
         scale_contract = source.get("scale_contract")
         if not isinstance(scale_contract, Mapping) or set(scale_contract) != (
             expected_scale_fields

@@ -4,7 +4,7 @@
 
 本文档说明 `probe_paper`、`pilot_paper` 与 `full_paper` 如何形成可机器复验的协议同构结论。该门禁比较代码与实验协议, 不比较效果数值, 也不把 probe 的科学结论外推到更严格 fixed-FPR 工作点。
 
-三个运行规模分别使用70、700和7000个 Prompt, 注册 FPR 分别为0.1、0.01和0.001。它们允许改变规模、统计强度、输出位置和由规模派生的记录数量；核心方法、攻击、baseline、数据划分原则、阈值校准原则、指标语义、随机化、命令依赖图、产物 schema、gate 角色和主张决策结构必须完全一致。
+三个运行规模分别使用70、700和7000个 Prompt, 注册 FPR 分别为0.1、0.01和0.001。它们只允许改变登记的 Prompt / 样本规模、目标 FPR、统计强度和由规模派生的记录数量；核心方法、攻击、baseline、数据划分原则、阈值校准原则、指标语义、随机化、命令依赖图、产物 schema、gate 角色和主张决策结构必须完全一致。
 
 ## 二、唯一登记与实际来源
 
@@ -13,8 +13,8 @@
 1. 三个 profile 的规范顺序；
 2. 允许变化字段路径；
 3. CPU 结果重建命令依赖边；
-4. 五类随机化统计 writer 的产物文件契约；
-5. 五项论文主张与 gate 角色的一一对应。
+4. 四类正式随机化统计 writer 与一类非主张参数诊断 writer 的产物文件契约；
+5. 四项正式论文主张与 gate 角色的一一对应。参数敏感性仅为诊断产物，不进入该映射。
 
 其余身份从实际项目实现读取：
 
@@ -22,12 +22,12 @@
 - 攻击来自 `experiments.protocol.attacks.default_attack_configs`；
 - baseline 来自4个主表 baseline 的实际共同协议定义；
 - split 来自固定70条块内的 3:33:34 风险分层规则；
-- 阈值来自 calibration clean negative 的嵌套冻结协议；
+- 阈值来自 calibration 中 clean negative、wrong-key negative 与登记 attacked negative 共同构成的完整决策器冻结协议；
 - 检测、配对优势和质量指标语义来自实际统计模块与冻结质量协议；
 - 随机化来自3个 seed 偏移和3个密钥索引形成的9重复注册表；
 - 主张结构来自 `configs/paper_claim_registry.json`。
 
-这一实现属于通用工程写法：不能只比较 profile 名称或少量摘要, 而应把实际配置正文、执行依赖和结论规则共同纳入规范记录。SLM-WM 项目特定部分是上述 fixed-FPR、9重复、正式攻击、4个主表 baseline 和5项主张的具体绑定。
+这一实现属于通用工程写法：不能只比较 profile 名称或少量摘要, 而应把实际配置正文、执行依赖和结论规则共同纳入规范记录。SLM-WM 项目特定部分是上述 fixed-FPR、固定9重复、正式攻击、4个主表 baseline 和4项正式主张的具体绑定。
 
 ## 三、规范化记录
 
@@ -40,7 +40,7 @@ protocol_contract
 artifact_contract
 ```
 
-`scale_contract` 只保存允许变化内容, 包括 FPR、Prompt 文件与数量、split 数量、最小 clean negative 数量、质量图像数量、Drive 结果根和记录数量派生关系。`protocol_contract` 保存所有必须一致的实验语义。`artifact_contract` 独立保存 writer、ready 字段和文件集合。
+`scale_contract` 只保存允许变化的科学规模字段及其派生内容，包括 FPR、Prompt 文件与数量、各固定 split 的派生样本计数、三类样本角色的派生数量、质量图像数量和记录数量派生关系。Drive 结果根可以按 profile 派生，但它只是操作存储位置，不是科学协议变化字段；其派生规则必须同构。固定9重复不能在 profile 间变化。`protocol_contract` 保存所有必须一致的实验语义，包括三类样本角色、Q/K 关系公式、几何捕获域、生成式攻击职责和质量指标。`artifact_contract` 在三档比较视图中连接正式 claim 产物与非主张诊断产物的 writer、ready 字段和文件集合。机器登记以 `artifact_contract` 保存仅与四项 claim 一一对应的正式产物，以 `diagnostic_artifact_contract` 保存参数敏感性诊断产物；只有前者允许出现在 `gate_roles`。
 
 比较时不对任意 JSON 路径做宽松删除。实现只比较三个 profile 的完整 `protocol_contract` 与完整 `artifact_contract`, 因而未登记字段不能借“规模变化”名义被忽略。所有差异以结构化路径写入报告。
 
@@ -75,3 +75,15 @@ python -m scripts.write_paper_profile_protocol_isomorphism_report \
 ```
 
 writer 只在 `outputs/paper_profile_protocol_isomorphism/` 写出报告和 `manifest.local.json`。当前 Git 身份必须与 probe 闭合报告中的 `common_code_version` 精确相同；目录已存在时拒绝混入旧产物。该命令不运行 GPU 实验, 不修改结果, 也不进入 `main/`。
+
+## 六、方法迁移时的更新顺序与协议变更原子性
+
+方法、角色或证据 schema 发生受治理变更时，三档协议必须在同一变更单元中完成：
+
+1. 更新 `configs/model_sd35.yaml` 的方法配置和摘要来源。
+2. 更新 `configs/paper_profile_protocol_registry.json` 的统一方法、消融和产物契约；不得把方法差异登记为允许规模差异。
+3. 更新 `paper_experiments/analysis/paper_profile_protocol_isomorphism.py` 从实际注册源读取目标方法身份和正式角色登记；角色集合必须从唯一登记派生，不得在多个消费者中重复硬编码。
+4. 对三个 profile 分别执行 dry-run，要求缺失路径为空且规范化 `protocol_contract`、`artifact_contract` 完全一致。
+5. 使用属于同一新提交的真实 `probe_paper` 闭合报告重建同构报告。
+
+验收必须同时满足 `profile_scale_registration_ready=true`、`protocol_isomorphism_ready=true` 和 `artifact_contract_isomorphic=true`。这些状态只证明协议和流程可迁移，不改变 pilot 或 full 的 `evidence_incomplete` 科学状态。

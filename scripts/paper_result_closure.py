@@ -137,22 +137,23 @@ _CLOSURE_ARTIFACT_SPECS = (
             ready_field="randomization_aggregate_statistics_ready",
         ),
     ),
+)
+
+_OPTIONAL_DIAGNOSTIC_ARTIFACT_SPECS = (
     _ClosureArtifactSpec(
         module_name=(
-            "paper_experiments.runners.randomization_parameter_sensitivity"
+            "paper_experiments.runners.single_model_parameter_sensitivity_diagnostic"
         ),
-        output_root=(
-            "outputs/randomization_branch_risk_parameter_sensitivity"
-        ),
-        artifact_id=(
-            "randomization_branch_risk_parameter_sensitivity_manifest"
-        ),
-        ready_field="parameter_sensitivity_aggregate_ready",
-        summary_file_name="parameter_sensitivity_aggregate_summary.json",
+        output_root="outputs/single_model_parameter_sensitivity_diagnostic",
+        artifact_id="single_model_parameter_sensitivity_diagnostic_manifest",
+        ready_field="parameter_sensitivity_diagnostic_ready",
+        summary_file_name="parameter_sensitivity_diagnostic_summary.json",
         file_names=_registered_closure_artifact(
-            artifact_id="randomization_branch_risk_parameter_sensitivity_manifest",
-            module_name="paper_experiments.runners.randomization_parameter_sensitivity",
-            ready_field="parameter_sensitivity_aggregate_ready",
+            artifact_id="single_model_parameter_sensitivity_diagnostic_manifest",
+            module_name=(
+                "paper_experiments.runners.single_model_parameter_sensitivity_diagnostic"
+            ),
+            ready_field="parameter_sensitivity_diagnostic_ready",
         ),
     ),
 )
@@ -718,66 +719,13 @@ def _derive_ablation_necessity_gate(
     }
 
 
-def _derive_parameter_sensitivity_component(
-    summary: Mapping[str, Any],
-    config: Mapping[str, Any],
-    metadata: Mapping[str, Any],
-    *,
-    artifact_id: str,
-) -> dict[str, Any]:
-    """确认18项单模型内部敏感性已经由精确9重复完整测量。"""
-
-    _require_summary_run_identity(
-        summary,
-        config,
-        artifact_id=artifact_id,
-    )
-    _validate_embedded_summary_digest(
-        summary,
-        config,
-        digest_field="parameter_sensitivity_summary_digest",
-        artifact_id=artifact_id,
-    )
-    _require_matching_summary_fields(
-        summary,
-        metadata,
-        (
-            "parameter_sensitivity_aggregate_ready",
-            "claim_boundary",
-            "supports_paper_claim",
-        ),
-        artifact_id=artifact_id,
-    )
-    if not all(
-        (
-            summary.get("parameter_sensitivity_aggregate_ready") is True,
-            summary.get("sensitivity_setting_count") == 18,
-            summary.get("randomization_repeat_count") == 9,
-            summary.get("sensitivity_model_scope")
-            == "registered_primary_diffusion_model_only",
-            summary.get("cross_model_evidence_provided") is False,
-            summary.get("claim_boundary")
-            == "single_model_internal_parameter_sensitivity_only",
-            summary.get("supports_paper_claim") is True,
-        )
-    ):
-        raise RuntimeError(f"{artifact_id} 单模型参数敏感性未完整重建")
-    return {
-        "component_role": "single_model_parameter_sensitivity",
-        "component_evidence_ready": True,
-        "contributes_to_central_claim_gate": False,
-        "component_decision": "measured_single_model_sensitivity",
-        "claim_boundary": summary["claim_boundary"],
-    }
-
-
 def _derive_artifact_component(
     spec: _ClosureArtifactSpec,
     summary: Mapping[str, Any],
     config: Mapping[str, Any],
     metadata: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """把五个冻结 Writer 映射到各自的显式论文判定规则。"""
+    """把四个正式 Writer 映射到各自的显式论文判定规则."""
 
     derivations = {
         "randomization_detection_statistics_manifest": _derive_detection_gate,
@@ -790,9 +738,6 @@ def _derive_artifact_component(
         "randomization_ablation_necessity_manifest": (
             _derive_ablation_necessity_gate
         ),
-        "randomization_branch_risk_parameter_sensitivity_manifest": (
-            _derive_parameter_sensitivity_component
-        ),
     }
     try:
         derivation = derivations[spec.artifact_id]
@@ -804,6 +749,55 @@ def _derive_artifact_component(
         metadata,
         artifact_id=spec.artifact_id,
     )
+
+
+def _derive_optional_diagnostic_component(
+    summary: Mapping[str, Any],
+    config: Mapping[str, Any],
+    metadata: Mapping[str, Any],
+    *,
+    artifact_id: str,
+) -> dict[str, Any]:
+    """严格复验可选单模型敏感性诊断, 但不把它提升为论文主张."""
+
+    _require_summary_run_identity(summary, config, artifact_id=artifact_id)
+    _validate_embedded_summary_digest(
+        summary,
+        config,
+        digest_field="parameter_sensitivity_diagnostic_summary_digest",
+        artifact_id=artifact_id,
+    )
+    _require_matching_summary_fields(
+        summary,
+        metadata,
+        ("parameter_sensitivity_diagnostic_ready", "supports_paper_claim"),
+        artifact_id=artifact_id,
+    )
+    expected_axes = [
+        "routing_reference_quantile",
+        "local_sensitivity_relative_step",
+        "content_strength_common_multiplier",
+        "geometry_strength_multiplier",
+    ]
+    if not all(
+        (
+            summary.get("parameter_sensitivity_diagnostic_ready") is True,
+            summary.get("parameter_axis_ids") == expected_axes,
+            summary.get("randomization_repeat_count") == 1,
+            summary.get("supports_paper_claim") is False,
+            summary.get("claim_boundary")
+            == "single_model_single_repeat_descriptive_diagnostic_only",
+        )
+    ):
+        raise RuntimeError(f"{artifact_id} 未满足目标单 repeat 参数诊断契约")
+    return {
+        "component_role": "single_model_parameter_sensitivity_diagnostic",
+        "component_evidence_ready": True,
+        "contributes_to_central_claim_gate": False,
+        "supports_paper_claim": False,
+        "component_decision": "descriptive_diagnostic_available",
+        "claim_boundary": summary["claim_boundary"],
+    }
 
 
 def _validate_artifact_manifest(
@@ -864,12 +858,20 @@ def _validate_artifact_manifest(
             raise RuntimeError(f"{spec.artifact_id} 文件摘要不匹配: {relative_path}")
     summary_path = manifest_path.parent / spec.summary_file_name
     summary = _read_json_object(summary_path)
-    component_record = _derive_artifact_component(
-        spec,
-        summary,
-        config,
-        metadata,
-    )
+    if spec.artifact_id == "single_model_parameter_sensitivity_diagnostic_manifest":
+        component_record = _derive_optional_diagnostic_component(
+            summary,
+            config,
+            metadata,
+            artifact_id=spec.artifact_id,
+        )
+    else:
+        component_record = _derive_artifact_component(
+            spec,
+            summary,
+            config,
+            metadata,
+        )
     return {
         "artifact_id": spec.artifact_id,
         "manifest_path": manifest_path.relative_to(root_path).as_posix(),
@@ -894,6 +896,20 @@ def _write_closure_gate(
         _validate_artifact_manifest(source, root_path=root_path, spec=spec)
         for spec in _CLOSURE_ARTIFACT_SPECS
     ]
+    diagnostic_artifact_records = []
+    for spec in _OPTIONAL_DIAGNOSTIC_ARTIFACT_SPECS:
+        manifest_path = _expected_artifact_paths(
+            root_path,
+            spec,
+            str(source.payload["paper_run_name"]),
+        )[-1]
+        if manifest_path.is_file():
+            record = _validate_artifact_manifest(
+                source,
+                root_path=root_path,
+                spec=spec,
+            )
+            diagnostic_artifact_records.append(record)
     claim_gate_records = {
         str(record["component_role"]): bool(record["central_claim_gate_ready"])
         for record in artifact_records
@@ -912,10 +928,7 @@ def _write_closure_gate(
         if record.get("component_evidence_ready") is True
         and record.get("contributes_to_central_claim_gate") is False
     }
-    required_measurement_component_roles = {
-        "dataset_quality_measurement",
-        "single_model_parameter_sensitivity",
-    }
+    required_measurement_component_roles = {"dataset_quality_measurement"}
     if measurement_component_roles != required_measurement_component_roles:
         raise RuntimeError("论文必要测量证据组件集合不完整")
     records_by_role = {
@@ -970,21 +983,6 @@ def _write_closure_gate(
                     ),
                 ),
             ),
-            "parameter_robustness": build_claim_decision(
-                "parameter_robustness",
-                evidence_complete=False,
-                scientific_support=None,
-                evidence_artifact_ids=(
-                    str(
-                        records_by_role[
-                            "single_model_parameter_sensitivity"
-                        ]["artifact_id"]
-                    ),
-                ),
-                evidence_blockers=(
-                    "parameter_robustness_decision_protocol_not_registered",
-                ),
-            ),
         }
     )
     paper_run_name = str(source.payload["paper_run_name"])
@@ -1000,6 +998,7 @@ def _write_closure_gate(
         "randomization_aggregate_digest": source.randomization_aggregate_digest,
         "common_code_version": source.common_code_version,
         "artifact_records": artifact_records,
+        "diagnostic_artifact_records": diagnostic_artifact_records,
         "claim_gate_records": claim_gate_records,
         "measurement_component_roles": sorted(
             measurement_component_roles
@@ -1095,6 +1094,10 @@ def _write_complete_archive(
     source_paths: list[Path] = []
     for spec in _CLOSURE_ARTIFACT_SPECS:
         source_paths.extend(_expected_artifact_paths(root_path, spec, paper_run_name))
+    for spec in _OPTIONAL_DIAGNOSTIC_ARTIFACT_SPECS:
+        expected_paths = _expected_artifact_paths(root_path, spec, paper_run_name)
+        if expected_paths[-1].is_file():
+            source_paths.extend(expected_paths)
     gate_dir = gate_report_path.parent
     source_paths.extend(sorted(path for path in gate_dir.iterdir() if path.is_file()))
     member_payloads: dict[str, tuple[Path, str]] = {

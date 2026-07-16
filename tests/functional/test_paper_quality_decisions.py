@@ -105,17 +105,17 @@ def test_complete_quality_components_can_support_without_workflow_shortcut() -> 
     )
     semantic = build_prompt_cluster_mean_inference(
         {f"prompt_{index:03d}": 1.0 for index in range(20)},
-        analysis_id="semantic_alignment_noninferiority",
+        analysis_id="independent_visual_content_preservation_noninferiority",
         protocol=protocol,
     )
     decisions = build_quality_preservation_decisions(
         distributional_inference=distribution,
         paired_perceptual_inference=perceptual,
-        semantic_alignment_inference=semantic,
+        independent_visual_content_inference=semantic,
         per_attack_inference={
             attack_id: {
                 "paired_perceptual_quality_noninferiority": perceptual,
-                "semantic_alignment_noninferiority": semantic,
+                "independent_visual_content_preservation_noninferiority": semantic,
                 "distributional_preservation_noninferiority": distribution,
             }
             for attack_id in protocol["registered_attack_ids"]

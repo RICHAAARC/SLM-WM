@@ -2,7 +2,7 @@
 
 ## 核心方法层
 
-`main/` 提供分支风险、完整特征 Jacobian Null Space、内容载体、Q/K attention 几何和仅图像盲检。它不读取 Prompt 文件、不加载实验配置、不写 records。
+`main/` 目标上只提供真实 S/T/R/Q 内容观测、NCHW 内容路由、二维 LF 主证据载体、HF-tail 困难攻击补充载体、带密钥真实 Q/K 几何同步与有界恢复、三分支单次 latent 写回、仅图像内容检测和同阈值救回。它不读取 Prompt 文件、不加载实验配置、不写 records。目标核心发布边界不包含旧 Jacobian、JVP/VJP、PSD-CG 和多时刻耦合；真实 Q/K 关系与恢复算子必须保留。实际迁移状态只由 `builds/project_construction_state.md` 登记。
 
 ## 主方法实验层
 

@@ -35,8 +35,8 @@ def _decision(
     )
 
 
-def test_optional_parameter_claim_does_not_block_registered_required_set() -> None:
-    """未登记为必要主张的参数稳定性不得否决固定参数论文结论。"""
+def test_parameter_sensitivity_cannot_enter_registered_claim_bundle() -> None:
+    """参数敏感性是诊断证据，不能伪装成可选论文主张。"""
 
     registry = load_paper_claim_registry()
     decisions = {
@@ -49,15 +49,12 @@ def test_optional_parameter_claim_does_not_block_registered_required_set() -> No
         scientific_support=None,
     )
 
-    bundle = build_claim_decision_bundle(decisions, registry=registry)
-
-    assert "parameter_robustness" not in bundle["required_claims"]
-    assert bundle["claim_decisions"]["parameter_robustness"]["decision"] == (
-        "evidence_incomplete"
-    )
-    assert bundle["registered_claim_set_decision"] == "supported"
-    assert bundle["registered_claim_set_supported"] is True
-    assert bundle["supports_paper_claim"] is True
+    assert registry["optional_claims"] == []
+    with pytest.raises(
+        ClaimDecisionGovernanceError,
+        match="未精确覆盖登记主张集合",
+    ):
+        build_claim_decision_bundle(decisions, registry=registry)
 
 
 def test_required_claim_distinguishes_negative_measurement_from_missing_evidence() -> None:

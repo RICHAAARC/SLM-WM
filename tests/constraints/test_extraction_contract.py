@@ -52,6 +52,8 @@ def _build_clean_minimal_source_repository(tmp_path: Path) -> Path:
         "configs/model_sd35.yaml",
         "configs/model_source_registry.json",
         "docs/core_method_package_readme.md",
+        "docs/builds/algorithm_primitives_content_adaptive_dual_carrier_latent_watermark.md",
+        "docs/builds/method_mechanism_design_content_adaptive_dual_carrier_latent_watermark.md",
         "scripts/validate_core_method_package.py",
         "pyproject.toml",
     ):

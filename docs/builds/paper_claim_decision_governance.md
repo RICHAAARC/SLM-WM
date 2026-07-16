@@ -2,34 +2,37 @@
 
 ## 一、文档职责
 
-本文档记录正式实验事实、派生统计、论文主张决策和运行流程就绪状态之间的唯一语义关系。它不保存实验数值, 也不允许人工覆盖 records、统计表或闭合报告中的结论。
+本文档定义正式实验事实、派生统计、论文主张决策和运行流程就绪状态之间的唯一语义关系。它不保存项目进度或实验数值，也不允许人工覆盖 records、统计表或闭合报告中的结论。
 
-## 二、当前证据链基线
+三档规模与流程迁移的唯一规范是 `paper_profile_protocol_isomorphism.md`；质量估计对象、区间和非劣效边界的唯一规范是 `paper_quality_claim_governance.md`。本文件只能消费两者的受治理输出，不得复制或修改其规模字段、统计公式和阈值。项目实际接线状态、迁移差距和验证进度只由 `project_construction_state.md` 登记。
 
-| 证据角色 | 主要生产位置 | 主要验证或消费位置 | 当前结论字段 |
+## 二、证据链职责
+
+| 证据角色 | 生产职责 | 验证或消费职责 | 结论边界 |
 | --- | --- | --- | --- |
-| fixed-FPR 检测记录 | `experiments/runners/image_only_dataset_runtime.py` | `paper_experiments/analysis/fixed_fpr_threshold_audit.py`、`paper_experiments/analysis/result_closure_gate.py` | `supports_paper_claim`、fixed-FPR ready 字段 |
-| baseline 公平对比 | `paper_experiments/baselines/`、`paper_experiments/analysis/paired_superiority.py` | `paper_experiments/analysis/paper_evidence_audit.py`、`paper_experiments/analysis/result_closure_gate.py` | `supports_paper_claim`、superiority ready 字段 |
-| FID/KID 与配对质量 | `experiments/artifacts/dataset_level_quality_outputs.py`、`paper_experiments/analysis/randomization_dataset_quality.py` | `scripts/paper_result_closure.py`、`paper_experiments/analysis/result_closure_gate.py` | `conclusion_decision=measured_evidence_component`、`supports_paper_claim=false` |
-| 机制必要性消融 | `experiments/ablations/necessity_statistics.py`、`paper_experiments/runners/randomization_ablation_necessity.py` | `scripts/paper_result_closure.py`、`paper_experiments/analysis/result_closure_gate.py` | `necessity_component_decision`、`supports_paper_claim` |
-| 参数敏感性 | `experiments/ablations/branch_risk_sensitivity.py`、`paper_experiments/runners/randomization_parameter_sensitivity.py` | `scripts/paper_result_closure.py` | 完整测量 ready 字段、`supports_paper_claim` |
-| 结果闭合与完整包 | `scripts/paper_result_closure.py`、`scripts/write_paper_complete_result_package.py` | `paper_experiments/analysis/result_closure_gate.py`、完整包 validator | `conclusion_decision`、`supports_paper_claim` |
+| fixed-FPR 检测记录 | `experiments/` 生成三类真实样本观测和冻结决策协议 | `paper_experiments/` 重建逐攻击和跨重复统计 | 原子记录不得直接声明论文主张成立 |
+| baseline 公平对比 | `paper_experiments/baselines/` 导入受治理真实结果 | 配对优势和证据审计模块复验共同协议 | 每种方法使用自身连续分数独立校准，不共享数值阈值 |
+| FID/KID 与配对质量 | `experiments/` 生产真实图像和质量特征 | 随机化质量聚合与质量决策模块 | 诊断指标不得替代独立质量证据 |
+| 机制必要性消融 | `experiments/ablations/` 从同一核心实现生成登记角色 | 随机化消融聚合器验证必要性 | 缺失角色、额外正式角色或复用主方法阈值均失败关闭 |
+| 单模型内部参数敏感性 | `experiments/` 小规模单因素运行 | 诊断聚合器记录局部稳定性 | 只解释固定参数依据，不进入正式论文主张集合 |
+| 结果闭合与完整包 | `scripts/` 编排闭合和归档 | 完整包 validator 重建全部摘要与决策 | 归档完整不等于科学结论成立 |
 
-当前主要问题是同名布尔字段同时出现在运行组件、统计组件、论文产物和完整包中。部分位置表示“不得直接支持论文主张”, 部分位置表示“证据完整且结论成立”, 因而不能继续把该字段当作跨层原始事实。
+跨层出现的同名兼容布尔字段只能是受治理决策的派生结果，不能作为生产者写入的原始科学事实。
 
-## 三、目标主张集合
+## 三、正式主张集合
 
-正式论文结论至少分解为以下稳定主张标识：
+正式论文主张集合精确为：
 
 ```text
 fixed_fpr_detection
 baseline_superiority
 quality_preservation
 mechanism_necessity
-parameter_robustness
 ```
 
-每项主张只允许使用以下三态决策：
+单模型内部参数敏感性是诊断证据，不是第五项主张，也不得作为 `optional_claims`、gate 角色或 `registered_claim_set_supported` 的输入。
+
+每项正式主张只允许使用以下三态决策：
 
 ```text
 supported
@@ -39,17 +42,13 @@ evidence_incomplete
 
 三态决策必须同时区分：
 
-1. `evidence_complete`: 所有预登记输入、原子记录、统计和 provenance 是否完整；
-2. `scientific_support`: 完整证据是否满足预登记判据；
-3. `decision`: 由前两项唯一派生的三态结论。
+1. `evidence_complete`：全部预登记输入、原子记录、统计和 provenance 是否完整。
+2. `scientific_support`：完整证据是否满足预登记判据。
+3. `decision`：由前两项唯一派生的三态结论。
 
-`registered_claim_set_supported` 只能由预登记 `required_claims` 的三态决策派生。兼容字段 `supports_paper_claim` 暂时保留, 但只能等于对应登记主张集合的派生结果, 不得由 writer 或 manifest 自行写成原始事实。
+`registered_claim_set_supported` 只能由 `configs/paper_claim_registry.json` 登记的全部 `required_claims` 派生。兼容字段 `supports_paper_claim` 只能等于对应登记主张集合的派生结果，不得由 writer、manifest 或 Notebook 自行写成原始事实。集中构造与校验职责位于 `paper_experiments/analysis/paper_claim_decisions.py`。
 
-冻结登记表位于 `configs/paper_claim_registry.json`, 集中构造与 validator 位于 `paper_experiments/analysis/paper_claim_decisions.py`。当前必要主张为 fixed-FPR 检测、baseline 优势、质量保持和机制必要性。`parameter_robustness` 当前登记为可选主张, 因而单模型内部敏感性证据不完整或未支持不会否决固定参数下的必要主张集合。
-
-阶段1只建立决策结构, 不把已有 FID/KID 测量自动提升为质量保持结论。因此在质量非劣效统计协议接入前, `quality_preservation` 必须为 `evidence_incomplete`; 这不等价于实验已经测得质量不支持。完整结果包仍允许归档该状态, 因为归档闭合与科学支持是两个独立判定。
-
-阶段2已由 `configs/paper_quality_claim_protocol.json` 和 `paper_experiments/analysis/paper_quality_decisions.py` 接入质量结论协议。随机化质量 writer 现在输出 Prompt 条件 KID 记录、Prompt 聚类区间、三类质量子主张、逐攻击主张和跨攻击主张。当前感知、语义与逐攻击质量原子尚未进入该聚合输入, 因而总体质量主张仍按真实缺口保持 `evidence_incomplete`, 而不是沿用旧 `measured_evidence_component` 状态。
+质量结论必须消费 Prompt 条件 KID、配对感知质量、独立视觉内容质量、逐攻击质量和跨攻击质量的受治理统计。任一必需原子或区间缺失时，`quality_preservation` 必须为 `evidence_incomplete`，不得由诊断代理、同源机制一致性分数或旧兼容状态替代。
 
 ## 四、运行流程就绪边界
 
@@ -63,20 +62,29 @@ workflow_transfer_ready = (
 )
 ```
 
-即使 `probe_paper` 的某项主张为 `measured_not_supported`, 只要真实正式步骤执行完成、产物完整且三个 profile 协议同构, 仍可以证明相同代码和协议能够迁移到 `pilot_paper` 与 `full_paper`。该状态不得被解释为更严格 FPR 下的科学结论已经成立。
+`workflow_transfer_ready=true` 只说明同一实现、决策程序和产物契约可以从 `probe_paper` 迁移到另外两个规模，不表示更严格 FPR 下的科学结论成立。即使 `probe_paper` 的某项主张为 `measured_not_supported`，只要真实正式步骤执行完成、产物完整且三档协议同构，流程迁移结论仍可成立。
 
-阶段3已由 `configs/paper_profile_protocol_registry.json`、`paper_experiments/analysis/paper_profile_protocol_isomorphism.py` 和 `scripts/write_paper_profile_protocol_isomorphism_report.py` 实现可执行门禁。报告把每个 profile 拆成允许变化的 `scale_contract`、必须一致的 `protocol_contract` 和独立比较的 `artifact_contract`。规范化比较不会删除方法、攻击、baseline、split、阈值、指标、命令图、gate 或 claim 结构中的任何字段；这些位置任一 profile 漂移都会给出精确差异路径并阻断迁移状态。
-
-报告还单独核验当前规模值是否匹配 `RUN_DEFAULTS`。测试可以证明修改允许的规模字段不会伪造协议语义差异, 但未登记的规模值会令 `profile_scale_registration_ready=false`。正式 writer 只从 clean Git 提交与相同 `common_code_version` 的真实 probe 闭合报告构造报告, 因而不能用当前代码替旧结果补写同构证明。
-
-`scientific_scope_by_profile` 明确保存三个工作点的结论作用域。只有 `probe_paper` 读取 probe 闭合报告中的分主张集合决策；`pilot_paper` 与 `full_paper` 在没有各自结果时固定为 `evidence_incomplete` 和 `scientific_support=null`。因此 `workflow_transfer_ready=true` 只表示相同实现与协议可以继续运行, 不表示 FPR=0.01 或 FPR=0.001 的科学效果已经成立。
+`scientific_scope_by_profile` 必须分别保存三个工作点的科学作用域。只有具有自身正式结果的 profile 才能产生该 profile 的科学支持结论；不存在自身结果时必须记录 `evidence_incomplete`、`scientific_support=null` 和 `scientific_support_transferred_from_probe=false`。
 
 ## 五、分层职责
 
-- `experiments/` 生产真实运行记录、攻击记录、消融记录和质量原子；
-- `paper_experiments/` 重建统计、逐攻击结论和分主张决策；
-- `scripts/` 编排结果闭合、验证和归档；
-- `paper_workflow/` 只包装 Colab session 与 Drive；
-- `main/` 不参与本次治理重构。
+- `experiments/` 生产真实运行记录、攻击记录、最小必要消融记录和质量原子。
+- `paper_experiments/` 重建统计、逐攻击结论和分主张决策。
+- `scripts/` 编排结果闭合、验证和归档。
+- `paper_workflow/` 只包装 Colab session 与 Drive。
+- `main/` 只提供核心方法，不依赖本结论治理层。
 
-该结构属于通用论文证据治理写法。SLM-WM 项目特定部分是固定 FPR、9个 seed-key repeat、14项机制消融、18项分支风险参数敏感性、716维局部特征水平集切空间和图像侧 Q/K 几何证据的绑定方式。
+该结构属于通用论文证据治理写法。SLM-WM 项目特定方法语义只引用两份无状态核心规范，不在本文重复公式、参数或完整角色集合。
+
+## 六、协议变更原子性
+
+方法或证据 schema 发生受治理变更时，必须在同一变更单元中完成：
+
+1. 更新主张登记和必要主张集合。
+2. 更新真实生产者的原子记录角色和 schema。
+3. 更新主张决策输入映射，同时保持三态决策语义。
+4. 更新结果闭合和完整包消费者，拒绝旧方法字段或未登记额外文件。
+5. 更新 field registry 和产物契约。
+6. 使用真实格式的原始记录执行生产者到消费者正向集成测试，不得手工注入最终 `supported` 决策。
+
+验收必须分别报告 `evidence_complete`、`scientific_support` 和 `decision`。任何 writer、manifest 或 Notebook 直接写入最终支持状态都属于阻断违规。

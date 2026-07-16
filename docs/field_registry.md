@@ -2,7 +2,9 @@
 
 ## 文档定位
 
-本文档是项目中 governed fields 的登记表。它只记录“当前项目实际使用或模板预留的字段实例”, 不重复解释字段治理规则。
+本文档是项目中 governed fields 的登记表。它只记录项目实际使用或模板预留的字段实例，不重复解释字段治理规则。
+
+登记表同时包含迁移前实现仍在使用的字段，以及三份冻结核心文档定义的目标 schema 字段。迁移前字段仅用于识别历史 records 和阻止旧结果冒充目标方法结果；目标字段的登记也不表示 writer、consumer、GPU 运行或论文证据已经完成。字段的实际实现状态和退出顺序只以 `docs/builds/project_construction_state.md` 为准。
 
 字段 category、后缀要求和清理规则见:
 
@@ -30,6 +32,164 @@ Notebook 与 repository module 的跨边界数据
 
 函数内部一次性局部变量不需要登记。跨函数、跨文件、跨进程或跨 Notebook 边界保存的中间状态字段需要登记。
 
+## 字段生命周期
+
+每个字段必须按以下互斥规则确定生命周期，顺序优先级从高到低：
+
+1. `configs/field_lifecycle_registry.json` 的 `target_required_exact_fields` 中列出的字段为 `target_required`。该集合覆盖目标方法的跨函数接口字段、可持久化证据字段以及目标治理字段；这些字段必须由目标 runtime 或目标证据链真实生产，不能从旧 records 推断或补写。仅进程内 Tensor 即使属于 `target_required`，仍必须以 `allowed_in_records=false` 禁止直接序列化。
+2. `configs/field_lifecycle_registry.json` 中 `legacy_only_exact_fields` 明确列出的字段，以及命中其前缀或包含规则的迁移前字段为 `legacy_only`。其中包括旧风险场、Gaussian amplitude tail、Jacobian/Null Space、旧 geometry 拟合阈值、clean-negative-only fixed-FPR 和旧 branch-risk 参数敏感性字段。它们只能读取历史证据或支持迁移审计，不得进入目标方法结果、目标完整包或目标论文主张。
+3. 不属于前两类的通用 provenance、artifact、依赖、运行编排和统计字段为 `active_shared`，可以由旧实现和目标实现共同使用，但其取值仍须服从对应版本协议。
+
+生命周期解析顺序由机器登记冻结为 `target_required_exact_fields -> legacy_only_exact_fields -> legacy_only_prefixes -> legacy_only_contains -> active_shared_default`。目标精确集合、legacy 精确集合和名称规则都只在该机器登记中维护，外围文档不得维护第二套可执行清单。本文件提供字段语义说明，但不从 Markdown 表反向派生生命周期。生命周期规则高于旧字段行中的 `allowed_in_claims` 兼容值。`legacy_only` 字段即使历史行保留 `allowed_in_claims=true`，也不得支持目标方法主张。新增字段时必须明确落入上述一种生命周期；不满足互斥分类时 field registry 校验必须失败。
+
+## 冻结目标方法新增字段
+
+下表补充登记三份核心文档新增、且在通用字段登记表中尚无语义行的目标 schema 字段。目标接口复用的既有通用字段不在此重复登记，其目标生命周期仍由 `target_required_exact_fields` 明确列出。所有字段名在本文件中只能出现一次。目标字段必须在核心 runtime、writer、consumer 和聚合器的同一次原子迁移中落地；仅在本表或机器登记中出现不能支持任何完成状态或论文主张，实际生产状态只由 `builds/project_construction_state.md` 登记。
+
+| field_name | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |
+| --- | --- | --- | --- | --- | --- | --- |
+| core_documents_frozen | governance | none | true | false | false | 三份核心文档内部公式、接口、schema 和状态职责已经定稿。 |
+| document_ecosystem_synchronized | governance | none | true | false | false | 外围文档、清单、结果包登记和约束测试已经单向同步三份核心文档。 |
+| prompt_text_digest | provenance | none | true | false | false | 正式样本使用的 Prompt 文本稳定摘要。 |
+| generation_input_identity_digest | provenance | none | true | false | false | Prompt、生成 seed、模型和生成配置组成的完整输入身份摘要。 |
+| key_relation | protocol | none | true | true | false | 当前记录实际使用 registered key 或 wrong key 评分的关系身份。 |
+| code_commit | provenance | none | true | false | false | 当前记录绑定的精确40位 Git 提交。 |
+| runtime_component_identity_digest | provenance | none | true | false | false | 模型运行组件类、revision 和关键算子身份摘要。 |
+| prg_version | protocol | none | true | false | false | 当前记录使用的确定性 PRG 版本。 |
+| prg_identity_digest | provenance | none | true | false | false | PRG 版本、domain 和非敏感身份输入摘要。 |
+| runtime_config_digest | provenance | none | true | false | false | 目标方法完整运行配置摘要。 |
+| content_routing_reference_registry_digest | provenance | none | true | false | false | `g_ref/r_ref/q_ref` 唯一登记文件内容摘要。 |
+| scoring_key_identity_digest | provenance | none | true | false | false | 不泄露密钥材料的实际评分密钥身份摘要。 |
+| decision_identity_digest | provenance | none | true | false | false | 方法角色、阈值、救回窗口和决策规则的联合摘要。 |
+| selected_layer_name | method | none | true | true | false | 跨层几何候选选择后提供唯一 transform 的冻结 Q/K 层名。 |
+| candidate_identity | provenance | none | true | true | false | 几何候选的 D4、旋转、尺度和平移规范身份。 |
+| candidate_sequence_index | metric | none | true | true | false | 选中层最终有效候选连接序列中的从0开始索引。 |
+| recovered_transform | metric | none | true | true | false | output-to-input 约定下的2×3恢复矩阵。 |
+| transform_in_capture_domain | governance | none | true | true | false | 选中 transform 是否位于冻结捕获域。 |
+| expected_anchor_indices | provenance | none | true | true | false | 几何协议冻结的12个 canonical 锚点索引。 |
+| observed_anchor_indices | provenance | none | true | true | false | 选中 transform 映射得到的 observation 锚点索引。 |
+| inlier_mask | metric | none | true | true | false | 12锚点协议中逐锚点的有效内点布尔集合。 |
+| canonical_relation_score | metric | none | true | true | false | 候选 transform 下 canonical 方向的带密钥 Q/K 关系分数。 |
+| inlier_ratio | metric | none | true | true | false | 有效锚点中满足冻结残差条件的比例。 |
+| mean_inlier_residual | metric | none | true | true | false | 内点锚点的平均归一化残差。 |
+| direct_qk_identity_ready | governance | none | true | true | false | 几何测量是否完整绑定冻结层直接 Q/K 身份。 |
+| layer_candidate_summaries | provenance | none | true | true | false | 两个冻结层各自候选序列和最优候选的可序列化摘要。 |
+| cross_layer_selection_identity_digest | provenance | none | true | false | false | 跨层字典序选择规则和选中层身份摘要。 |
+| qk_atomic_records_digest | provenance | none | true | false | false | 几何测量消费的直接 Q/K 原子记录集合摘要。 |
+| aligned_image_sha256 | provenance | none | true | false | false | 真实回正并量化后的 RGB 图像 SHA-256。 |
+| aligned_image_member_path | artifact | none | true | false | false | 回正图像在受治理结果包中的成员路径。 |
+| aligned_width | metric | none | true | false | false | 回正图像宽度。 |
+| aligned_height | metric | none | true | false | false | 回正图像高度。 |
+| geometry_measurement_digest | provenance | none | true | false | false | 可序列化正式几何恢复观测的完整摘要。 |
+| identity | provenance | none | true | false | false | 正式成功或失败观测共享的结构化身份对象。 |
+| measurement_status | governance | none | true | true | false | 正式观测为 success 或 failure 的判别字段。 |
+| failure_boundary | governance | none | true | true | false | 失败记录停止的受治理协议边界；成功记录必须为 null。 |
+| failure_code | governance | none | true | true | false | 失败记录的稳定错误码；成功记录必须为 null。 |
+| source_image_sha256 | provenance | none | true | false | false | 正式观测来源图像的 SHA-256；不可得时显式为 null。 |
+| evaluated_image_sha256 | provenance | none | true | false | false | 实际进入检测或质量测量的图像 SHA-256；不可得时显式为 null。 |
+| source_width | metric | none | true | false | false | 来源图像宽度；不可得时显式为 null。 |
+| source_height | metric | none | true | false | false | 来源图像高度；不可得时显式为 null。 |
+| evaluated_width | metric | none | true | false | false | 被评估图像宽度；不可得时显式为 null。 |
+| evaluated_height | metric | none | true | false | false | 被评估图像高度；不可得时显式为 null。 |
+| source_image_member_path | artifact | none | true | false | false | 来源图像在受治理结果包中的成员路径。 |
+| evaluated_image_member_path | artifact | none | true | false | false | 被评估图像在受治理结果包中的成员路径。 |
+| raw_lf_score | metric | none | true | true | false | 未回正图像的 LF 连续内容分数。 |
+| raw_hf_tail_score | metric | none | true | true | false | 未回正图像的 HF-tail 连续内容分数。 |
+| registered_key_geometry_score | metric | none | true | true | false | 最终图像对登记密钥的直接 Q/K 几何诊断分数。 |
+| wrong_key_geometry_score | metric | none | true | true | false | 最终图像对 wrong key 的直接 Q/K 几何诊断分数。 |
+| aligned_hf_tail_score | metric | none | true | true | false | 回正图像的 HF-tail 连续内容分数。 |
+| geometry_measurement | provenance | none | true | true | false | 可选的 `FormalGeometryRecoveryObservation` 嵌套对象。 |
+| geometry_search_required | governance | none | true | true | false | 原始内容 margin 是否进入冻结近阈值窗口。 |
+| geometry_search_attempted | governance | none | true | true | false | 当前记录是否真实执行几何搜索。 |
+| evidence_positive | metric | none | true | true | false | 同一内容阈值和冻结救回规则产生的最终水印证据布尔值。 |
+| measurement_identity_digest | provenance | none | true | false | false | 正式观测除自身外全部身份、显式 null、测量和嵌套摘要的联合摘要。 |
+| calibration_negative_role | protocol | none | true | true | false | calibration 负观测所属的 `clean_negative_registered`、`attacked_negative_registered` 或 `watermarked_wrong_key` 角色。 |
+| negative_role_sample_count | metric | none | true | true | false | 当前 calibration 负角色进入窗口拟合或阈值冻结的实际观测数。 |
+| negative_role_allowed_false_positive_count | metric | none | true | true | false | 当前 calibration 负角色按冻结有限样本公式得到的最大假阳性预算。 |
+| negative_role_observed_false_positive_count | metric | none | true | true | false | 当前候选窗口或阈值在该 calibration 负角色上的实际假阳性数量。 |
+| negative_role_budget_satisfied | governance | none | true | true | false | 当前 calibration 负角色是否独立满足自身 fixed-FPR 预算。 |
+| negative_role_budget_records_digest | provenance | none | true | false | false | 三组 calibration 负角色预算记录按规范顺序连接后的稳定摘要。 |
+| target_parameter_axis_id | protocol | none | true | false | false | 目标单模型敏感性四个轴之一：reference 分位数、探针步长、内容共同倍率或 geometry 倍率。 |
+| target_parameter_candidate_value | metric | none | true | false | false | 当前单因素候选的冻结数值。 |
+| target_parameter_fixed_repeat_id | protocol | none | true | false | false | 小规模描述性诊断唯一固定 repeat 的身份。 |
+| target_parameter_prompt_subset_digest | provenance | none | true | false | false | 登记小规模 Prompt 子集的稳定摘要。 |
+| target_parameter_sensitivity_record_digest | provenance | none | true | false | false | 单因素候选、固定身份、真实测量和诊断结果的稳定摘要。 |
+| target_parameter_sensitivity_diagnostic_ready | governance | none | false | false | true | 四个轴在一个固定 repeat 上完成真实描述性诊断并通过 schema 复验；不得支持论文主张或 release gate。 |
+| lf_mask | method | none | false | false | false | 目标内容路由输出的 LF-origin 空间容量 Tensor，必须由 `S/T/R/Q` 公式真实计算；只能在进程内消费，不得直接序列化。 |
+| hf_tail_mask | method | none | false | false | false | 目标内容路由输出的 HF-tail-origin 空间容量 Tensor，必须由 `S/T/R/Q` 公式真实计算；只能在进程内消费，不得直接序列化。 |
+| content_threshold | protocol | none | true | true | false | 当前 `method_role` 由三组 calibration 负观测预算共同冻结的唯一内容阈值。 |
+| rescue_margin_low | protocol | none | true | true | false | 目标同阈值救回窗口的有限负下界；`content_chain_only` 固定为 null。 |
+| registration_confidence | metric | none | true | true | false | 目标几何恢复由双向关系、coverage、inlier 和 residual 共同形成的注册置信度，不得独立判正。 |
+| saliency_map | method | none | false | false | false | 冻结语义显著性评估器在目标空间输出的归一化显著性 Tensor；只能在进程内消费。 |
+| patch_relevance | metric | none | false | false | false | 逐视觉 patch 对冻结 Prompt 条件的相关性 Tensor；只能在进程内消费。 |
+| image_feature_digest | provenance | none | true | false | false | 语义显著性计算所消费图像特征的稳定摘要。 |
+| prompt_feature_digest | provenance | none | true | false | false | 语义显著性计算所消费 Prompt 特征的稳定摘要。 |
+| saliency_map_digest | provenance | none | true | false | false | 归一化语义显著性图的稳定摘要。 |
+| model_identity_digest | provenance | none | true | false | false | 当前冻结模型 ID、revision、特征层和预处理协议的联合摘要。 |
+| texture_map | method | none | false | false | false | 从真实参考图像计算并归一化到目标空间的纹理复杂度 Tensor；只能在进程内消费。 |
+| reference_gradient | metric | none | true | false | false | 纹理复杂度归一化所使用的冻结参考梯度。 |
+| texture_map_digest | provenance | none | true | false | false | 纹理复杂度图及其冻结计算协议的稳定摘要。 |
+| response_map | method | none | false | false | false | 相邻冻结生成步潜变量变化形成的潜空间响应 Tensor；只能在进程内消费。 |
+| reference_response | metric | none | true | false | false | 潜空间响应归一化所使用的冻结参考值。 |
+| previous_latent_digest | provenance | none | true | false | false | 潜空间响应计算中前一冻结生成步潜变量的稳定摘要。 |
+| current_latent_digest | provenance | none | true | false | false | 潜空间响应计算中当前冻结生成步潜变量的稳定摘要。 |
+| response_map_digest | provenance | none | true | false | false | 归一化潜空间响应图的稳定摘要。 |
+| local_sensitivity_map | method | none | false | false | false | 使用冻结公开探针在当前样本处测得的局部扰动敏感性 Tensor；只能在进程内消费。 |
+| reference_sensitivity | metric | none | true | false | false | 局部扰动敏感性归一化所使用的冻结参考值。 |
+| public_probe_digest | provenance | none | true | false | false | 不含水印密钥的公开局部扰动探针稳定摘要。 |
+| probe_step | protocol | none | true | false | false | 局部敏感性公开探针使用的冻结扰动步长。 |
+| reference_image_digest | provenance | none | true | false | false | 局部敏感性评估中未扰动参考图像的稳定摘要。 |
+| perturbed_image_digest | provenance | none | true | false | false | 局部敏感性评估中真实扰动后图像的稳定摘要。 |
+| local_sensitivity_map_digest | provenance | none | true | false | false | 局部扰动敏感性图及探针身份的联合稳定摘要。 |
+| writable_capacity_map | method | none | false | false | false | 综合语义、纹理、响应和敏感性后得到的逐位置可写容量 Tensor；只能在进程内消费。 |
+| routing_identity_digest | provenance | none | true | false | false | 内容路由输入、冻结参数和输出掩码的联合摘要。 |
+| template | method | none | false | false | false | 当前载体分支按冻结 PRG 和滤波协议构造的密钥模板 Tensor；只能在进程内消费。 |
+| prg_domain | protocol | none | true | false | false | 区分 LF、HF-tail 或 geometry 模板用途的冻结 PRG 域标签。 |
+| filter_identity_digest | provenance | none | true | false | false | LF 载体模板所使用频域滤波器和参数的稳定摘要。 |
+| high_pass_identity_digest | provenance | none | true | false | false | HF-tail 载体高通选择算子和参数的稳定摘要。 |
+| selected_element_count | metric | none | true | false | false | HF-tail 模板经空间与幅值选择后实际保留的元素数量。 |
+| blind_lf_score | metric | none | true | true | false | 盲内容评分器对输入图像给出的 LF 连续分数。 |
+| blind_hf_tail_score | metric | none | true | true | false | 盲内容评分器对输入图像给出的 HF-tail 连续分数。 |
+| blind_content_score | metric | none | true | true | false | 盲内容评分器按冻结权重融合得到的连续内容分数。 |
+| hf_tail_weight | protocol | none | true | true | false | 内容分数融合中 HF-tail 分支的冻结权重。 |
+| score_identity_digest | provenance | none | true | false | false | 评分密钥、模板、权重和输入身份的联合摘要。 |
+| geometry_update | method | none | false | false | false | 几何链按冻结 Q/K 相对关系目标构造的潜变量更新 Tensor；只能在进程内消费。 |
+| accepted_scale | metric | none | true | false | false | 几何更新单链回溯后实际接受的缩放因子。 |
+| backtracking_index | metric | none | true | false | false | 几何更新单链回溯中实际接受候选的从0开始索引。 |
+| relative_strength | protocol | none | true | false | false | 几何更新相对于冻结基准强度的倍率。 |
+| l2_budget | protocol | none | true | false | false | 几何更新单链允许使用的冻结 L2 预算。 |
+| relation_score_before | metric | none | true | false | false | 写入几何更新前冻结层 Q/K 相对关系分数。 |
+| relation_score_after | metric | none | true | false | false | 写入几何更新后冻结层 Q/K 相对关系分数。 |
+| relation_template_identity_digest | provenance | none | true | false | false | 几何链带密钥相对关系模板及冻结层身份摘要。 |
+| geometry_update_digest | provenance | none | true | false | false | 几何链潜变量更新张量的稳定摘要。 |
+| hf_tail_relative_strength | protocol | none | true | false | false | HF-tail 内容分支相对于冻结基准强度的倍率。 |
+| geometry_relative_strength | protocol | none | true | false | false | 几何链相对于冻结基准强度的倍率。 |
+| combined_relative_l2_limit | protocol | none | true | false | false | LF、HF-tail 与 geometry 三项联合更新的相对 L2 上限。 |
+| common_backtracking_factor | protocol | none | true | false | false | 三项联合写回共同缩放时使用的冻结回溯因子。 |
+| common_backtracking_maximum_steps | protocol | none | true | false | false | 三项联合写回允许执行的最大共同回溯步数。 |
+| budget_identity_digest | provenance | none | true | false | false | 三分支强度、联合预算和共同回溯协议的联合摘要。 |
+| written_latent | method | none | false | false | false | 按实际 runtime dtype 完成三分支共同写回后的潜变量 Tensor；只能在进程内消费。 |
+| lf_update_digest | provenance | none | true | false | false | 实际参与共同写回的 LF 更新稳定摘要。 |
+| hf_tail_update_digest | provenance | none | true | false | false | 实际参与共同写回的 HF-tail 更新稳定摘要。 |
+| lf_effective_l2 | metric | none | true | false | false | 共同缩放后 LF 更新的实际 L2 范数。 |
+| hf_tail_effective_l2 | metric | none | true | false | false | 共同缩放后 HF-tail 更新的实际 L2 范数。 |
+| geometry_effective_l2 | metric | none | true | false | false | 共同缩放后 geometry 更新的实际 L2 范数。 |
+| combined_update_digest | provenance | none | true | false | false | 三分支共同缩放并相加后的联合更新摘要。 |
+| combined_effective_l2 | metric | none | true | false | false | 三分支共同缩放后联合更新的实际 L2 范数。 |
+| accepted_common_scale | metric | none | true | false | false | 满足联合预算并真实写回时接受的共同缩放因子。 |
+| actual_dtype_write_digest | provenance | none | true | false | false | 按实际 runtime dtype 量化后非零写回值的稳定摘要。 |
+| write_identity_digest | provenance | none | true | false | false | 写回输入、预算、共同缩放和结果潜变量的联合摘要。 |
+| layer_candidate_summaries_digest | provenance | none | true | false | false | 各冻结层几何候选摘要按规范顺序连接后的稳定摘要。 |
+| aligned_image | method | none | false | false | false | 选中可信几何变换后供同一内容评分器重判的真实回正图像 Tensor；正式记录只能保存其 SHA-256、成员路径和尺寸。 |
+| raw | provenance | none | false | false | false | 双链 runtime 中未回正内容测量的进程内结构对象；正式记录必须展开为冻结标量字段。 |
+| geometry | provenance | none | false | false | false | 双链 runtime 中可选几何恢复的进程内结构对象；正式记录必须转换为 `geometry_measurement`。 |
+| geometry_recovery_enabled | protocol | none | true | true | false | 当前方法角色是否允许执行几何参考系恢复。 |
+| rescue_enabled | protocol | none | true | true | false | 当前方法角色是否允许在冻结窗口内执行回正后内容重判。 |
+| geometry_gate_identity_digest | provenance | none | true | false | false | 几何可信门禁阈值、捕获域和选择规则的联合摘要。 |
+| calibration_population_identity_digest | provenance | none | true | false | false | 三组 calibration 负观测集合及其划分身份摘要。 |
+| layer_name | protocol | none | true | true | false | 单个正式几何层候选所属的冻结 Q/K 层名。 |
+| candidate_summary_digest | provenance | none | true | false | false | 单层单候选全部恢复测量和身份字段的稳定摘要。 |
+
 ## 字段登记表
 
 | field_name | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |
@@ -40,8 +200,8 @@ Notebook 与 repository module 的跨边界数据
 | record_id | protocol | none | true | false | false | 单条记录的稳定标识。 |
 | split | protocol | none | true | false | false | 数据或事件划分。 |
 | method_name | protocol | none | true | false | false | 实验记录中的方法名称。 |
-| metric_name | protocol | none | true | false | false | 实验记录中的指标名称。 |
-| metric_value | protocol | none | true | false | false | 实验记录中的指标数值。 |
+| metric_name | protocol | none | true | false | false | 受治理记录或聚合行的指标语义名称。 |
+| metric_value | protocol | none | true | false | false | 与 `metric_name` 对应的受治理指标数值。 |
 | metadata | governance | none | true | false | false | records、manifest 或 typed object 的补充结构化信息。 |
 | artifact_id | artifact | none | false | false | false | 受治理论文产物的稳定标识。 |
 | artifact_type | artifact | none | false | false | false | 受治理论文产物类型, 例如 table、figure、report 或 manifest。 |
@@ -67,7 +227,7 @@ Notebook 与 repository module 的跨边界数据
 | rebuild_source_argument | artifact | none | false | false | false | 重建命令中由调用方替换为当前来源包路径的显式参数标记。 |
 | generated_at | governance | none | false | false | false | 本地报告或审计摘要的生成时间。 |
 | construction_unit_name | governance | none | false | false | false | 项目分阶段构建流程中的语义阶段名称。 |
-| phase_status | governance | none | false | false | false | 分阶段构建状态文档中的阶段推进状态。 |
+| phase_status | governance | none | false | false | false | `legacy_only`：已删除分阶段状态文档使用的旧状态字段；当前唯一状态源不得生产该字段。 |
 | executor | governance | none | false | false | false | 执行当前阶段推进的主体。 |
 | execution_date | governance | none | false | false | false | 当前阶段推进的执行日期。 |
 | input_manifest | governance | none | false | false | false | 当前阶段使用的输入 manifest。 |
@@ -103,7 +263,7 @@ Notebook 与 repository module 的跨边界数据
 | minimal_method_dependency | governance | none | false | false | false | minimal smoke 依赖的最小方法包入口。 |
 | writes_persistent_output_by_default | governance | none | false | false | false | 脚本默认是否写出持久化输出。 |
 | attention_runtime | method | none | false | false | false | attention 原语是否接入真实运行时的状态说明。 |
-| branch | method | none | false | false | false | 载体派生分支名称, 例如 LF、`tail_robust` 或 attention。 |
+| branch | method | none | false | false | false | `legacy_only`：迁移前载体分支名称；目标方法使用冻结 `method_role` 与 LF/HF-tail/geometry 语义字段，不读取该宽泛分支名。 |
 | eta_local_contrast_risk | method | none | false | false | false | 分支风险场中解码灰度局部对比度风险的权重。 |
 | eta_semantic | method | none | false | false | false | 语义风险场中 semantic 权重。 |
 | eta_texture | method | none | false | false | false | 语义风险场中 texture 权重。 |
@@ -116,7 +276,6 @@ Notebook 与 repository module 的跨边界数据
 | stability_threshold | method | none | false | false | false | 高斯幅值尾部截断与 attention 路由的稳定性阈值。 |
 | risk_values | method | none | false | false | false | 语义风险场逐位置风险值。 |
 | budget_values | method | none | false | false | false | 语义承载预算逐位置数值。 |
-| lf_mask | method | none | false | false | false | LF 主证据候选区域 mask。 |
 | tail_mask | method | none | false | false | false | 高斯幅值尾部截断补充证据候选区域 mask。 |
 | attention_mask | method | none | false | false | false | attention 几何候选区域 mask。 |
 | mask_values | method | none | false | false | false | 投影到 latent 长度后的 mask 数值。 |
@@ -138,8 +297,8 @@ Notebook 与 repository module 的跨边界数据
 | subspace_id | method | none | false | false | false | 潜空间安全子空间对象的稳定标识。 |
 | basis_digest | method | none | false | false | false | 潜空间子空间基的稳定摘要。 |
 | safe_axes | method | none | false | false | false | 可用于水印承载的安全轴集合。 |
-| method_definition | method | none | true | false | false | 构造式三分支协议、局部特征水平集切空间术语边界和实际写回复验规则组成的可机读方法定义。 |
-| method_definition_digest | provenance | none | true | true | false | 版本化可机读方法定义的稳定 SHA-256 摘要, 同时进入运行配置身份与结果 metadata。 |
+| method_definition | method | none | true | false | false | `legacy_only`：迁移前方法定义正文；目标方法必须从目标版本 registry 读取，不得复用局部特征水平集定义。 |
+| method_definition_digest | provenance | none | true | true | false | 版本化可机读方法定义的稳定 SHA-256 摘要；只有与对应方法版本 registry 和记录 schema 同时绑定时才可使用。 |
 | carrier_id | method | none | false | false | false | 水印载体对象的稳定标识。 |
 | carrier_family | method | none | false | false | false | 水印载体所属机制族。 |
 | frequency_band | method | none | false | false | false | 水印载体使用的频带名称或明确的频带不适用标识。 |
@@ -195,7 +354,7 @@ Notebook 与 repository module 的跨边界数据
 | update_digest | method | none | false | false | false | 组合 latent update 摘要。 |
 | evidence_id | method | none | true | false | false | 检测证据对象的稳定标识。 |
 | evidence_type | method | none | true | false | false | 检测证据类型, 例如 content、geometry 或 attention。 |
-| score_name | method | none | true | false | false | 检测证据分数名称。 |
+| score_name | method | none | true | false | false | 主方法或 external baseline 观测中连续分数字段的语义名称。 |
 | score_value | method | none | true | false | false | 检测证据分数值。 |
 | lf_score | method | none | true | false | false | LF 分支归一化相关分数。 |
 | tail_score | method | none | true | false | false | 高斯幅值尾部截断分支的相关分数。 |
@@ -205,7 +364,6 @@ Notebook 与 repository module 的跨边界数据
 | lambda_lf | method | none | true | false | false | 内容分数中 LF 分支权重。 |
 | lambda_tail | method | none | true | false | false | 内容分数中的高斯幅值尾部截断分支权重。 |
 | used_independent_branch_vote | method | none | true | false | false | 是否使用 LF/高斯幅值尾部截断独立阈值投票。正式方法应为 false。 |
-| registration_confidence | metric | none | true | true | false | 双向关系分数、锚点内点比例、残差和最小双向覆盖率共同定义的注册置信度。 |
 | image_only_alignment | method | none | true | true | false | 仅图像检测中仿射参考系恢复的预注册结构门禁定义。 |
 | attention_alignment_gate | protocol | none | true | true | false | 锚点数量、归一化坐标残差上界与最小内点比例组成的完整预注册结构门禁记录；alignment、detector、冻结阈值及结果摘要必须绑定同一值。 |
 | anchor_selection_rule | protocol | none | true | true | false | 在抽样 token 索引范围内确定性选择12个均匀间隔锚点的规则；实际 token 数少于12时失败。 |
@@ -236,13 +394,11 @@ Notebook 与 repository module 的跨边界数据
 | aligned_content_score | method | none | true | false | false | 几何对齐后的内容分数。 |
 | formal_detection_score | method | none | true | false | false | fixed-FPR 正式判定使用的分数, 其来源由 threshold_score_field 说明。 |
 | threshold_score_after | method | none | true | false | false | 攻击或质量保持作用后用于 fixed-FPR 判定的正式分数。 |
-| content_threshold | protocol | none | true | false | false | fixed-FPR 内容阈值。 |
 | score_margin | method | none | true | false | false | 内容分数相对内容阈值的边界余量。 |
 | raw_content_margin | method | none | true | false | false | 原始内容分数相对内容阈值的边界余量。 |
 | aligned_content_margin | method | none | true | false | false | 对齐后内容分数相对内容阈值的边界余量。 |
 | formal_detection_margin | method | none | true | false | false | 正式判定分数相对 fixed-FPR 阈值的边界余量。 |
 | fail_reason | method | none | true | false | false | 内容判定失败原因。 |
-| rescue_margin_low | protocol | none | true | false | false | 仅由 window-fit clean negatives 派生的同阈值 rescue 负 margin 下界。 |
 | positive_by_content | method | none | true | false | false | 原始内容分支是否正判。 |
 | formal_detection_decision | method | none | true | false | false | 按 threshold_score_field 与 fixed-FPR 阈值得到的正式检测判定。 |
 | rescue_eligible | method | none | true | false | false | 样本是否满足 rescue 条件。 |
@@ -304,7 +460,7 @@ Notebook 与 repository module 的跨边界数据
 | config_digests | artifact | none | false | false | false | runtime manifest 中记录的配置摘要集合。 |
 | generation_record_count | runtime | none | false | false | false | runtime summary 中 generation record 数量。 |
 | latent_trace_record_count | runtime | none | false | false | false | runtime summary 中 latent trace record 数量。 |
-| attention_capture_record_count | runtime | none | false | false | false | runtime summary 中 attention capture record 数量。 |
+| attention_capture_record_count | runtime | none | false | false | false | runtime 或方法摘要中真实 attention capture records 的数量。 |
 | unsupported_reason_count | runtime | none | false | false | false | runtime summary 中 unsupported_reason 数量。 |
 | reproducibility_digest | runtime | none | false | false | false | runtime summary 的复现摘要。 |
 | mean_quality_score | runtime | none | false | false | false | generation records 的平均质量分数。 |
@@ -333,7 +489,7 @@ Notebook 与 repository module 的跨边界数据
 | profile_summary_digest | artifact | none | true | false | false | 依赖准备报告引用的 profile summary 稳定摘要。 |
 | direct_dependency_input_contract | governance | none | false | false | false | registry 中区分精确直接依赖输入的契约。 |
 | complete_hash_lock_contract | governance | none | false | false | false | registry 中区分目标 Linux x86_64 runtime 完整 wheel 哈希锁的契约。 |
-| artifact_role | governance | none | false | false | false | 依赖输入或完整锁在正式环境中的证据职责。 |
+| artifact_role | governance | none | false | false | false | 依赖输入、完整锁、科学执行绑定或重打包记录所承担的正式产物职责。 |
 | requirement_format | governance | none | false | false | false | 直接输入或完整锁条目的受治理文本格式。 |
 | exact_operator | governance | none | false | false | false | 直接依赖输入唯一允许的精确版本运算符。 |
 | materialization_environment | runtime | none | false | false | false | 完整 wheel 哈希锁必须被解析和物化的目标环境。 |
@@ -460,7 +616,6 @@ Notebook 与 repository module 的跨边界数据
 | binding_path | artifact | none | true | false | false | 单个科学执行绑定文件的路径。 |
 | binding_digest | provenance | none | true | false | false | 单个科学执行绑定文件的 SHA-256。 |
 | binding | provenance | none | true | false | false | 外层 session 返回的完整科学执行绑定对象。 |
-| artifact_role | protocol | none | true | false | false | 科学执行绑定或重新打包记录对应的正式产物职责。 |
 | scientific_command_dispatch_report_path | artifact | none | true | false | false | 产物内逐科学命令调度报告的路径。 |
 | scientific_command_dispatch_report_digest | provenance | none | true | false | false | 产物内逐科学命令调度报告的 SHA-256。 |
 | bound_summary_path | artifact | none | true | false | false | 科学执行绑定所约束的正式摘要路径。 |
@@ -825,7 +980,6 @@ Notebook 与 repository module 的跨边界数据
 | geometry_evidence_record_id | method | none | true | false | false | 注意力几何证据 record 的稳定标识。 |
 | graph_source | method | none | true | false | false | 注意力图 record 的矩阵来源说明。 |
 | geometry_source | method | none | true | false | false | 几何证据 record 的来源说明。 |
-| attention_capture_record_count | method | none | false | false | false | attention capture records 数量。 |
 | attention_graph_record_count | method | none | false | false | false | 注意力锚点图 records 数量。 |
 | geometry_evidence_record_count | method | none | false | false | false | 几何证据 records 数量。 |
 | real_attention_capture_count | method | none | false | false | false | 无 unsupported reason 且含有有界 attention_matrix_preview 的真实 attention capture records 数量。 |
@@ -836,7 +990,7 @@ Notebook 与 repository module 的跨边界数据
 | recovered_sync_consistency_mean | metric | none | false | false | false | recovered sync consistency 的均值。 |
 | alignment_residual_mean | metric | none | false | false | false | alignment residual 的均值。 |
 | geometry_reliable_count | method | none | false | false | false | 几何证据中满足可靠性条件的记录数量。 |
-| direct_positive_decision_used | method | none | false | false | false | 几何证据链是否使用了直接 positive 判定。 |
+| direct_positive_decision_used | method | none | false | false | false | 正式 evidence decision 是否使用几何链直接判正；目标方法必须为 false。 |
 | attention_geometry_ready | method | none | false | false | false | 注意力几何证据是否已具备进入后续真实 attention 相对更新的条件。 |
 | attention_records_path | artifact | none | true | false | false | 用于重建注意力几何证据的 attention capture records 输入路径。 |
 | attention_matrix_preview | method | none | true | false | false | 真实 attention 捕获中保存的有界 attention matrix 预览。 |
@@ -893,11 +1047,10 @@ Notebook 与 repository module 的跨边界数据
 | geo_direct_positive_audit_decision | method | none | false | false | false | 仅用于反例审计的几何直接判正风险指示, 不进入正式 evidence decision。 |
 | geo_direct_positive_audit_rate | metric | none | false | false | false | clean negative 上几何直接判正反例审计触发率。 |
 | geo_direct_positive_audit_formal_method | method | none | false | false | false | 几何直接判正反例审计是否进入正式方法, 正式方法中必须为 false。 |
-| direct_positive_decision_used | method | none | false | false | false | 是否在正式 evidence decision 中使用几何直接判正。 |
 | operating_point_id | metric | none | false | false | false | fixed-FPR operating point 的稳定标识。 |
 | target_fpr | protocol | none | false | false | false | 阈值校准协议的目标误报率。 |
-| calibrated_content_threshold | protocol | none | false | false | false | 由 calibration clean negative 冻结的内容阈值。 |
-| calibrated_detection_threshold | protocol | none | false | false | false | 由 calibration clean negative 在 threshold_score_field 指定分数空间中冻结的正式检测阈值。 |
+| calibrated_content_threshold | protocol | none | false | false | false | `legacy_only`：迁移前仅由 calibration clean negative 冻结的内容阈值。目标协议改用三组负角色分别受预算约束的冻结记录。 |
+| calibrated_detection_threshold | protocol | none | false | false | false | `legacy_only`：迁移前由 calibration clean negative 在指定分数空间冻结的检测阈值。 |
 | formal_detection_claim_ready | governance | none | false | false | false | 正式判定分数是否同时满足校准 split fixed-FPR 边界和测试 clean negative 经验 FPR 诊断边界。 |
 | calibration_negative_count | metric | none | false | false | false | threshold-freeze 子集中用于最终完整 evidence 阈值冻结的 clean negative 样本数。 |
 | allowed_false_positive_count | metric | none | false | false | false | 目标 FPR 下允许的 false positive 数量。 |
@@ -911,17 +1064,17 @@ Notebook 与 repository module 的跨边界数据
 | observed_fpr | metric | none | false | false | false | 阈值冻结数据上的实际 FPR。 |
 | threshold_tie_count | metric | none | false | false | false | 与冻结阈值数值相同的样本数量。 |
 | threshold_degenerate | metric | none | false | false | false | 阈值是否存在退化或并列导致的 FPR 风险。 |
-| threshold_source | protocol | none | false | false | false | 阈值来源。主方法使用 calibration clean negative 联合冻结完整 evidence 协议, 正式 FPR 由独立 test clean negative 经验值及单侧 Wilson 上界支持; 外部 baseline 可使用其受审计的固定 score-map conformal 阈值。 |
+| threshold_source | protocol | none | true | false | false | 决策阈值的受治理来源身份。目标主方法必须绑定三组负观测预算协议，各 baseline 必须绑定自身受审计的同 FPR 校准来源；clean-negative-only 主方法取值仅可解释迁移前记录。 |
 | evaluation_split | protocol | none | false | false | false | 正式结果指标所属的数据划分, 论文比较记录必须为 test, 不得混入 calibration 或 dev。 |
 | rescue_window_frozen | protocol | none | false | false | false | rescue window 是否已冻结。 |
 | fail_reason_gate_frozen | protocol | none | false | false | false | fail reason gate 是否已冻结。 |
 | evidence_fpr_exceeds_target | metric | none | false | false | false | 测试 clean negative evidence-level FPR 是否超过目标 operating point, 不包含 attacked negative 诊断分母; 该字段用于经验诊断, 不直接阻断阈值冻结 workflow。 |
-| fixed_fpr_control_scope | protocol | none | false | false | false | fixed-FPR 阈值冻结时实际使用的控制样本范围, 正式协议应为 calibration clean negative。 |
-| fixed_fpr_denominator_role | protocol | none | false | false | false | fixed-FPR 统计分母的样本角色说明, 当前只允许 clean negative 作为控制分母。 |
-| rescue_control_scope | protocol | none | false | false | false | rescue 后 evidence-level FPR 的控制样本范围, 当前为 evidence clean negative。 |
+| fixed_fpr_control_scope | protocol | none | false | false | false | `legacy_only`：迁移前 fixed-FPR 只使用 calibration clean negative 的控制范围。 |
+| fixed_fpr_denominator_role | protocol | none | false | false | false | `legacy_only`：迁移前只允许 clean negative 的控制分母说明。 |
+| rescue_control_scope | protocol | none | false | false | false | `legacy_only`：迁移前 rescue 只使用 evidence clean negative 的控制范围。 |
 | rescue_changes_fpr_denominator | protocol | none | false | false | false | rescue 是否改变 fixed-FPR 分母, 当前必须为 false。 |
-| attacked_negative_boundary_role | governance | none | false | false | false | attacked negative 在 fixed-FPR 协议中的边界角色, 当前仅作为 robustness diagnostic。 |
-| attacked_negative_governs_fixed_fpr | governance | none | false | false | false | attacked negative FPR 是否参与 fixed-FPR 阈值控制, 当前必须为 false。 |
+| attacked_negative_boundary_role | governance | none | false | false | false | `legacy_only`：迁移前 attacked negative 只作为鲁棒性诊断的边界角色。 |
+| attacked_negative_governs_fixed_fpr | governance | none | false | false | false | `legacy_only`：迁移前 attacked negative 不参与 fixed-FPR 控制。目标协议不得读取该字段。 |
 | calibration_fpr_exceeds_target | metric | none | false | false | false | calibration clean negative 上冻结阈值的实际 FPR 是否超过目标 FPR, 该字段控制 fixed-FPR 校准门禁。 |
 | test_clean_fpr_exceeds_target | metric | none | false | false | false | 测试 clean negative 上 evidence-level FPR 是否超过目标 FPR, 该字段用于经验泛化诊断。 |
 | formal_detection_test_clean_fpr_exceeds_target | metric | none | false | false | false | 测试 clean negative 上 formal detection score FPR 是否超过目标 FPR, 该字段用于正式判定分数的经验泛化诊断。 |
@@ -941,8 +1094,6 @@ Notebook 与 repository module 的跨边界数据
 | raw_score_auc | metric | none | false | false | false | raw content score 对 positive / clean negative 的 AUC。 |
 | aligned_score_auc | metric | none | false | false | false | aligned content score 对 positive / clean negative 的 AUC。 |
 | rescue_applied_rate | metric | none | false | false | false | 阈值校准口径下 rescue_applied 的比例。 |
-| metric_name | metric | none | false | false | false | 常规指标名称。 |
-| metric_value | metric | none | false | false | false | 常规指标数值。 |
 | metric_source | metric | none | false | false | false | 常规指标来源。 |
 | metric_status | metric | none | false | false | false | 指标状态, 例如 measured 或 unsupported。 |
 | fpr_exceeds_target | metric | none | false | false | false | 某一 FPR 审计口径是否超过目标 FPR。 |
@@ -1146,8 +1297,8 @@ Notebook 与 repository module 的跨边界数据
 | baseline_sources | artifact | none | false | false | false | 外部 baseline 来源登记条目集合。 |
 | source_dir | artifact | none | true | false | false | 单个外部 baseline 的本地源码缓存目录。 |
 | source_status | runtime | none | false | false | false | 单个外部 baseline 官方源码的本地获取状态。 |
-| official_repository_url | runtime | none | false | false | false | 外部 baseline 官方源码仓库 URL。 |
-| official_repository_commit | runtime | none | false | false | false | 外部 baseline 官方源码仓库提交标识。 |
+| official_repository_url | provenance | none | false | false | false | 外部 baseline 来源注册、运行或缓存记录共同引用的官方源码仓库 URL。 |
+| official_repository_commit | provenance | none | false | false | false | 外部 baseline 来源注册、运行或本地缓存共同绑定的精确官方源码提交。 |
 | source_license | governance | none | false | false | false | 外部 baseline 官方源码许可证记录。 |
 | local_code_tracked | governance | none | false | false | false | 外部 baseline 第三方源码是否由本仓库跟踪。 |
 | result_status | metric | none | false | false | false | 外部 baseline 复现或导入结果状态。 |
@@ -1395,8 +1546,6 @@ Notebook 与 repository module 的跨边界数据
 | result_protocol_name | protocol | none | true | false | false | 外部 baseline 结果所遵循的共同实验协议名称。 |
 | result_source_type | artifact | none | true | false | false | 外部 baseline 指标来自官方复现还是受治理导入。 |
 | baseline_result_source_digest | artifact | none | true | false | false | 外部 baseline 指标来源文件或来源包的稳定摘要。 |
-| official_repository_url | artifact | none | false | false | false | 外部 baseline 官方源码仓库地址。 |
-| official_repository_commit | artifact | none | false | false | false | 外部 baseline 官方源码本地缓存对应的提交标识。 |
 | official_repository_branch | artifact | none | false | false | false | 外部 baseline 官方源码本地缓存对应的分支名称。 |
 | official_source_ready_count | metric | none | false | false | false | 已在本地源码缓存中可检查的外部 baseline 数量。 |
 | imported_baseline_result_count | metric | none | false | false | false | 已导入共同协议结果记录的外部 baseline 观测数量。 |
@@ -1452,9 +1601,7 @@ Notebook 与 repository module 的跨边界数据
 | producer_id | governance | none | true | false | false | 产物生成器或 adapter 的稳定标识。 |
 | producer_role | governance | none | true | false | false | 产物生成器在流程中的职责。 |
 | detection_decision | metric | none | false | false | false | 外部 baseline 单条 observation 根据 score 和 threshold 得到的检测判定。 |
-| score_name | metric | none | true | false | false | 外部 baseline observation 中分数字段的语义名称。 |
 | higher_is_positive | protocol | none | false | false | false | 分数越高是否代表越倾向水印阳性。 |
-| threshold_source | protocol | none | true | false | false | 外部 baseline observation 中 threshold 的来源说明。 |
 | bit_accuracy | metric | none | false | false | false | T2SMark 或同类方法记录的 bit 级准确率。 |
 | key_accuracy | metric | none | false | false | false | T2SMark 或同类方法记录的 key 级准确率。 |
 | t2smark_result_index | protocol | none | false | false | false | T2SMark 官方 results.json 中的样本索引。 |
@@ -1672,11 +1819,10 @@ Notebook 与 repository module 的跨边界数据
 | paper_common_protocol_ready | governance | none | false | false | false | pilot_paper 级 fixed-FPR 共同协议是否完成运行前治理冻结。|
 | paper_prompt_count | metric | none | false | false | false | 当前论文运行层级 prompt split 中的 prompt 数量。|
 | paper_prompt_split_ready | governance | none | false | false | false | 当前论文运行层级 prompt split 是否可供共同协议使用。|
-| paper_target_fpr | protocol | none | false | false | false | 当前论文运行层级共同协议使用的 fixed-FPR 目标值。|
-| paper_target_fpr | protocol | none | false | false | false | 当前论文运行层级使用的 fixed-FPR 目标值, probe_paper、pilot_paper 与 full_paper 分别固定为0.1、0.01和0.001。|
+| paper_target_fpr | protocol | none | false | false | false | 论文 profile 共同协议使用的 fixed-FPR 目标值，由 profile registry 唯一派生。|
 | expected_target_fpr | protocol | none | false | false | false | 当前论文运行层级按协议应匹配的 fixed-FPR 目标值。|
 | paper_negative_count_minimum_required | metric | none | false | false | false | pilot_paper fixed-FPR 校准所要求的最小 clean negative 数量。|
-| minimum_clean_negative_count | metric | none | false | false | false | fixed-FPR 协议要求的完整 test split clean negative 样本数, 三类运行层级分别为34、340、3400。|
+| minimum_clean_negative_count | metric | none | false | false | false | `legacy_only`：迁移前 clean-negative-only 规模字段；目标 profile 使用三组 `minimum_negative_role_counts` 映射。|
 | minimum_result_positive_count | metric | none | false | false | false | 结果导入 schema 要求的完整 test split positive 样本数, 与当前运行层级的 test 数量一致。|
 | minimum_result_negative_count | metric | none | false | false | false | 结果导入 schema 要求的完整 test split negative 样本数, 不允许不完整统计进入论文 claim 边界。|
 | minimum_result_attacked_negative_count | metric | none | false | false | false | 结果导入 schema 要求的每个攻击设置完整 test split attacked negative 样本数。|
@@ -1708,7 +1854,7 @@ Notebook 与 repository module 的跨边界数据
 | paper_run_template_registry_unique | governance | none | false | false | false | 当前论文运行的正式导入模板注册表是否无重复键。|
 | paper_run_supports_superiority_claim | governance | none | false | false | false | 当前论文运行层级结果是否允许在 pilot_paper 样本规模边界内支撑方法优越性主张。|
 | paper_claim_scale | governance | none | false | false | false | 当前结果或协议允许支撑的论文主张规模, 例如 pilot_paper 或 full_paper。|
-| paper_run_claim_type | governance | none | false | false | false | 当前论文运行层级对应的正式主张类型, probe_paper、pilot_paper 与 full_paper 分别对应 probe_claim、pilot_claim 与 full_claim。|
+| paper_run_claim_type | governance | none | false | false | false | 当前论文运行层级对应的正式主张类型, 正式主张作用域直接使用 probe_paper、pilot_paper 与 full_paper，不维护历史 claim 别名。|
 | strict_formal_evidence_required | governance | none | false | false | false | 当前共同协议是否要求结果记录只能来自正式真实测量证据。|
 | strict_formal_result_ready | governance | none | true | false | false | 单条共同协议结果记录是否已经通过正式真实测量证据门禁。|
 | nonformal_evidence_rejection_policy | governance | none | false | false | false | 非正式证据进入共同协议结果导入时的拒绝策略。|
@@ -1816,7 +1962,6 @@ Notebook 与 repository module 的跨边界数据
 | lf_relative_strength | method | none | true | false | false | LF 更新相对当前 latent 范数的强度。 |
 | tail_relative_strength | method | none | true | false | false | 尾部截断载体相对当前 latent 范数的强度。 |
 | attention_relative_strength | method | none | true | false | false | 注意力几何更新相对当前 latent 范数的强度。 |
-| tail_fraction | method | none | true | false | false | Q20 中点逆 CDF 量化标准正态模板保留的幅值尾部比例。 |
 | source_id | provenance | none | true | false | false | 外部 Prompt 数据来源稳定标识。 |
 | source_url | provenance | none | true | false | false | 外部 Prompt 项目主页。 |
 | revision_url | provenance | none | false | false | false | 直接指向资源登记40位提交树的 Hugging Face URL。 |
@@ -1966,7 +2111,7 @@ Notebook 与 repository module 的跨边界数据
 | execution_manifest_sha256 | provenance | none | true | false | false | 当前 baseline execution manifest 文件 SHA-256。 |
 | paper_run_name | protocol | none | true | false | false | 产物所属的唯一论文运行层级, 取值为 probe_paper、pilot_paper 或 full_paper。 |
 | formal_attack_names | protocol | none | true | false | false | 当前正式运行实际要求完整覆盖的受治理攻击名称集合。 |
-| threshold | protocol | none | true | false | false | observation 及其 transfer 记录共享的 calibration clean negative 冻结阈值。 |
+| threshold | protocol | none | true | false | false | `legacy_only`：迁移前 observation 及 transfer 记录共享的 clean-negative-only 冻结阈值。目标协议不得读取该字段。 |
 | generation_protocol | protocol | none | true | false | false | common-backbone 模型、采样步数、guidance 和图像尺寸的结构化配置。 |
 | detection_protocol | protocol | none | true | false | false | 仅图像访问边界、反演步数与目标 FPR 的结构化配置。 |
 | transfer_ready | governance | none | true | false | false | 单 baseline transfer 交换面是否通过身份、计数、阈值与攻击集合校验。 |
@@ -2643,7 +2788,7 @@ Notebook 与 repository module 的跨边界数据
 | claim_decisions | governance | none | true | true | false | 以预登记主张标识为键保存各项论文主张三态决策的映射, 不保存未经重建的人工结论。 |
 | registered_claim_ids | governance | none | true | true | false | 冻结主张登记表中全部必要与可选论文主张的稳定顺序集合。 |
 | required_claims | governance | none | true | true | false | 当前论文结论必须满足的预登记主张标识集合。 |
-| optional_claims | governance | none | true | true | false | 已登记但不参与集合级否决的主张集合; 当前仅包含单模型内部参数稳定性。 |
+| optional_claims | governance | none | true | true | false | 已登记但不参与集合级否决的主张集合；目标协议固定为空列表，参数敏感性只作为诊断证据。 |
 | evidence_complete | governance | none | true | true | false | 当前主张所需原子记录、统计和 provenance 是否完整可审计。 |
 | scientific_support | governance | none | true | true | false | 在证据完整前提下, 当前主张是否满足预登记科学判据。 |
 | evidence_artifact_ids | provenance | none | true | true | false | 单项主张决策实际引用的受治理产物标识集合。 |
@@ -2660,7 +2805,7 @@ Notebook 与 repository module 的跨边界数据
 | primary_sampling_unit | protocol | none | true | true | false | 论文统计推断的主要总体采样单位, 质量协议固定为 Prompt。 |
 | nested_sampling_unit | protocol | none | true | true | false | 主要采样单位内部的嵌套随机化单位, 当前为 Prompt 内的注册 repeat。 |
 | paired_perceptual_quality_noninferiority | protocol | none | false | true | false | 配对感知质量非劣效的指标和冻结区间下界配置。 |
-| semantic_alignment_noninferiority | protocol | none | false | true | false | 语义对齐非劣效的指标和冻结区间下界配置。 |
+| independent_visual_content_preservation_noninferiority | protocol | none | false | true | false | 配对 clean 图像之间独立视觉内容表示保持非劣效的指标和冻结区间下界配置；不表示 Prompt 或图文对齐。 |
 | distributional_preservation_noninferiority | protocol | none | false | true | false | clean-watermarked 分布保持的主要指标、解释边界和冻结区间上界配置。 |
 | minimum_lower_confidence_bound | metric | none | false | true | false | 感知或语义非劣效允许支持主张的冻结区间下界。 |
 | noninferiority_loss_margin_from_identity | metric | none | false | true | true | 相对恒等图像配对分数1.0允许的冻结损失幅度。 |
@@ -2680,7 +2825,7 @@ Notebook 与 repository module 的跨边界数据
 | confidence_interval_low | metric | none | true | true | true | Prompt 聚类 bootstrap 双侧区间下界。 |
 | confidence_interval_high | metric | none | true | true | true | Prompt 聚类 bootstrap 双侧区间上界。 |
 | prompt_cluster_inference_digest | provenance | none | true | true | true | Prompt 聚类估计、区间和随机协议的稳定摘要。 |
-| quality_subclaim_decisions | governance | none | false | true | true | 感知、语义与分布保持三类质量子主张的独立三态决策。 |
+| quality_subclaim_decisions | governance | none | false | true | true | 感知、独立视觉内容与分布保持三类质量子主张的独立三态决策。 |
 | per_attack_quality_decisions | governance | none | false | true | true | 以正式攻击 ID 为键保存的逐攻击质量三态决策。 |
 | cross_attack_quality_decision | governance | none | false | true | true | 只能由完整逐攻击质量决策集合派生的跨攻击三态结论。 |
 | quality_preservation_claim_decision | governance | none | false | true | true | 三类质量子主张和跨攻击决策共同派生的总体质量保持决策。 |
@@ -2716,7 +2861,7 @@ Notebook 与 repository module 的跨边界数据
 | false_positive_bound_method | protocol | none | false | false | false | fixed-FPR 假正率上界使用的冻结统计方法。 |
 | file_names | artifact | none | false | false | false | 一个登记产物必须精确写出的文件名集合。 |
 | gate_role | governance | none | false | false | false | 统计产物在分主张结论链中的稳定门禁职责。 |
-| gate_roles | governance | none | false | false | false | 五类统计产物到五项登记主张的完整职责映射。 |
+| gate_roles | governance | none | false | false | false | 四类正式统计产物到四项登记主张的一一职责映射；诊断产物不得进入该集合。 |
 | metric_semantics | protocol | none | false | false | false | 检测、配对优势、质量匹配和质量非劣效的完整指标解释契约。 |
 | normalized_protocol_digests | provenance | none | false | false | false | 删除规模契约后每个 profile 完整协议正文的稳定摘要映射。 |
 | paired_superiority_analysis_schema | protocol | none | false | false | false | 主方法与 baseline 配对优势所用 Prompt 聚类分析 schema。 |
@@ -3248,7 +3393,7 @@ Notebook 与 repository module 的跨边界数据
 | result_analysis_governed_payload_path_map | provenance | none | true | true | false | 最终闭合实际读取的主表、攻击表、质量表、CI、逐攻击和失败案例共7类规范路径映射。 |
 | governed_paper_payload_path_map | provenance | none | true | true | false | 七类论文 payload 必须逐字符等于当前论文层级规范仓库相对路径的映射。 |
 | governed_paper_payload_semantic_digest | provenance | none | true | true | false | 从原子记录独立重建七类论文 payload 后形成的联合语义摘要。 |
-| governed_paper_payload_semantic_rebuild_ready | governance | none | true | true | false | 主表、攻击表、FID/KID、CI、逐攻击、失败 JSONL 与 SVG 是否全部可独立语义重建。 |
+| governed_paper_payload_semantic_rebuild_ready | governance | none | true | true | false | 主表、攻击表、FID/KID、CI、逐攻击、失败 JSONL 与 SVG 是否全部可按登记语义独立重建。 |
 | result_analysis_governed_payload_digest | provenance | none | true | true | false | 最终结果闭合报告绑定的七类论文 payload 路径、表行、失败记录和 SVG 联合摘要。 |
 | main_comparison_rebuilt_rows_digest | provenance | none | true | true | false | 由正式 result records 独立聚合的主比较表规范行摘要。 |
 | main_comparison_semantic_rebuild_ready | governance | none | true | true | false | 主比较表全部方法行和指标是否与正式 result records 独立聚合值一致。 |
@@ -3559,46 +3704,51 @@ Notebook 与 repository module 的跨边界数据
 | allowed_threshold_freeze_false_positive_count | metric | none | true | false | false | method-repeat 在共同 threshold-freeze 子集上的最大允许假阳性数量。 |
 | proposed_measurement_digest | provenance | none | true | true | false | 配对优势记录引用的主方法攻击后阈值无关仅图像 measurement 摘要。 |
 
-## 单模型分支风险参数敏感性字段
+## 迁移前单模型分支风险参数敏感性字段
 
 | field | role | unit | per_record | per_artifact | derived | description |
 |---|---|---|---|---|---|---|
-| risk_parameter_protocol | protocol | none | true | false | false | 区分正式参考参数与受治理单模型内部敏感性参数覆盖的运行协议。 |
-| sensitivity_id | protocol | none | true | false | false | 18项单参数敏感性设置中的稳定设置标识。 |
-| sensitivity_config | protocol | none | true | false | false | 单条敏感性运行绑定的参数名、变化方向、操作和值及解析后分支配置。 |
-| sensitivity_summary | artifact | none | false | true | true | GPU 会话返回的单重复参数敏感性完成摘要。 |
-| sensitivity_progress | artifact | none | false | true | true | 尚未完成的参数敏感性会话进度, 不支持论文结论。 |
-| sensitivity_prompt_id | protocol | none | true | false | false | 检测原子绑定的敏感性运行 prompt 标识。 |
-| parameter_name | protocol | none | true | false | false | 当前单参数设置改变的手工风险函数字段名。 |
-| variation | protocol | none | true | false | false | 参数设置相对参考值的 reference、low 或 high 方向。 |
-| numeric_value | metric | none | true | false | false | 参数替换值或乘法因子。 |
-| resolved_branch_risk_configs | protocol | none | true | false | true | 参数操作应用后三个分支的完整风险配置正文。 |
-| sensitivity_protocol | protocol | none | false | true | false | 单模型内部一次只改变一个参数的敏感性协议名称。 |
-| sensitivity_model_scope | governance | none | false | true | false | 敏感性证据覆盖的模型范围, 当前只允许登记主扩散模型。 |
-| sensitivity_fixed_identity_fields | protocol | none | false | true | false | 参数变化时必须保持不变的模型、prompt、随机化、攻击和检测身份字段。 |
-| sensitivity_setting_ids | protocol | none | false | true | false | 按冻结顺序登记的18项敏感性设置标识。 |
-| sensitivity_setting_count | metric | none | false | true | true | 已登记或已完整测量的敏感性设置数量。 |
-| sensitivity_spec_digest | provenance | none | false | true | true | 18项设置协议正文的稳定摘要。 |
-| sensitivity_exact_set_ready | governance | none | false | true | true | 设置集合、顺序、数量和协议摘要是否精确匹配冻结规范。 |
-| cross_model_evidence_provided | governance | none | false | true | false | 当前敏感性证据是否包含跨模型实验, 当前固定为 false。 |
-| per_setting_calibration_required | governance | none | false | true | false | 每个参数设置是否必须使用自己的 calibration negatives 冻结阈值。 |
-| single_model_internal_sensitivity | governance | none | true | false | false | 聚合指标行是否严格属于单模型内部参数敏感性。 |
-| parameter_sensitivity_component_ready | governance | none | false | true | true | 当前 seed-key 重复是否完成18项真实生成、攻击、检测和独立校准。 |
-| minimum_attacked_true_positive_rate_across_settings | metric | none | false | true | true | 单重复18项设置中 attacked TPR 点估计的最小值。 |
-| maximum_attacked_true_positive_rate_across_settings | metric | none | false | true | true | 单重复18项设置中 attacked TPR 点估计的最大值。 |
-| attacked_true_positive_rate_range | metric | none | false | true | true | 单重复18项设置 attacked TPR 最大值与最小值之差。 |
-| minimum_paired_ssim_across_settings | metric | none | false | true | true | 单重复18项设置中配对 SSIM 均值的最小值。 |
-| maximum_paired_ssim_across_settings | metric | none | false | true | true | 单重复18项设置中配对 SSIM 均值的最大值。 |
-| parameter_sensitivity_records_digest | provenance | none | false | true | true | 单重复逐 prompt 敏感性记录集合的稳定摘要。 |
-| per_setting_frozen_protocols_digest | provenance | none | false | true | true | 18项设置各自冻结检测协议的联合稳定摘要。 |
-| parameter_sensitivity_aggregate_ready | governance | none | false | true | true | 精确9重复参数敏感性原始证据是否完成重建与统计。 |
-| repeat_metric_rows_digest | provenance | none | false | true | true | 9重复乘18项设置的逐重复指标行稳定摘要。 |
-| aggregate_metric_rows_digest | provenance | none | false | true | true | 18项跨重复绝对指标与参考配对差值行的稳定摘要。 |
-| parameter_sensitivity_summary_digest | provenance | none | false | true | true | 跨重复参数敏感性摘要在排除自身摘要字段后的稳定摘要。 |
-| measurement_component_roles | governance | none | false | true | true | 结果闭合要求完整存在但不参与中心优越性投票的测量组件角色集合。 |
-| workflow_completion_state | governance | none | false | true | true | 区分续跑、数据集组件完成、单重复组件完成和单重复打包完成的会话状态。 |
-| session_execution_decision | governance | none | false | true | true | 本次命令是否正常结束, 不表示论文运行已经闭合。 |
-| paper_run_closed | governance | none | false | true | true | 当前论文运行层级是否已通过最终结果闭合, 单重复 GPU 会话中固定为 false。 |
+| risk_parameter_protocol | protocol | none | true | false | false | `legacy_only`：区分正式参考参数与受治理单模型内部敏感性参数覆盖的运行协议。 |
+| sensitivity_id | protocol | none | true | false | false | `legacy_only`：单模型内部单因素敏感性设置的稳定标识。 |
+| sensitivity_config | protocol | none | true | false | false | `legacy_only`：单条敏感性运行绑定的参数名、变化方向、操作和值及解析后分支配置。 |
+| sensitivity_summary | artifact | none | false | false | true | `legacy_only`：GPU 会话返回的单重复参数敏感性完成摘要。 |
+| sensitivity_progress | artifact | none | false | false | true | `legacy_only`：尚未完成的参数敏感性会话进度, 不支持论文结论。 |
+| sensitivity_prompt_id | protocol | none | true | false | false | `legacy_only`：检测原子绑定的敏感性运行 prompt 标识。 |
+| parameter_name | protocol | none | true | false | false | `legacy_only`：当前单参数设置改变的手工风险函数字段名。 |
+| variation | protocol | none | true | false | false | `legacy_only`：参数设置相对参考值的 reference、low 或 high 方向。 |
+| numeric_value | metric | none | true | false | false | `legacy_only`：参数替换值或乘法因子。 |
+| resolved_branch_risk_configs | protocol | none | true | false | true | `legacy_only`：参数操作应用后三个分支的完整风险配置正文。 |
+| sensitivity_protocol | protocol | none | false | false | false | `legacy_only`：单模型内部一次只改变一个参数的敏感性协议名称。 |
+| sensitivity_model_scope | governance | none | false | false | false | `legacy_only`：敏感性证据覆盖的模型范围, 当前只允许登记主扩散模型。 |
+| sensitivity_fixed_identity_fields | protocol | none | false | false | false | `legacy_only`：参数变化时必须保持不变的模型、prompt、随机化、攻击和检测身份字段。 |
+| sensitivity_setting_ids | protocol | none | false | false | false | `legacy_only`：按冻结顺序登记的单模型内部敏感性设置标识。 |
+| sensitivity_setting_count | metric | none | false | false | true | `legacy_only`：已登记或已完整测量的敏感性设置数量。 |
+| sensitivity_spec_digest | provenance | none | false | false | true | `legacy_only`：登记敏感性设置协议正文的稳定摘要。 |
+| sensitivity_exact_set_ready | governance | none | false | false | true | `legacy_only`：设置集合、顺序、数量和协议摘要是否精确匹配冻结规范。 |
+| cross_model_evidence_provided | governance | none | false | false | false | `legacy_only`：当前敏感性证据是否包含跨模型实验, 当前固定为 false。 |
+| per_setting_calibration_required | governance | none | false | false | false | `legacy_only`：每个参数设置是否必须使用自己的 calibration negatives 冻结阈值。 |
+| single_model_internal_sensitivity | governance | none | true | false | false | `legacy_only`：聚合指标行是否严格属于单模型内部参数敏感性。 |
+| parameter_sensitivity_component_ready | governance | none | false | false | true | `legacy_only`：当前敏感性组件是否完成全部登记设置的真实生成、攻击、检测和独立校准。 |
+| minimum_attacked_true_positive_rate_across_settings | metric | none | false | false | true | `legacy_only`：登记敏感性设置中 attacked TPR 点估计的最小值。 |
+| maximum_attacked_true_positive_rate_across_settings | metric | none | false | false | true | `legacy_only`：登记敏感性设置中 attacked TPR 点估计的最大值。 |
+| attacked_true_positive_rate_range | metric | none | false | false | true | `legacy_only`：登记敏感性设置 attacked TPR 最大值与最小值之差。 |
+| minimum_paired_ssim_across_settings | metric | none | false | false | true | `legacy_only`：登记敏感性设置中配对 SSIM 均值的最小值。 |
+| maximum_paired_ssim_across_settings | metric | none | false | false | true | `legacy_only`：登记敏感性设置中配对 SSIM 均值的最大值。 |
+| parameter_sensitivity_records_digest | provenance | none | false | false | true | `legacy_only`：单重复逐 prompt 敏感性记录集合的稳定摘要。 |
+| per_setting_frozen_protocols_digest | provenance | none | false | false | true | `legacy_only`：全部登记设置各自冻结检测协议的联合稳定摘要。 |
+| parameter_sensitivity_aggregate_ready | governance | none | false | false | true | `legacy_only`：精确9重复参数敏感性原始证据是否完成重建与统计。 |
+| repeat_metric_rows_digest | provenance | none | false | false | true | `legacy_only`：登记 repeat 与敏感性设置笛卡尔积的逐重复指标行稳定摘要。 |
+| aggregate_metric_rows_digest | provenance | none | false | false | true | `legacy_only`：登记设置跨重复绝对指标与参考配对差值行的稳定摘要。 |
+| parameter_sensitivity_summary_digest | provenance | none | false | false | true | `legacy_only`：跨重复参数敏感性摘要在排除自身摘要字段后的稳定摘要。 |
+## 通用运行与闭合字段
+
+| field | role | unit | per_record | per_artifact | derived | description |
+|---|---|---|---|---|---|---|
+| measurement_component_roles | governance | none | false | false | true | 结果闭合中不参与正式主张投票的测量或诊断组件角色集合。 |
+| workflow_completion_state | governance | none | false | false | true | 区分续跑、数据集组件完成、单重复组件完成和单重复打包完成的会话状态。 |
+| session_execution_decision | governance | none | false | false | true | 本次命令是否正常结束, 不表示论文运行已经闭合。 |
+| paper_run_closed | governance | none | false | false | true | 当前论文运行层级是否已通过最终结果闭合, 单重复 GPU 会话中固定为 false。 |
+
 
 ## 四图质量证据与 GPU 资格化字段
 
@@ -3615,13 +3765,13 @@ Notebook 与 repository module 的跨边界数据
 | clip_evidence_role | governance | none | true | false | false | 固定为 `mechanism_consistency_diagnostic`, 防止同源 CLIP 指标进入正式语义保持决策。 |
 | clip_source_feature_digest | provenance | none | true | false | true | 配对指标引用的 source CLIP 向量稳定摘要。 |
 | clip_comparison_feature_digest | provenance | none | true | false | true | 配对指标引用的 comparison CLIP 向量稳定摘要。 |
-| independent_semantic_cosine | metric | none | true | false | true | 不参与方法优化或检测的冻结 DINOv2 CLS 特征 cosine, 是正式语义保持决策输入。 |
-| independent_semantic_evidence_role | governance | none | true | false | false | 固定为 `independent_semantic_preservation_primary`, 标记独立语义主张证据职责。 |
-| independent_semantic_source_feature_digest | provenance | none | true | false | true | 配对指标引用的 source DINOv2 CLS 向量稳定摘要。 |
-| independent_semantic_comparison_feature_digest | provenance | none | true | false | true | 配对指标引用的 comparison DINOv2 CLS 向量稳定摘要。 |
-| independent_semantic_quality_protocol_digest | provenance | none | true | true | true | DINOv2 模型 ID、精确 revision、预处理、特征层、归一化和依赖锁的联合稳定摘要。 |
-| paired_quality_independent_semantic_feature_records_digest | provenance | none | false | true | true | 单 repeat 或9-repeat 独立语义原始特征集合的稳定摘要。 |
-| paired_quality_metric_record_id | provenance | none | true | false | true | base 或逐攻击 SSIM、诊断 CLIP 与独立语义配对原始记录标识。 |
+| independent_semantic_cosine | metric | none | true | false | true | 不参与方法优化或检测的冻结 DINOv2 CLS 特征 cosine，是正式独立视觉内容保持决策输入；字段名中的 `independent_semantic` 是兼容标识符，不表示 Prompt 语义或图文对齐。 |
+| independent_semantic_evidence_role | governance | none | true | false | false | 固定为兼容值 `independent_semantic_preservation_primary`，标记独立视觉内容保持证据职责，不表示 Prompt 语义。 |
+| independent_semantic_source_feature_digest | provenance | none | true | false | true | 配对独立视觉内容指标引用的 source DINOv2 CLS 向量稳定摘要；字段名保留兼容标识符。 |
+| independent_semantic_comparison_feature_digest | provenance | none | true | false | true | 配对独立视觉内容指标引用的 comparison DINOv2 CLS 向量稳定摘要；字段名保留兼容标识符。 |
+| independent_semantic_quality_protocol_digest | provenance | none | true | true | true | 独立视觉内容评估器的 DINOv2 模型 ID、精确 revision、预处理、特征层、归一化和依赖锁联合摘要；字段名保留兼容标识符。 |
+| paired_quality_independent_semantic_feature_records_digest | provenance | none | false | true | true | 单 repeat 或9-repeat 独立视觉内容原始特征集合的稳定摘要；字段名中的 `independent_semantic` 是兼容标识符。 |
+| paired_quality_metric_record_id | provenance | none | true | false | true | base 或逐攻击 SSIM、诊断 CLIP 与独立视觉内容配对原始记录标识。 |
 | paired_quality_metric_record_digest | provenance | none | true | false | true | 配对质量指标、图像摘要、estimand scope 及两套冻结特征摘要的稳定摘要。 |
 | attack_prompt_distribution_record_digest | provenance | none | true | false | true | 单一注册攻击和 Prompt 下9个 repeat 的无偏 Prompt 条件 KID 记录摘要。 |
 | attack_conditioned_quality_component_ready | governance | none | false | true | true | 单 repeat 是否完整产生 test Prompt 乘注册攻击的四图、Inception、诊断 CLIP、独立 DINOv2 和配对指标证据。 |

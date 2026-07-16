@@ -986,7 +986,7 @@ def rebuild_randomization_dataset_quality_statistics(
     canonical_independent_semantic_features: tuple[dict[str, Any], ...] = ()
     attack_prompt_distribution_records: tuple[dict[str, Any], ...] = ()
     paired_perceptual_inference = None
-    semantic_alignment_inference = None
+    independent_visual_content_inference = None
     mechanism_consistency_clip_inference = None
     per_attack_inference = None
     if complete_attack_inputs:
@@ -1044,14 +1044,14 @@ def rebuild_randomization_dataset_quality_statistics(
             ),
             analysis_id="paired_perceptual_quality_base_ssim",
         )
-        semantic_alignment_inference = build_prompt_cluster_mean_inference(
+        independent_visual_content_inference = build_prompt_cluster_mean_inference(
             _prompt_mean_values(
                 canonical_paired_metrics,
                 value_field="independent_semantic_cosine",
                 attack_id="none",
                 expected_prompt_ids=prompt_ids,
             ),
-            analysis_id="semantic_alignment_base_independent_semantic_cosine",
+            analysis_id="independent_visual_content_base_cosine",
         )
         mechanism_consistency_clip_inference = build_prompt_cluster_mean_inference(
             _prompt_mean_values(
@@ -1083,7 +1083,7 @@ def rebuild_randomization_dataset_quality_statistics(
                         analysis_id=f"attack_paired_ssim:{attack_id}",
                     )
                 ),
-                "semantic_alignment_noninferiority": (
+                "independent_visual_content_preservation_noninferiority": (
                     build_prompt_cluster_mean_inference(
                         _prompt_mean_values(
                             canonical_paired_metrics,
@@ -1107,7 +1107,7 @@ def rebuild_randomization_dataset_quality_statistics(
     quality_decisions = build_quality_preservation_decisions(
         distributional_inference=distributional_inference,
         paired_perceptual_inference=paired_perceptual_inference,
-        semantic_alignment_inference=semantic_alignment_inference,
+        independent_visual_content_inference=independent_visual_content_inference,
         per_attack_inference=per_attack_inference,
         evidence_artifact_id="randomization_dataset_quality_manifest",
     )
@@ -1206,7 +1206,7 @@ def rebuild_randomization_dataset_quality_statistics(
         "attack_conditioned_quality_statistics_ready": complete_attack_inputs,
         "distributional_preservation_inference": distributional_inference,
         "paired_perceptual_quality_inference": paired_perceptual_inference,
-        "semantic_alignment_inference": semantic_alignment_inference,
+        "independent_visual_content_inference": independent_visual_content_inference,
         "mechanism_consistency_clip_inference": (
             mechanism_consistency_clip_inference
         ),

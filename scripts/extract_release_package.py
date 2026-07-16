@@ -22,6 +22,10 @@ if str(ROOT) not in sys.path:
 from experiments.runtime.dependency_profiles import (  # noqa: E402
     load_dependency_profile_registry,
 )
+from scripts.build_specification_inventory import (  # noqa: E402
+    BUILD_SPECIFICATION_PATHS,
+    CORE_METHOD_SPECIFICATION_PATHS,
+)
 
 
 EXTRACTION_MANIFEST_SCHEMA = "release_package_extraction_manifest"
@@ -53,6 +57,7 @@ COMMON_EXCLUDED_PARTS = (
     ".pytest_cache",
 )
 
+
 PROFILES = {
     "minimal_method_package": ExtractionProfile(
         profile_name="minimal_method_package",
@@ -62,6 +67,7 @@ PROFILES = {
             "configs/model_sd35.yaml",
             "configs/model_source_registry.json",
             "pyproject.toml",
+            *CORE_METHOD_SPECIFICATION_PATHS,
         ),
         exclude_parts=(
             *COMMON_EXCLUDED_PARTS,
@@ -96,6 +102,12 @@ PROFILES = {
             "docs/release_boundary.md",
             "docs/extraction_profiles.md",
             "docs/intermediate_state_governance.md",
+            "docs/placeholder_random_governance.md",
+            "docs/paper_quality_evidence_governance.md",
+            "docs/core_method_package_readme.md",
+            "docs/release_layer_boundary.md",
+            "docs/legacy/method_semantic_invariants.md",
+            *BUILD_SPECIFICATION_PATHS,
             ".gitignore",
             ".gitattributes",
             "README.md",
@@ -132,6 +144,11 @@ PROFILES = {
             "docs/release_layer_boundary.md",
             "docs/extraction_profiles.md",
             "docs/intermediate_state_governance.md",
+            "docs/placeholder_random_governance.md",
+            "docs/paper_quality_evidence_governance.md",
+            "docs/core_method_package_readme.md",
+            "docs/legacy/method_semantic_invariants.md",
+            *BUILD_SPECIFICATION_PATHS,
             ".gitignore",
             ".gitattributes",
             "README.md",

@@ -19,7 +19,7 @@ METHOD_CONFIG_RELATIVE_PATH = PurePosixPath("configs/model_sd35.yaml")
 REGISTRY_SCHEMA = "slm_wm_method_semantic_trace_registry"
 REGISTRY_SCOPE = "normative_traceability_without_scientific_conformance_decision"
 EXPECTED_NORMATIVE_TRACE_DIGEST = (
-    "7581d916fe320ad68aba5f10969b6da9fe37b9a7280a875940b1b07026462057"
+    "2b22b993681db581803680441c2d39dbceb55961733b33cc36bbce9b618c6c50"
 )
 EXPECTED_INVARIANT_IDS = (
     "constructive_local_tangent_scope",

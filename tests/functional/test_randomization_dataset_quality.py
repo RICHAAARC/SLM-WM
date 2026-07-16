@@ -237,7 +237,7 @@ def test_exact9_quality_preserves_measured_zero_difference_result(
         "paired_perceptual_quality_noninferiority"
     ]["decision"] == "evidence_incomplete"
     assert result.summary["quality_subclaim_decisions"][
-        "semantic_alignment_noninferiority"
+        "independent_visual_content_preservation_noninferiority"
     ]["decision"] == "evidence_incomplete"
     assert result.summary["supports_paper_claim"] is False
     metric_by_name = {

@@ -26,7 +26,7 @@ from tools.harness.lib.method_semantic_registry import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
-INVARIANT_DOCUMENT = ROOT / "docs" / "builds" / "method_semantic_invariants.md"
+INVARIANT_DOCUMENT = ROOT / "docs" / "legacy" / "method_semantic_invariants.md"
 
 
 def _violations(payload: dict[str, object]) -> list[dict[str, str]]:
@@ -194,7 +194,7 @@ def test_registry_rejects_weak_definition_and_evidence_references() -> None:
 
     weak_pointer = deepcopy(load_method_semantic_registry(ROOT))
     weak_pointer["invariants"][0]["definition_pointer"] = (
-        "docs/builds/method_semantic_invariants.md#not_the_invariant"
+        "docs/legacy/method_semantic_invariants.md#not_the_invariant"
     )
     unregistered_field = deepcopy(load_method_semantic_registry(ROOT))
     unregistered_field["invariants"][0]["runtime_evidence_fields"][0] = (

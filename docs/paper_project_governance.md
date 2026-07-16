@@ -7,13 +7,14 @@
 ## 推荐流程
 
 1. 在 `.codex/project_contract.md` 中声明论文目标和阶段。
-2. 在 `main/` 中实现核心方法和协议。
-3. 在 `experiments/` 中实现阶段性实验 runner。
-4. 在 `paper_workflow/` 中编排 Notebook 入口。
-5. 在 `scripts/` 中实现数据准备、结果检查和打包命令。
-6. 在 `docs/field_registry.md` 中登记字段。
-7. 用 `tools/harness/run_all_audits.py` 检查治理规则。
-8. 用 `tests/` 分层验证轻量约束、功能行为和正式流程。
+2. 在 `main/` 中实现核心方法，不引入实验编排、论文统计或 Notebook 依赖。
+3. 在 `experiments/` 中实现主方法运行、攻击、校准、质量记录和消融协议。
+4. 在 `paper_experiments/` 中实现跨重复聚合、baseline 对比和论文结论决策。
+5. 在 `scripts/` 中实现可脱离 Notebook 的服务器运行、结果检查和打包命令。
+6. 在 `paper_workflow/` 中提供只调用 `scripts/` 的薄 Notebook 入口，不定义方法、统计或门禁逻辑。
+7. 在 `docs/field_registry.md` 中登记字段。
+8. 用 `tools/harness/run_all_audits.py` 检查治理规则。
+9. 用 `tests/` 分层验证轻量约束、功能行为和正式流程。
 
 ## 构建约束
 

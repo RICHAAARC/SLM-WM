@@ -28,7 +28,7 @@ DEFAULT_PAPER_QUALITY_CLAIM_PROTOCOL_PATH = (
 )
 QUALITY_SUBCLAIM_IDS = (
     "paired_perceptual_quality_noninferiority",
-    "semantic_alignment_noninferiority",
+    "independent_visual_content_preservation_noninferiority",
     "distributional_preservation_noninferiority",
 )
 
@@ -67,7 +67,7 @@ def load_paper_quality_claim_protocol(
     ):
         raise PaperQualityDecisionError("Prompt 聚类推断配置不完整")
     perceptual = payload.get("paired_perceptual_quality_noninferiority")
-    semantic = payload.get("semantic_alignment_noninferiority")
+    semantic = payload.get("independent_visual_content_preservation_noninferiority")
     distribution = payload.get("distributional_preservation_noninferiority")
     if not all(isinstance(value, dict) for value in (perceptual, semantic, distribution)):
         raise PaperQualityDecisionError("三类质量非劣效配置必须是对象")
@@ -87,6 +87,9 @@ def load_paper_quality_claim_protocol(
         or semantic.get("metric_name") != "independent_semantic_cosine"
         or semantic.get("evaluator_id")
         != "independent_visual_semantic_dinov2_base"
+        or semantic.get("estimand_interpretation")
+        != "paired_clean_image_visual_content_preservation_only"
+        or semantic.get("prompt_text_encoded") is not False
         or semantic.get("threshold_basis")
         != (
             "preregistered_unit_vector_angular_bound_equivalent_to_"
@@ -212,7 +215,7 @@ def build_quality_preservation_decisions(
     *,
     distributional_inference: Mapping[str, Any],
     paired_perceptual_inference: Mapping[str, Any] | None = None,
-    semantic_alignment_inference: Mapping[str, Any] | None = None,
+    independent_visual_content_inference: Mapping[str, Any] | None = None,
     per_attack_inference: Mapping[str, Mapping[str, Any]] | None = None,
     evidence_artifact_id: str,
     protocol: Mapping[str, Any] | None = None,
@@ -255,14 +258,14 @@ def build_quality_preservation_decisions(
         "paired_perceptual_prompt_observations_missing",
     )
     semantic = lower_bound_decision(
-        "semantic_alignment_noninferiority",
-        semantic_alignment_inference,
+        "independent_visual_content_preservation_noninferiority",
+        independent_visual_content_inference,
         float(
-            resolved_protocol["semantic_alignment_noninferiority"][
+            resolved_protocol["independent_visual_content_preservation_noninferiority"][
                 "minimum_lower_confidence_bound"
             ]
         ),
-        "semantic_alignment_prompt_observations_missing",
+        "independent_visual_content_prompt_cluster_observations_missing",
     )
     distribution_margin = float(
         resolved_protocol["distributional_preservation_noninferiority"][
@@ -291,7 +294,7 @@ def build_quality_preservation_decisions(
         else:
             expected_component_ids = {
                 "paired_perceptual_quality_noninferiority",
-                "semantic_alignment_noninferiority",
+                "independent_visual_content_preservation_noninferiority",
                 "distributional_preservation_noninferiority",
             }
             if set(attack_components) != expected_component_ids:
@@ -315,12 +318,12 @@ def build_quality_preservation_decisions(
                         ),
                         float(
                             attack_components[
-                                "semantic_alignment_noninferiority"
+                                "independent_visual_content_preservation_noninferiority"
                             ]["confidence_interval_low"]
                         )
                         >= float(
                             resolved_protocol[
-                                "semantic_alignment_noninferiority"
+                                "independent_visual_content_preservation_noninferiority"
                             ]["minimum_lower_confidence_bound"]
                         ),
                         float(
@@ -351,7 +354,7 @@ def build_quality_preservation_decisions(
     )
     subclaim_decisions = {
         "paired_perceptual_quality_noninferiority": perceptual,
-        "semantic_alignment_noninferiority": semantic,
+        "independent_visual_content_preservation_noninferiority": semantic,
         "distributional_preservation_noninferiority": distribution,
     }
     required_components = [*subclaim_decisions.values(), cross_attack]

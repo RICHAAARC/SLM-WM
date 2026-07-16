@@ -6,15 +6,12 @@
     "measured_not_supported",
     "evidence_incomplete"
   ],
-  "optional_claims": [
-    "parameter_robustness"
-  ],
+  "optional_claims": [],
   "registered_claim_ids": [
     "fixed_fpr_detection",
     "baseline_superiority",
     "quality_preservation",
-    "mechanism_necessity",
-    "parameter_robustness"
+    "mechanism_necessity"
   ],
   "registry_schema": "paper_claim_registry_v1",
   "required_claims": [

@@ -6,17 +6,19 @@
 
 ## Current Construction Unit
 
-- `project_unit`: `experiment_protocol_validation`
-- `target_construction_unit`: `paper_artifact_rebuild_gate`
-- 当前推进单元允许实现真实 GPU 实验入口、同身份随机化重复、fixed-FPR、正式攻击、完整消融、公平 baseline、质量匹配、跨重复统计和受治理证据聚合。
-- 当前推进单元不得把 synthetic、proxy、counterfactual、单重复组件或未完成的大规模运行结果登记为正式论文证据。
-- 分支风险场、Jacobian Null Space、尾部截断鲁棒载体、注意力几何和仅图像检测已经形成 CPU 可执行闭环并通过独立语义审计；完成状态以 `docs/builds/method_conformance_report.md` 为准, 不得由实验结果反向改写方法定义。
-- `docs/builds/method_semantic_invariants.md` 是核心方法数学语义的权威来源；`main/methods/method_definition.py` 只能作为可执行镜像, 不得由当前实现反向改写方法定义。
-- `configs/method_semantic_registry.json` 只登记公式、实现符号、CPU 性质和 GPU 原子证据之间的追踪关系, 不得自行保存 `ready`、`verified`、`pass` 或其他科学验证结论。
-- 方法规范冻结只定义可证伪公式、唯一配置、失败条件、禁止替代项和验证职责, 不得据此声明实现已经通过。某个核心方法不变量提升到 `cpu_verified` 时, 必须在同一提交中完成真实实现、独立正反例性质测试、运行证据 schema 和当前方法文档对齐。全部核心不变量通过独立 CPU 语义审计前, 不得进入论文实验协议推进。
-- 当前没有本地 CUDA 环境, 也没有可用的远程 Linux 服务器。真实 SD3.5 生成、精确 JVP、Q/K 梯度、再扩散攻击和正式 Inception 特征提取只能由 Colab GPU 入口执行; 本地环境只承担 CPU 测试、静态审计、记录物化和论文结果闭合。
-- 单个 seed-key 重复只允许形成 `supports_paper_claim=false` 的证据组件。任何正式论文结论必须先通过版本化精确9重复聚合验证, 并从原始 observation、消融记录和 Inception feature records 重算统计。
-- 当前单元通过只表示实验协议与执行路径满足真实 GPU 测试前置条件, 不表示已经产生论文结果；真实方法稳定性与论文结论分别需要后续 Colab GPU 科学预检和正式结果包证明。
+- `project_unit`: `document_ecosystem_synchronization`
+- `target_construction_unit`: `core_method_runtime_construction`
+- `project_unit` 只表示当前治理动作；`target_construction_unit` 表示文档定稿后的下一代码构建目标，二者都不表示完成状态。完成状态只由项目构建状态规范登记。
+- 当前唯一算法原语权威来源是 `docs/builds/algorithm_primitives_content_adaptive_dual_carrier_latent_watermark.md`。
+- 当前唯一方法机制与接口设计来源是 `docs/builds/method_mechanism_design_content_adaptive_dual_carrier_latent_watermark.md`。
+- 当前唯一项目状态、保留/修改/移除清单和实施顺序来源是 `docs/builds/project_construction_state.md`。
+- 三份核心文档已经完成内部定稿。外围契约、README、构建清单和发布文档只能单向消费三份核心文档，不得复制第二套公式、接口或迁移状态。
+- 正式方法固定为“语义显著性自适应内容-几何双链潜空间水印”。具体数学语义、禁止主张和参数边界只以算法原语文档为准，本契约不重复定义。
+- 当前实现与目标方法的差距只以 `docs/builds/project_construction_state.md` 为准。迁移前代码和兼容记录不得覆盖三份核心文档，也不得支持目标方法主张。
+- 在核心实现、配置、登记表、CPU 性质测试和 GPU 资格化全部迁移前，正式论文结果生产处于阻断状态。历史 `c6139ced` 结果及其他旧提交结果只能作为历史工程证据。
+- 当前治理单元只同步文档、机器可读目标契约及其约束测试，不修改核心方法实现；下一构建单元才允许按有状态清单修改核心方法及其直接配置、测试和 runtime 接线。任何单元都不得扩充攻击集合或 baseline，也不得用 synthetic、proxy、placeholder 或兼容性回退替代真实方法。
+- 方法规范冻结只定义可证伪公式、唯一配置、失败条件、禁止替代项和验证职责，不表示实现已经通过。实现状态必须由独立测试和真实 GPU 记录决定。
+- 单个 seed-key 重复只允许形成 `supports_paper_claim=false` 的证据组件。任何正式论文结论仍必须通过版本化精确9重复聚合验证。
 
 ## Ordered Semantic Construction Units
 
@@ -45,13 +47,13 @@
 本仓库采用由内向外的五层结构, 依赖方向必须保持为
 `paper_workflow/ -> scripts/ -> paper_experiments/ -> experiments/ -> main/`。
 
-1. 核心方法层: `main/` 只包含风险场、语义条件 Jacobian 低响应子空间、内容载体、注意力几何和仅图像检测等论文方法实现。该层只能依赖通用第三方库和自身模块。
+1. 核心方法层: `main/` 目标上只包含真实内容观测、S/T/R/Q 内容路由、二维 LF 与 HF-tail 载体、真实 Q/K 几何同步与有界恢复、三分支单次写回、仅图像检测和同阈值救回。迁移前的 Jacobian、JVP/VJP、PSD-CG 与旧多注入耦合不得进入目标最小发布包；可复用的真实 Q/K 关系和恢复算子必须保留。该层只能依赖通用第三方库和自身模块。
 2. 主方法实验层: `experiments/` 负责数据划分、fixed-FPR、模型运行、攻击、正式消融和实验产物。该层可以依赖 `main/`, 不得依赖 `paper_experiments/`、`scripts/`、`paper_workflow/` 或外部 baseline 工程。
 3. 完整论文实验层: `paper_experiments/` 负责外部 baseline、公平对比、官方参考复现、受治理导入、论文证据审计和投稿就绪分析。该层可以依赖 `main/` 与 `experiments/`, 不得依赖 `scripts/` 或 `paper_workflow/`。
 4. 独立执行层: `scripts/` 提供可在 GPU 服务器或 CPU 汇总服务器直接执行的 CLI。该层可以依赖前三层, 不得依赖 `paper_workflow/`。
 5. Colab 运行层: `paper_workflow/` 只负责 Notebook 入口、Drive 同步、Colab session helper 和远程运行包装。正式实现必须能够脱离该层运行。
 6. `external_baseline/` 只作为外部源码缓存、来源登记和经审计的适配实现目录, 不属于核心方法层, 也不进入最小方法发布包。
-7. 最小方法发布包只包含 `main/` 和方法所需的最小配置; 完整论文实验发布包可以包含 `experiments/`、`paper_experiments/` 与 `scripts/`, 但必须排除 `paper_workflow/` 和未受治理的第三方源码缓存。
+7. 最小方法发布包只包含 `main/` 和方法所需的最小配置，其中内容链与几何链均为必需组成；完整论文实验发布包可以包含 `experiments/`、`paper_experiments/` 与 `scripts/`, 但必须排除 `paper_workflow/` 和未受治理的第三方源码缓存。
 
 ## Output File Governance
 

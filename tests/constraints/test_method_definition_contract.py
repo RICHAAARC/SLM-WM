@@ -27,13 +27,16 @@ METHOD_DOCUMENT = (
     ROOT
     / "docs"
     / "builds"
-    / "method_section_semantic_conditioned_latent_manifold_watermark.md"
+    / "method_mechanism_design_content_adaptive_dual_carrier_latent_watermark.md"
 )
 PRIMITIVE_DOCUMENT = (
     ROOT
     / "docs"
     / "builds"
-    / "algorithm_primitives_semantic_conditioned_latent_manifold_watermark.md"
+    / "algorithm_primitives_content_adaptive_dual_carrier_latent_watermark.md"
+)
+CONSTRUCTION_DOCUMENT = (
+    ROOT / "docs" / "builds" / "project_construction_state.md"
 )
 FIELD_REGISTRY = ROOT / "docs" / "field_registry.md"
 EXPECTED_METHOD_DEFINITION = {
@@ -476,22 +479,21 @@ def test_machine_readable_method_definition_freezes_constructive_semantics() -> 
 
 @pytest.mark.constraint
 def test_method_documents_define_local_tangent_constructive_protocol() -> None:
-    """方法文档必须描述当前构造协议和局部切空间边界."""
+    """无状态规范必须排除局部切空间方法，状态差距单独登记。"""
 
-    for document in (METHOD_DOCUMENT, PRIMITIVE_DOCUMENT):
-        text = document.read_text(encoding="utf-8")
+    method_text = METHOD_DOCUMENT.read_text(encoding="utf-8")
+    primitive_text = PRIMITIVE_DOCUMENT.read_text(encoding="utf-8")
+    construction_text = CONSTRUCTION_DOCUMENT.read_text(encoding="utf-8")
 
-        assert "构造式" in text
-        assert "局部" in text and "特征水平集" in text and "切空间" in text
-        assert "不构造全局非线性流形" in text
-        assert "常秩" in text
-        assert "\\arg\\max" not in text
-        assert "\\beta_g" not in text
-        assert "\\beta_s" not in text
-        assert "\\beta_v" not in text
-        assert "\\mathcal{M}_{\\mathrm{route}}" not in text
-        assert "\\Delta J" in text
-        assert "J(I" in text
+    assert "唯一算法原语权威来源" in primitive_text
+    assert "不定义方法数学语义" in primitive_text
+    assert "716维特征水平集及其一阶局部切空间解释" in primitive_text
+    assert "Jacobian Null Space、完整 JVP/VJP 和 PSD-CG" in primitive_text
+    assert "项目构建状态的唯一有状态来源" in construction_text
+    assert "正式运行仍执行716维特征" in construction_text
+    assert "GitNexus 影响面" not in method_text
+    assert "\\arg\\max" not in primitive_text
+    assert "\\Delta J" not in primitive_text
 
 
 @pytest.mark.constraint

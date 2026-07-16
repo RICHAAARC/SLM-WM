@@ -1,8 +1,12 @@
-# SLM-WM 方法语义不变量
+# 迁移前方法语义不变量兼容记录
 
 ## 文档职责
 
-本文档是“语义条件潜流形水印”数学语义的权威来源。`main/methods/method_definition.py` 只能镜像本文档已经冻结的定义, 不能根据当前代码行为反向改写公式。`configs/method_semantic_registry.json` 只保存公式、实现、CPU 性质测试和 GPU 原子证据之间的追踪关系, 不允许自行声明任何不变量已经通过。
+本文档只为当前尚未迁移的 `main/`、`configs/method_semantic_registry.json` 和既有约束测试保留旧实现身份。它不再是目标方法的权威来源，不得支持“内容自适应双载体潜空间水印”的方法主张、完成状态或新结果解释。
+
+目标方法的唯一算法原语规范是 `../builds/algorithm_primitives_content_adaptive_dual_carrier_latent_watermark.md`，唯一实现迁移设计是 `../builds/method_mechanism_design_content_adaptive_dual_carrier_latent_watermark.md`。完成核心代码迁移时，必须同步替换本兼容记录和机器登记表，不能让新旧不变量长期并存。
+
+以下公式、字段和测试节点均属于迁移前实现。保留它们的唯一目的，是让旧代码身份继续可核验并阻止旧结果冒充新方法结果。`configs/method_semantic_registry.json` 仍只承担追踪职责，不允许自行声明任何不变量已经通过。
 
 方法完成度严格区分以下层级：
 

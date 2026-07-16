@@ -246,6 +246,8 @@ def _validate_release_boundary(root: Path, copied_files: tuple[str, ...]) -> Non
         "configs/core_method_dependency_identity.json",
         "configs/model_sd35.yaml",
         "configs/model_source_registry.json",
+        "docs/builds/algorithm_primitives_content_adaptive_dual_carrier_latent_watermark.md",
+        "docs/builds/method_mechanism_design_content_adaptive_dual_carrier_latent_watermark.md",
         "main/__init__.py",
         "pyproject.toml",
         VALIDATION_ENTRYPOINT,
@@ -263,13 +265,19 @@ def _validate_release_boundary(root: Path, copied_files: tuple[str, ...]) -> Non
         "pyproject.toml",
         VALIDATION_ENTRYPOINT,
     }
+    allowed_document_files = {
+        "docs/builds/algorithm_primitives_content_adaptive_dual_carrier_latent_watermark.md",
+        "docs/builds/method_mechanism_design_content_adaptive_dual_carrier_latent_watermark.md",
+    }
     for relative in copied_files:
         top_level = PurePosixPath(relative).parts[0]
         if top_level in _FORBIDDEN_TOP_LEVEL_PATHS:
             raise ValueError(f"最小核心方法包包含外层路径: {relative}")
         if top_level == "configs" and relative not in allowed_config_files:
             raise ValueError(f"最小核心方法包包含未登记配置: {relative}")
-        if top_level not in {"configs", "main"} and relative not in allowed_root_files:
+        if top_level == "docs" and relative not in allowed_document_files:
+            raise ValueError(f"最小核心方法包包含未登记文档: {relative}")
+        if top_level not in {"configs", "docs", "main"} and relative not in allowed_root_files:
             raise ValueError(f"最小核心方法包包含未登记根路径: {relative}")
     if not (root / "README.md").read_text(encoding="utf-8-sig").startswith(
         "# SLM-WM 核心方法包"

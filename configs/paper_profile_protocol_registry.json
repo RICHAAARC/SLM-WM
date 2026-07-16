@@ -8,11 +8,49 @@
     "scale_contract.prompt_count",
     "scale_contract.sample_count",
     "scale_contract.split_counts",
-    "scale_contract.minimum_clean_negative_count",
+    "scale_contract.minimum_negative_role_counts",
     "scale_contract.dataset_level_quality_minimum_count",
-    "scale_contract.drive_result_root",
     "scale_contract.record_count_derivation"
   ],
+  "method_role_contract": {
+    "contract_schema": "dual_chain_method_role_contract_v1",
+    "role_ids": [
+      "full_dual_chain",
+      "uniform_content_routing",
+      "lf_only_content",
+      "hf_tail_only_content",
+      "content_chain_only",
+      "geometry_recovery_without_embedded_sync"
+    ]
+  },
+  "sample_role_contract": {
+    "contract_schema": "dual_chain_sample_role_contract_v1",
+    "role_ids": [
+      "watermarked_positive",
+      "clean_negative",
+      "attacked_negative"
+    ]
+  },
+  "formal_evaluation_schema_contract": {
+    "schema_id": "dual_chain_formal_evaluation_success_failure_v1",
+    "identity_fields": [
+      "prompt_id",
+      "randomization_repeat_id",
+      "method_role",
+      "sample_role",
+      "key_relation",
+      "attack_id",
+      "decision_identity_digest"
+    ],
+    "union_fields": [
+      "measurement_status",
+      "failure_boundary",
+      "failure_code",
+      "measurement_identity_digest",
+      "geometry_measurement",
+      "evidence_positive"
+    ]
+  },
   "artifact_contract": [
     {
       "artifact_id": "randomization_detection_statistics_manifest",
@@ -67,18 +105,6 @@
       ],
       "ready_field": "randomization_aggregate_statistics_ready",
       "writer_module": "paper_experiments.runners.randomization_ablation_necessity"
-    },
-    {
-      "artifact_id": "randomization_branch_risk_parameter_sensitivity_manifest",
-      "file_names": [
-        "parameter_sensitivity_repeat_metrics.csv",
-        "parameter_sensitivity_aggregate_metrics.csv",
-        "parameter_sensitivity_aggregate_summary.json",
-        "parameter_sensitivity_source_report.json",
-        "manifest.local.json"
-      ],
-      "ready_field": "parameter_sensitivity_aggregate_ready",
-      "writer_module": "paper_experiments.runners.randomization_parameter_sensitivity"
     }
   ],
   "command_dependency_edges": [
@@ -99,8 +125,8 @@
       "producer": "randomization_aggregate_package"
     },
     {
-      "consumer": "paper_experiments.runners.randomization_parameter_sensitivity",
-      "producer": "randomization_aggregate_package"
+      "consumer": "paper_experiments.runners.single_model_parameter_sensitivity_diagnostic",
+      "producer": "registered_single_repeat_evidence"
     },
     {
       "consumer": "scripts.paper_result_closure",
@@ -135,12 +161,6 @@
       "claim_id": "mechanism_necessity",
       "gate_role": "mechanism_necessity_gate",
       "requirement_role": "required_claim"
-    },
-    {
-      "artifact_id": "randomization_branch_risk_parameter_sensitivity_manifest",
-      "claim_id": "parameter_robustness",
-      "gate_role": "single_model_parameter_sensitivity",
-      "requirement_role": "optional_claim"
     }
   ],
   "profile_ids": [
@@ -148,5 +168,17 @@
     "pilot_paper",
     "full_paper"
   ],
-  "registry_schema": "paper_profile_protocol_registry_v1"
+  "registry_schema": "paper_profile_protocol_registry_v1",
+  "diagnostic_artifact_contract": [
+    {
+      "artifact_id": "single_model_parameter_sensitivity_diagnostic_manifest",
+      "file_names": [
+        "parameter_sensitivity_diagnostic_records.jsonl",
+        "parameter_sensitivity_diagnostic_summary.json",
+        "manifest.local.json"
+      ],
+      "ready_field": "parameter_sensitivity_diagnostic_ready",
+      "writer_module": "paper_experiments.runners.single_model_parameter_sensitivity_diagnostic"
+    }
+  ]
 }

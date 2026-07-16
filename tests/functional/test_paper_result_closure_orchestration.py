@@ -162,7 +162,7 @@ def _write_rebuilt_artifacts(
     paired_ready: bool = True,
     ablation_ready: bool = True,
 ) -> None:
-    """写出五个 Writer 应发布的最小受治理文件集合。"""
+    """写出四个正式 Writer 应发布的最小受治理文件集合。"""
 
     for spec in closure._CLOSURE_ARTIFACT_SPECS:
         paths = closure._expected_artifact_paths(
@@ -269,7 +269,7 @@ def test_closure_command_plan_uses_one_validated_aggregate(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """五个统计 Writer 必须消费同一个已验证聚合 ZIP。"""
+    """四个正式统计 Writer 必须消费同一个已验证聚合 ZIP。"""
 
     source = _aggregate_source(tmp_path)
     monkeypatch.setattr(
@@ -285,12 +285,71 @@ def test_closure_command_plan_uses_one_validated_aggregate(
         root=tmp_path,
     )
 
-    assert len(commands) == closure.PAPER_RESULT_CLOSURE_COMMAND_COUNT == 5
+    assert len(commands) == closure.PAPER_RESULT_CLOSURE_COMMAND_COUNT == 4
     assert all(
         command[command.index("--aggregate-package-path") + 1]
         == str(source.package_path)
         for command in commands
     )
+
+
+@pytest.mark.quick
+def test_optional_parameter_diagnostic_is_strict_but_not_a_claim_gate() -> None:
+    """可选参数诊断存在时必须严格复验, 且固定不支持论文主张."""
+
+    summary = {
+        "paper_claim_scale": PAPER_RUN_NAME,
+        "target_fpr": TARGET_FPR,
+        "parameter_sensitivity_diagnostic_ready": True,
+        "parameter_axis_ids": [
+            "routing_reference_quantile",
+            "local_sensitivity_relative_step",
+            "content_strength_common_multiplier",
+            "geometry_strength_multiplier",
+        ],
+        "randomization_repeat_count": 1,
+        "supports_paper_claim": False,
+        "claim_boundary": (
+            "single_model_single_repeat_descriptive_diagnostic_only"
+        ),
+    }
+    digest = build_stable_digest(summary)
+    summary["parameter_sensitivity_diagnostic_summary_digest"] = digest
+    config = {
+        "paper_run_name": PAPER_RUN_NAME,
+        "target_fpr": TARGET_FPR,
+        "parameter_sensitivity_diagnostic_summary_digest": digest,
+    }
+    metadata = {
+        "parameter_sensitivity_diagnostic_ready": True,
+        "supports_paper_claim": False,
+    }
+
+    record = closure._derive_optional_diagnostic_component(
+        summary,
+        config,
+        metadata,
+        artifact_id="single_model_parameter_sensitivity_diagnostic_manifest",
+    )
+    assert record["contributes_to_central_claim_gate"] is False
+    assert record["supports_paper_claim"] is False
+
+    forged = {**summary, "randomization_repeat_count": 9}
+    forged_digest = build_stable_digest(
+        {
+            key: value
+            for key, value in forged.items()
+            if key != "parameter_sensitivity_diagnostic_summary_digest"
+        }
+    )
+    forged["parameter_sensitivity_diagnostic_summary_digest"] = forged_digest
+    with pytest.raises(RuntimeError, match="单 repeat"):
+        closure._derive_optional_diagnostic_component(
+            forged,
+            {**config, "parameter_sensitivity_diagnostic_summary_digest": forged_digest},
+            metadata,
+            artifact_id="single_model_parameter_sensitivity_diagnostic_manifest",
+        )
 
 
 @pytest.mark.quick
@@ -397,7 +456,7 @@ def test_run_rebuilds_gates_and_archives_governed_outputs(
     )
 
     archive_path = Path(result["archive_path"])
-    assert len(executed) == 5
+    assert len(executed) == 4
     assert result["paper_result_evidence_ready"] is True
     assert result["conclusion_decision"] == "evidence_incomplete"
     assert result["supports_paper_claim"] is False

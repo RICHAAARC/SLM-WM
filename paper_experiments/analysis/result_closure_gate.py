@@ -4568,18 +4568,6 @@ def _build_result_closure_claim_decisions(
                 ),
                 ("formal_mechanism_ablation_manifest",),
             ),
-            "parameter_robustness": build_claim_decision(
-                "parameter_robustness",
-                evidence_complete=False,
-                scientific_support=None,
-                evidence_artifact_ids=(
-                    "randomization_branch_risk_parameter_sensitivity_manifest",
-                ),
-                evidence_blockers=(
-                    *workflow_blockers,
-                    "parameter_robustness_evidence_not_bound_to_closure_input",
-                ),
-            ),
         }
     )
 
