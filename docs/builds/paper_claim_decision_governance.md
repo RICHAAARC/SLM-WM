@@ -10,7 +10,7 @@
 
 | 证据角色 | 生产职责 | 验证或消费职责 | 结论边界 |
 | --- | --- | --- | --- |
-| fixed-FPR 检测记录 | `experiments/` 生成三类真实样本观测和冻结决策协议 | `paper_experiments/` 重建逐攻击和跨重复统计 | 原子记录不得直接声明论文主张成立 |
+| fixed-FPR 检测记录 | `experiments/` 生成三类真实样本观测、7项核心攻击和冻结决策协议 | `paper_experiments/` 重建核心逐攻击和跨重复统计 | 原子记录不得直接声明论文主张成立；补充攻击不投票 |
 | baseline 公平对比 | `paper_experiments/baselines/` 导入受治理真实结果 | 配对优势和证据审计模块复验共同协议 | 每种方法使用自身连续分数独立校准，不共享数值阈值 |
 | FID/KID 与配对质量 | `experiments/` 生产真实图像和质量特征 | 随机化质量聚合与质量决策模块 | 诊断指标不得替代独立质量证据 |
 | 机制必要性消融 | `experiments/ablations/` 从同一核心实现生成登记角色 | 随机化消融聚合器验证必要性 | 缺失角色、额外正式角色或复用主方法阈值均失败关闭 |
@@ -50,7 +50,7 @@ evidence_incomplete
 
 主投稿结论的 profile 作用域固定为 `pilot_paper`。当且仅当 pilot 自身四项 required claims 均由完整证据支持时，才允许形成 pilot 作用域内的 `registered_claim_set_supported=true` 和投稿就绪候选。`full_paper` 是可选扩展，不进入 pilot required-claim conjunction；其未运行或 `evidence_incomplete` 不改变 pilot 决策。若论文正文报告 FPR=0.001 或 full 规模结论，则必须由 full 自身四项决策独立支持，不能引用 pilot 状态代替。
 
-质量结论必须消费 Prompt 条件 KID、配对感知质量、独立视觉内容质量、逐攻击质量和跨攻击质量的受治理统计。任一必需原子或区间缺失时，`quality_preservation` 必须为 `evidence_incomplete`，不得由诊断代理、同源机制一致性分数或旧兼容状态替代。
+质量结论必须消费 Prompt 条件 KID、配对感知质量、独立视觉内容质量、7项核心逐攻击质量和核心跨攻击质量的受治理统计。任一核心必需原子或区间缺失时，`quality_preservation` 必须为 `evidence_incomplete`，不得由诊断代理、补充攻击结果、同源机制一致性分数或旧兼容状态替代。10项补充攻击不进入任一 required claim；其缺失不阻断核心证据，存在时也不能提高或降低核心主张决策。
 
 ## 四、运行流程就绪边界
 
@@ -71,7 +71,7 @@ workflow_transfer_ready = (
 ## 五、分层职责
 
 - `experiments/` 生产真实运行记录、攻击记录、最小必要消融记录和质量原子。
-- `paper_experiments/` 重建统计、逐攻击结论和分主张决策。
+- `paper_experiments/` 重建统计、核心逐攻击结论和分主张决策，并把补充攻击隔离为非主张描述性结果。
 - `scripts/` 编排结果闭合、验证和归档。
 - `paper_workflow/` 只包装 Colab session 与 Drive。
 - `main/` 只提供核心方法，不依赖本结论治理层。
@@ -88,5 +88,7 @@ workflow_transfer_ready = (
 4. 更新结果闭合和完整包消费者，拒绝旧方法字段或未登记额外文件。
 5. 更新 field registry 和产物契约。
 6. 使用真实格式的原始记录执行生产者到消费者正向集成测试，不得手工注入最终 `supported` 决策。
+
+核心/补充攻击职责变化还必须同步主张输入过滤器和 exact-set validator。任何消费者若继续把10项补充攻击缺失视为 required evidence 不完整，或把补充攻击结果并入核心均值和主张投票，都属于阻断违规。
 
 验收必须分别报告 `evidence_complete`、`scientific_support` 和 `decision`。任何 writer、manifest 或 Notebook 直接写入最终支持状态都属于阻断违规。

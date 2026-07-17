@@ -21,8 +21,8 @@
 | `project_construction_state.md` | 记录当前仓库快照、GitNexus 影响面、保留/修改/移除清单和实施顺序 | 当前 Git 提交、GitNexus 索引及真实文件状态 | 判断当前实现差距和下一构建动作时使用 |
 | `formal_dependency_environment.md` | 冻结正式 Python、CUDA、PyTorch 和完整哈希锁证据链 | `configs/dependency_profile_registry.json`、`experiments/runtime/dependency_profiles.py` | 修改依赖、宿主入口或 GPU 环境时使用 |
 | `prompt_dataset_provenance.md` | 冻结 Prompt 来源、选择算法、嵌套集合和来源摘要 | `configs/prompt_source_registry.json`、`configs/prompt_selection_manifest.jsonl` | 重建或审计 Prompt bank 时使用 |
-| `paper_profile_protocol_isomorphism.md` | 冻结三档允许变化的规模字段、必须同构的协议字段和 pilot 主投稿/full 扩展边界 | `configs/paper_profile_protocol_registry.json`、`paper_experiments/analysis/paper_profile_protocol_isomorphism.py` | 修改 `probe_paper`、`pilot_paper`、`full_paper` 任一协议时使用 |
-| `paper_quality_claim_governance.md` | 冻结质量估计对象、统计单位、非劣效边界和逐攻击结论 | `configs/paper_quality_claim_protocol.json`、`paper_experiments/analysis/paper_quality_decisions.py` | 修改质量生产、聚合或决策时使用 |
+| `paper_profile_protocol_isomorphism.md` | 冻结三档允许变化的规模字段、7项核心/10项补充攻击职责、必须同构的协议字段和 pilot 主投稿/full 扩展边界 | `configs/paper_profile_protocol_registry.json`、`paper_experiments/analysis/paper_profile_protocol_isomorphism.py` | 修改 `probe_paper`、`pilot_paper`、`full_paper` 或攻击证据职责时使用 |
+| `paper_quality_claim_governance.md` | 冻结质量估计对象、统计单位、非劣效边界、核心逐攻击结论和补充描述性边界 | `configs/paper_quality_claim_protocol.json`、`paper_experiments/analysis/paper_quality_decisions.py` | 修改质量生产、聚合或决策时使用 |
 | `paper_claim_decision_governance.md` | 冻结论文主张、证据完整性和科学支持之间的派生关系 | `configs/paper_claim_registry.json`、`paper_experiments/analysis/paper_claim_decisions.py` | 修改结论闭合和结果包门禁时最后使用 |
 
 除本文件外，上述8份规范均不可删除或互相替代：两份无状态方法规范与一份有状态构建记录职责排他；三档规模、质量统计和最终主张决策分别约束不同机器对象，也不能合并为一份宽泛说明。
@@ -89,12 +89,13 @@
 3. 拒绝方法摘要、检测器、攻击、baseline、消融、统计规则或产物 schema 的跨档差异。
 4. `probe_paper` 流程闭合只证明相同流程可迁移，不外推 `pilot_paper` 或 `full_paper` 的科学效果。
 5. `pilot_paper` 是主投稿证据；`full_paper` 是可选扩展，不进入 pilot 投稿就绪的 required-claim conjunction。
+6. 7项核心攻击进入三档核心证据闭合；10项补充攻击不进入 required claims，缺失时只报告未运行状态。
 
 ### 5.4 质量与论文结论闭合
 
 1. 从真实持久化图像生产配对感知、独立视觉内容和分布质量原子。
 2. 按 Prompt 聚类和5重复结构重建统计区间。
-3. 逐攻击形成质量子主张，再派生跨攻击质量结论。
+3. 7项核心攻击逐项形成质量子主张，再派生核心跨攻击质量结论；补充攻击只形成独立描述性状态。
 4. 将 fixed-FPR、baseline、质量和机制必要性四项结论传入统一主张决策器；参数敏感性仅由独立诊断消费者复验，不进入主张决策器或 release gate。
 5. 只有 `evidence_complete=true` 且预登记判据满足时，主张才能为 `supported`。
 

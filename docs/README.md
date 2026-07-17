@@ -12,6 +12,7 @@
 ## 实验与证据治理
 
 - `builds/README.md`：三档同构、质量结论和论文主张规范的唯一目录清单。
+- `builds/paper_profile_protocol_isomorphism.md`：7项核心攻击、10项补充攻击、5重复与三档同构的冻结协议。
 - `paper_quality_evidence_governance.md`：四图质量证据与 GPU 资格化治理。
 - `runtime/external_gpu_workflow_persistence.md`：外部 GPU 会话持久化和恢复。
 - `artifact_rebuild.md`：由 records 重建论文产物的规则。

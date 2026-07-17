@@ -21,7 +21,7 @@
 - `primary/shallow_diffuse/`: Shallow Diffuse, 需要 SD3.5 shallow latent update 适配。
 - `primary/t2smark/`: T2SMark, 官方源码包含 SD3.5 入口, 当前 adapter 负责结果转写和共同协议落盘。
 
-Tree-Ring、Gaussian Shading 和 Shallow Diffuse 分别由三个 `external_baseline_*_run.ipynb` 入口运行。每个入口只调度一个 baseline, 使用与主方法一致的 SD3.5 生成预算、当前论文层级 fixed-FPR 和完整攻击矩阵。T2SMark 只由 `official_reference_t2smark_run.ipynb` 的正式复现链生成主表候选。四个主表 baseline 还必须读取与主方法相同的活动交叉重复：同一 Prompt 使用同一生成 seed 和由 `sha256_counter_normal_icdf_table20_float32` 生成的同一基础 latent Tensor。该协议连续读取 SHA-256 大端计数器比特流中的20位索引并查询冻结 Q20 中点逆 CDF float32 表；规范生成和目标 dtype 转换均在 CPU 完成, 随后才搬运到执行设备。各方法保留自身水印编码, 但共同绑定密钥重复索引与派生整数身份；实际 Tensor 摘要不同的 observation 不得进入配对结果。
+Tree-Ring、Gaussian Shading 和 Shallow Diffuse 分别由三个 `external_baseline_*_run.ipynb` 入口运行。每个入口只调度一个 baseline, 使用与主方法一致的 SD3.5 生成预算、当前论文层级 fixed-FPR 和7项核心攻击 exact-set 矩阵。T2SMark 只由 `official_reference_t2smark_run.ipynb` 的正式复现链生成主表候选。四个主表 baseline 不要求执行10项补充攻击；补充攻击只由完整主方法在冻结核心决策器后生成描述性报告。四个主表 baseline 还必须读取与主方法相同的活动交叉重复：同一 Prompt 使用同一生成 seed 和由 `sha256_counter_normal_icdf_table20_float32` 生成的同一基础 latent Tensor。该协议连续读取 SHA-256 大端计数器比特流中的20位索引并查询冻结 Q20 中点逆 CDF float32 表；规范生成和目标 dtype 转换均在 CPU 完成, 随后才搬运到执行设备。各方法保留自身水印编码, 但共同绑定密钥重复索引与派生整数身份；实际 Tensor 摘要不同的 observation 不得进入配对结果。
 
 四个 Notebook 都只准备 CPU `workflow_orchestrator`. repository 的共享隔离调度分别在 `sd35_method_runtime_gpu` 与 `t2smark_sd35_gpu` 子解释器中运行完整 baseline workflow, 并用独立 `scientific_execution_binding.json` 绑定科学 runner 输出的 summary、manifest、profile / 锁摘要、执行报告和依赖报告快照. 该绑定是打包白名单必需项, 不能用父解释器直接执行结果或仅有环境检查替代.
 
@@ -29,9 +29,9 @@ Tree-Ring、Gaussian Shading 和 Shallow Diffuse 分别由三个 `external_basel
 
 运行产物写入 `outputs/external_baseline_method_faithful/<paper_run_name>/run_records/<baseline_id>/`, 跨包交换文件写入同一论文层级下的 `split_observations/`。每个压缩包只包含当前论文层级和当前 baseline 的独占路径, 多包物化不会覆盖其他方法。
 
-三个 common-backbone adapter 均以真实科学完成单元执行。每个 Prompt 的 clean / watermarked 源图及连续盲检分数构成一个 `source_pair` 单元; 每个 test Prompt、正式攻击和阴阳角色构成一个攻击单元。单元记录采用原子替换写入, 并绑定 clean detached 代码锁、完整依赖锁、受治理外部源码 revision、适配实现摘要、Prompt、配置、seed 和实际 CUDA 设备。workspace 绝对路径不进入科学身份或完成单元, outputs 引用统一保存为仓库相对 POSIX 路径, 因而 Drive 恢复到另一 checkout 路径后仍可验证和继续运行。重启时只复用完整且逐字节验证通过的单元, 损坏、身份不符、额外旧文件或 exact-set 不完整都会闭锁。
+三个 common-backbone adapter 均以真实科学完成单元执行。每个 Prompt 的 clean / watermarked 源图及连续盲检分数构成一个 `source_pair` 单元; 每个 test Prompt、核心攻击和阴阳角色构成一个攻击单元。单元记录采用原子替换写入, 并绑定 clean detached 代码锁、完整依赖锁、受治理外部源码 revision、适配实现摘要、Prompt、配置、seed 和实际 CUDA 设备。workspace 绝对路径不进入科学身份或完成单元, outputs 引用统一保存为仓库相对 POSIX 路径, 因而 Drive 恢复到另一 checkout 路径后仍可验证和继续运行。重启时只复用完整且逐字节验证通过的单元, 损坏、身份不符、额外旧文件或核心 exact-set 不完整都会闭锁。
 
-目标共同协议对主方法和每个主表 baseline 都使用相同的三组 calibration 负观测角色：`clean_negative_registered`、`attacked_negative_registered` 和 `watermarked_wrong_key`。每种方法必须使用自身真实连续分数和自身密钥语义独立冻结阈值，但使用相同的 Prompt 级分区、有限样本假阳性预算、目标 FPR 和 test 评测职责；不得共享数值阈值，也不得把只使用 clean negative 的阈值称为目标公平协议。为形成 `attacked_negative_registered`，calibration 负样本必须真实执行与正样本相同的登记攻击；三组任一缺失都必须失败关闭。当前 adapter 是否已经迁移到该协议只由 `../docs/builds/project_construction_state.md` 登记，README 不得把现有 clean-only 路径写成已经符合目标方法。
+目标共同协议对主方法和每个主表 baseline 都使用相同的三组 calibration 负观测角色：`clean_negative_registered`、`attacked_negative_registered` 和 `watermarked_wrong_key`。每种方法必须使用自身真实连续分数和自身密钥语义独立冻结阈值，但使用相同的 Prompt 级分区、有限样本假阳性预算、目标 FPR 和7项核心 test 评测职责；不得共享数值阈值，也不得把只使用 clean negative 的阈值称为目标公平协议。为形成 `attacked_negative_registered`，calibration 负样本必须真实执行与正样本相同的核心登记攻击；三组任一缺失都必须失败关闭。补充攻击不得进入 calibration。当前 adapter 是否已经迁移到该协议只由 `../docs/builds/project_construction_state.md` 登记，README 不得把现有 clean-only 路径写成已经符合目标方法。
 
 最终 observation、adapter manifest 和 transfer 文件只能由全部完成单元确定性重建，Notebook 与持久化 wrapper 不承担断点恢复或统计聚合逻辑。
 

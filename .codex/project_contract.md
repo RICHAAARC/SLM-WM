@@ -20,6 +20,7 @@
 - 方法规范冻结只定义可证伪公式、唯一配置、失败条件、禁止替代项和验证职责，不表示实现已经通过。实现状态必须由独立测试和真实 GPU 记录决定。
 - 单个 seed-key 重复只允许形成 `supports_paper_claim=false` 的证据组件。任何正式论文结论仍必须通过版本化精确5重复聚合验证。
 - `pilot_paper` 是主投稿证据 profile；`full_paper` 是更严格 FPR 与更大样本规模的可选扩展。未运行或未闭合 `full_paper` 不阻断基于完整 `pilot_paper` 证据形成的投稿就绪状态，也不得被解释为 `full_paper` 科学结论已经成立。
+- 三档 required claims 只消费预登记的7项核心证据攻击；其余10项攻击属于补充描述性证据，不进入 fixed-FPR、baseline superiority、quality preservation 或 mechanism necessity 的 required conjunction。核心攻击在三档、6个方法角色和4个主表 baseline 间保持完全同构；补充攻击缺失、失败或未运行不得被解释为已验证，也不得阻断完整核心证据闭合。
 - clean 图像、角色无关模型原子、公开质量特征、普通攻击结果、profile 不变原子和生成共享前缀只能在身份摘要完全匹配且等价性验证通过时复用。密钥依赖模板、角色阈值、最终决策、逐 profile 校准和统计结论不得跨边界复用。
 
 ## Ordered Semantic Construction Units

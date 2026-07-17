@@ -4,7 +4,7 @@
 
 本文档说明 `probe_paper`、`pilot_paper` 与 `full_paper` 如何形成可机器复验的协议同构结论。该门禁比较代码与实验协议, 不比较效果数值, 也不把 probe 的科学结论外推到更严格 fixed-FPR 工作点。
 
-三个运行规模分别使用70、700和7000个 Prompt, 注册 FPR 分别为0.1、0.01和0.001。`probe_paper` 是流程与初步可行性 profile，`pilot_paper` 是主投稿证据 profile，`full_paper` 是可选扩展 profile。它们只允许改变登记的 Prompt / 样本规模、目标 FPR、统计强度和由规模派生的记录数量；核心方法、攻击、baseline、数据划分原则、阈值校准原则、指标语义、随机化、命令依赖图、产物 schema、gate 角色和主张决策结构必须完全一致。
+三个运行规模分别使用70、700和7000个 Prompt, 注册 FPR 分别为0.1、0.01和0.001。`probe_paper` 是流程与初步可行性 profile，`pilot_paper` 是主投稿证据 profile，`full_paper` 是可选扩展 profile。它们只允许改变登记的 Prompt / 样本规模、目标 FPR、统计强度和由规模派生的记录数量；核心方法、7项核心证据攻击、baseline、数据划分原则、阈值校准原则、指标语义、随机化、命令依赖图、产物 schema、gate 角色和主张决策结构必须完全一致。10项补充攻击的配置身份和描述性边界也必须一致，但其是否实际执行不属于 profile 核心闭合条件。
 
 ## 二、唯一登记与实际来源
 
@@ -19,7 +19,7 @@
 其余身份从实际项目实现读取：
 
 - 方法配置来自 `configs/model_sd35.yaml` 及其完整配置摘要；
-- 攻击来自 `experiments.protocol.attacks.default_attack_configs`；
+- 攻击来自 `experiments.protocol.attacks.default_attack_configs`，并由机器 registry 显式登记与 `resource_profile` 正交的 `attack_evidence_role`；
 - baseline 来自4个主表 baseline 的实际共同协议定义；
 - split 来自固定70条块内的 3:33:34 风险分层规则；
 - 阈值来自 calibration 中 clean negative、wrong-key negative 与登记 attacked negative 共同构成的完整决策器冻结协议；
@@ -27,7 +27,36 @@
 - 随机化来自权威注册表预先冻结的5个互异 seed-key 有序配对；该集合不是 seed 与 key 的完整笛卡尔积；
 - 主张结构来自 `configs/paper_claim_registry.json`。
 
-这一实现属于通用工程写法：不能只比较 profile 名称或少量摘要, 而应把实际配置正文、执行依赖和结论规则共同纳入规范记录。SLM-WM 项目特定部分是上述 fixed-FPR、固定5重复、正式攻击、4个主表 baseline 和4项正式主张的具体绑定。
+这一实现属于通用工程写法：不能只比较 profile 名称或少量摘要, 而应把实际配置正文、执行依赖和结论规则共同纳入规范记录。SLM-WM 项目特定部分是上述 fixed-FPR、固定5重复、7项核心证据攻击、10项补充描述性攻击、4个主表 baseline 和4项正式主张的具体绑定。
+
+### 2.1 冻结攻击证据集合
+
+7项核心证据攻击按以下规范顺序冻结，并在三档、6个方法角色、4个主表 baseline、正样本和受攻击负样本之间形成完整共同矩阵：
+
+1. `jpeg_compression_main`
+2. `gaussian_noise_main`
+3. `resize_main`
+4. `crop_resize_main`
+5. `rotation_main`
+6. `img2img_regeneration_extra`
+7. `diffusion_purification_extra`
+
+10项补充描述性攻击按以下规范顺序冻结：
+
+1. `gaussian_blur_main`
+2. `crop_main`
+3. `composite_geometric_main`
+4. `photometric_distortion_main`
+5. `flow_matching_inversion_regeneration_extra`
+6. `sdedit_regeneration_extra`
+7. `global_editing_extra`
+8. `local_editing_extra`
+9. `visual_paraphrase_extra`
+10. `adversarial_removal_extra`
+
+`jpeg_compression_probe` 只承担非主张的单攻击工程 smoke，不属于上述两个论文证据集合。核心集合逐项登记 `attack_evidence_role=core_claim_required`；补充集合逐项登记 `attack_evidence_role=supplementary_descriptive`。已有 ID 中的 `_main/_extra` 和 `resource_profile=full_main/full_extra` 只描述历史命名与执行资源，不得据此推断证据职责。
+
+核心集合是四项 required claims 的唯一攻击总体。补充集合不进入 calibration、核心跨攻击聚合、质量合取、baseline superiority、mechanism necessity 或投稿就绪；若运行，只允许完整方法在冻结核心决策器下产生逐攻击描述性检测、误报和质量结果。补充结果不得选择最强 baseline 后追加自适应比较，也不得由部分成功攻击外推完整集合鲁棒性。
 
 ## 三、规范化记录
 
@@ -40,7 +69,7 @@ protocol_contract
 artifact_contract
 ```
 
-`scale_contract` 只保存允许变化的科学规模字段及其派生内容，包括 FPR、Prompt 文件与数量、各固定 split 的派生样本计数、三类样本角色的派生数量、质量图像数量和记录数量派生关系。Drive 结果根可以按 profile 派生，但它只是操作存储位置，不是科学协议变化字段；其派生规则必须同构。固定5重复不能在 profile 间变化。`protocol_contract` 保存所有必须一致的实验语义，包括三类样本角色、Q/K 关系公式、几何捕获域、生成式攻击职责和质量指标。`artifact_contract` 在三档比较视图中连接正式 claim 产物与非主张诊断产物的 writer、ready 字段和文件集合。机器登记以 `artifact_contract` 保存仅与四项 claim 一一对应的正式产物，以 `diagnostic_artifact_contract` 保存参数敏感性诊断产物；只有前者允许出现在 `gate_roles`。
+`scale_contract` 只保存允许变化的科学规模字段及其派生内容，包括 FPR、Prompt 文件与数量、各固定 split 的派生样本计数、三类样本角色的派生数量、质量图像数量和记录数量派生关系。Drive 结果根可以按 profile 派生，但它只是操作存储位置，不是科学协议变化字段；其派生规则必须同构。固定5重复不能在 profile 间变化。`protocol_contract` 保存所有必须一致的实验语义，包括三类样本角色、Q/K 关系公式、几何捕获域、7项核心攻击、10项补充攻击、攻击证据职责、生成式攻击对称职责和质量指标。`artifact_contract` 在三档比较视图中连接正式 claim 产物与非主张诊断产物的 writer、ready 字段和文件集合。机器登记以 `artifact_contract` 保存仅与四项 claim 一一对应的正式产物，以 `diagnostic_artifact_contract` 保存参数敏感性诊断产物；只有前者允许出现在 `gate_roles`。补充攻击报告使用独立非主张产物角色，不得进入 `gate_roles`。
 
 比较时不对任意 JSON 路径做宽松删除。实现只比较三个 profile 的完整 `protocol_contract` 与完整 `artifact_contract`, 因而未登记字段不能借“规模变化”名义被忽略。所有差异以结构化路径写入报告。
 
@@ -67,7 +96,7 @@ workflow_transfer_ready = (
 
 ## 五、跨 profile 等价产物复用
 
-嵌套 Prompt 身份相同且完整 provenance 匹配时，三档可以复用 profile-invariant 的生成图像、普通攻击结果、公开 VAE/Q/K 原子和质量特征。复用记录必须绑定 source artifact digest、生产代码、模型 revision、预处理、dtype、依赖和缓存 schema，并逐成员验证。
+嵌套 Prompt 身份相同且完整 provenance 匹配时，三档可以复用 profile-invariant 的生成图像、核心或补充普通攻击结果、公开 VAE/Q/K 原子和质量特征。复用记录必须绑定 source artifact digest、生产代码、模型 revision、预处理、dtype、依赖和缓存 schema，并逐成员验证。
 
 以下内容始终是 profile-specific，禁止从 probe 或 pilot 直接复制到更严格 profile：calibration population、经验预算、置信边界、`content_threshold`、`rescue_margin_low`、最终布尔决策、统计区间和主张决策。复用只减少重复测量，不改变每档独立证据责任。
 
@@ -91,5 +120,7 @@ writer 只在 `outputs/paper_profile_protocol_isomorphism/` 写出报告和 `man
 3. 更新 `paper_experiments/analysis/paper_profile_protocol_isomorphism.py` 从实际注册源读取目标方法身份和正式角色登记；角色集合必须从唯一登记派生，不得在多个消费者中重复硬编码。
 4. 对三个 profile 分别执行 dry-run，要求缺失路径为空且规范化 `protocol_contract`、`artifact_contract` 完全一致。
 5. 使用属于同一新提交的真实 `probe_paper` 闭合报告重建同构报告。
+
+攻击协议迁移还必须原子更新攻击 registry、核心/补充集合摘要、预期记录计数、baseline 共同模板、质量 gate、结果闭合和补充报告消费者。只更新人类可读列表而保留17项攻击全部进入 required gate，必须失败关闭。
 
 验收必须同时满足 `profile_scale_registration_ready=true`、`protocol_isomorphism_ready=true` 和 `artifact_contract_isomorphic=true`。这些状态只证明协议和流程可迁移，不改变 pilot 或 full 的 `evidence_incomplete` 科学状态。

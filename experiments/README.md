@@ -21,5 +21,8 @@
 7. 在完整身份匹配时复用 clean 图像、公开 VAE/Q/K、内容观测、质量特征和普通攻击结果；角色、密钥和 profile 特定的阈值与决策仍独立生成。
 8. 以 Prompt-repeat 为幂等恢复原子并支持样本级多 GPU ownership；失败记录、样本分母和预登记随机化不得因缓存、恢复或调度改变。
 9. `pilot_paper` 生产主投稿证据，`full_paper` 仅在显式请求和资源允许时生产可选扩展证据。
+10. 从唯一攻击 registry 解析与资源档位正交的证据职责：7项 `core_claim_required` 必须覆盖6个方法角色并进入 calibration、质量门禁和 required claims；10项 `supplementary_descriptive` 只在冻结核心决策器后由完整方法执行描述性评测，不进入 required gate。
+
+补充攻击允许未运行或部分完成，但 writer 必须显式记录其完成集合和缺失状态；不得只汇总成功样本，也不得用补充结果补齐、改写或否决核心7项攻击结论。`resource_profile` 只描述计算资源等级，不能用于推断证据职责。
 
 任何仍验证迁移前方法的 runner 或测试只能证明历史实现回归稳定，不能产生目标方法证据。具体迁移状态只由项目构建状态文档登记。

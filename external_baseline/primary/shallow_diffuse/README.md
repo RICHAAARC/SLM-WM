@@ -17,7 +17,7 @@
 6. 检测器只读取图像, 使用空 Prompt 将 VAE latent 沿同一 schedule 反演到生成时的 `edit_timestep`, 不继续反演到初始噪声。
 7. edit latent 上的 masked patch 距离形成连续检测分数；目标论文协议必须按本 baseline 的真实分数独立消费根目录 README 登记的三组 calibration 负观测，不能以 clean-negative-only 阈值冒充目标公平协议。
 
-该 baseline 的 shallow latent 局部注入与 SLM-WM 的 HF-tail 是不同机制。SLM-WM 目标 HF-tail 的精确定义以 `../../../docs/builds/algorithm_primitives_content_adaptive_dual_carrier_latent_watermark.md` 第7节为准；共同协议只统一 Prompt、模型主线、攻击和 fixed-FPR 统计边界，不改写各方法的载体定义。
+该 baseline 的 shallow latent 局部注入与 SLM-WM 的 HF-tail 是不同机制。SLM-WM 目标 HF-tail 的精确定义以 `../../../docs/builds/algorithm_primitives_content_adaptive_dual_carrier_latent_watermark.md` 第7节为准；共同协议只统一 Prompt、模型主线、7项核心攻击和 fixed-FPR 统计边界，不改写各方法的载体定义。10项补充攻击不要求该 baseline 覆盖。
 
 ## official reference 边界
 

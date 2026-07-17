@@ -2,13 +2,13 @@
 
 ## 1. 适用边界
 
-本协议只治理实验数据如何形成论文结论，不重新定义 `main/` 核心算法。目标算法以 `builds/algorithm_primitives_content_adaptive_dual_carrier_latent_watermark.md` 为唯一权威来源。攻击集合和 baseline 集合只能从各自冻结 registry 读取；本协议不得自行增删。
+本协议只治理实验数据如何形成论文结论，不重新定义 `main/` 核心算法。目标算法以 `builds/algorithm_primitives_content_adaptive_dual_carrier_latent_watermark.md` 为唯一权威来源。核心/补充攻击集合和 baseline 集合只能从各自冻结 registry 读取；本协议不得自行增删或改变证据职责。
 
-`probe_paper`、`pilot_paper` 和 `full_paper` 必须使用同一结论集合、同一 estimand、同一指标语义、同一攻击与 baseline 协议、同一 fixed-FPR 校准程序和同一闭合门禁。三者只允许改变登记的样本规模、目标 FPR `0.1/0.01/0.001` 和统计强度。`probe_paper` 负责流程与初步可行性，`pilot_paper` 是主投稿证据，`full_paper` 是可选扩展。`probe_paper` 不能使用减少结论项的快速替代协议；pilot 与 full 结论均只能由自身证据支持。full 未运行不阻断完整 pilot 的投稿作用域，但正文不得据此报告 full 规模或 FPR=0.001 结论。
+`probe_paper`、`pilot_paper` 和 `full_paper` 必须使用同一结论集合、同一 estimand、同一指标语义、同一7项核心攻击与4 baseline 协议、同一 fixed-FPR 校准程序和同一闭合门禁。三者只允许改变登记的样本规模、目标 FPR `0.1/0.01/0.001` 和统计强度。`probe_paper` 负责流程与初步可行性，`pilot_paper` 是主投稿证据，`full_paper` 是可选扩展。`probe_paper` 不能使用减少核心结论项的快速替代协议；pilot 与 full 结论均只能由自身核心证据支持。full 未运行不阻断完整 pilot 的投稿作用域，但正文不得据此报告 full 规模或 FPR=0.001 结论。10项补充攻击不进入任一 profile 的核心闭合门禁，实际运行时仍使用同一 estimand 和冻结检测器。
 
 ## 2. 四图配对质量 estimand
 
-逐攻击质量的规范观察单元由同一 Prompt, 同一 `randomization_repeat_id`, 同一攻击配置摘要和同一 `attack_seed_random` 下的4张真实图像组成:
+核心或已运行补充攻击的规范质量观察单元都由同一 Prompt, 同一 `randomization_repeat_id`, 同一攻击配置摘要和同一 `attack_seed_random` 下的4张真实图像组成:
 
 1. `clean`.
 2. `watermarked`.
@@ -31,6 +31,8 @@
 -> 逐攻击质量决策
 -> 跨攻击质量决策
 ```
+
+只有精确7项核心攻击的逐攻击决策进入上述跨攻击质量决策和 `quality_preservation`。补充攻击只写入独立描述性质量报告；其特征、区间和失败状态不能与核心集合合并。
 
 所有记录必须绑定 Prompt, repeat, 样本角色, 攻击身份, 攻击随机种子, 图像文件 SHA-256, 图像像素 SHA-256, 分辨率, 代码提交和科学依赖 profile. `openai/clip-vit-base-patch32` 与方法语义条件编码器同源, 因而其 cosine 只保留为 `mechanism_consistency_diagnostic`. 正式独立视觉内容表示保持主张使用不参与优化或检测的 `facebook/dinov2-base` 冻结 CLS 特征。`independent_semantic_cosine` 是现有兼容字段名，其估计对象严格是配对图像之间的视觉内容保持，不是 Prompt 或图文对齐。模型 ID、精确 revision、预处理、特征层、L2 归一化和完整依赖锁由 `configs/independent_semantic_quality_evaluator.json` 冻结. 聚合器从两套原始向量分别复算 cosine, 但只有独立视觉内容 cosine 进入质量决策; Prompt 条件 KID 仍从 Inception 特征复算. 调用方不得直接注入最终质量决策.
 

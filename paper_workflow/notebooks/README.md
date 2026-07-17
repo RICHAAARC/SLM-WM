@@ -113,8 +113,8 @@ python scripts/write_reviewed_scientific_dependency_hash_locks.py \
 4. `randomization_repeat_evidence_run.ipynb`。
 
 权威5个 repeat 全部完成后, CPU 汇总环境必须使用层内
-`paper_experiments.runners.randomization_aggregate_provenance` 入口显式绑定9个
-component 和3个跨 repeat 不变包。该聚合与后续统计不属于 Notebook 职责。
+`paper_experiments.runners.randomization_aggregate_provenance` 入口显式绑定5个
+repeat component 和3个跨 repeat 不变包。该聚合与后续统计不属于 Notebook 职责。
 
 主方法入口在完成全部 Prompt 后释放生成模型显存, 随即从真实 clean / watermarked
 图像对提取正式 Inception 特征并计算 FID / KID。因此数据集质量不是独立 Notebook

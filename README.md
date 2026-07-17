@@ -29,7 +29,9 @@ paper_workflow/ -> scripts/ -> paper_experiments/ -> experiments/ -> main/
 
 ## 三档运行
 
-`probe_paper`、`pilot_paper` 和 `full_paper` 必须使用同一方法、攻击、baseline、检测器、质量估计对象、产物 schema 和结果闭合规则。三档只允许在登记的 Prompt / 样本规模、各固定 split 的派生样本计数、目标 FPR 和派生统计强度上变化。seed-key 交叉重复数三档固定为5，不得变化。`pilot_paper` 是主投稿证据，`full_paper` 是可选扩展；full 未运行不阻断 pilot 作用域内的投稿就绪，但不得据此宣称 FPR=0.001 结论。
+`probe_paper`、`pilot_paper` 和 `full_paper` 必须使用同一方法、7项核心证据攻击、4个主表 baseline、检测器、质量估计对象、产物 schema 和结果闭合规则。三档只允许在登记的 Prompt / 样本规模、各固定 split 的派生样本计数、目标 FPR 和派生统计强度上变化。seed-key 交叉重复数三档固定为5，不得变化。`pilot_paper` 是主投稿证据，`full_paper` 是可选扩展；full 未运行不阻断 pilot 作用域内的投稿就绪，但不得据此宣称 FPR=0.001 结论。
+
+攻击协议分为核心与补充两层。7项核心攻击在6个方法角色和4个主表 baseline 间形成完整共同矩阵，并独立支撑四项 required claims；其余10项高成本攻击只形成补充描述性鲁棒性结果，不进入 pilot 投稿就绪门禁。补充结果未运行、部分完成或效果失败都必须如实披露，不能扩张为已支持的广泛高级攻击结论。
 
 正式执行允许采用身份受治理的 clean 图像、VAE/Q/K 原子、质量特征、普通攻击和生成共享前缀复用，并允许 Prompt-repeat 断点恢复和样本级多 GPU 并行。所有复用都必须通过等价性与摘要校验；密钥依赖测量、角色阈值、逐 profile 校准、最终决策和统计结论仍独立产生。
 

@@ -11,6 +11,7 @@
 9. 参数敏感性固定使用一个登记 repeat 和小规模 Prompt 子集，只形成描述性诊断与 schema 复验；不得扩张为5重复推断，不得进入论文主张或 release gate。
 10. `pilot_paper` 是主投稿重建目标；`full_paper` 是可选扩展。full 产物缺失必须报告为扩展证据不完整，但不能阻断完整 pilot 结果包或把 pilot 结论外推到 FPR=0.001。
 11. 图像、普通攻击、VAE/Q/K 原子和质量特征可从通过摘要复验的共享缓存重建来源关系；阈值、角色/密钥决策、逐 profile 统计和 claim audit 必须从原子 records 重新计算，不得从缓存写入最终结论。
+12. 核心论文表、质量结论和主张审计只从7项 `core_claim_required` 的 exact-set records 重建；10项 `supplementary_descriptive` 必须使用独立表或报告，并显式列出已运行与缺失攻击。补充结果不完整不阻断核心 pilot 包，但不得被重建为核心闭合或集合级支持证据。
 
 主要重建入口:
 

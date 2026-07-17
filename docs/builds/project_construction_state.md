@@ -16,16 +16,17 @@
 
 | 项目 | 基线 |
 |---|---|
-| 审计日期 | `2026-07-16` |
+| 审计日期 | `2026-07-17` |
 | 重复协议文档修订日期 | `2026-07-17` |
 | profile 与等价执行文档修订日期 | `2026-07-17` |
-| 源代码基线提交 | `942585e7c0f95005dbee861edd01b54b32817e52` |
+| 攻击证据职责文档修订日期 | `2026-07-17` |
+| 源代码基线提交 | `6f2077e13b10b28324e89f8823135d6873c9795b` |
 | GitNexus 索引提交 | `942585e7c0f95005dbee861edd01b54b32817e52` |
 | GitNexus 索引时间 | `2026-07-15T17:28:41.464Z` |
-| 工作树说明 | 存在未提交的文档、配置、测试和治理修改；本次不把它们解释为核心方法实现已经迁移 |
+| 工作树说明 | 存在未提交的人类可读协议文档修改；本次不把它们解释为机器协议、核心方法实现或论文证据已经迁移 |
 | 核心实现判断范围 | `main/`、`experiments/`、`configs/model_sd35.yaml`、`configs/method_semantic_registry.json` 及其测试和运行入口 |
 
-正式 GPU 运行必须重新绑定完成核心迁移后的精确 clean detached 提交。本表只用于安排构建，不支持论文主张。
+当前 GitNexus 索引早于源代码基线，表中既有影响数据只作历史规划参考；进入任何符号修改前必须先重新索引并重跑 impact。正式 GPU 运行必须重新绑定完成核心迁移后的精确 clean detached 提交。本表只用于安排构建，不支持论文主张。
 
 ---
 
@@ -33,8 +34,8 @@
 
 | 构建面 | 状态 | 判断 |
 |---|---|---|
-| 三份中心文档职责分离 | `protocol_revision_pending_review` | 算法公式和6角色集合保持不变；正式随机化已修订为5个预登记 seed-key 配对，pilot 已登记为主投稿、full 已登记为可选扩展，并新增等价执行复用边界。尚未完成独立复审和默认 pytest，因此暂不维持 `core_documents_frozen` 状态 |
-| 其他文档生态同步 | `protocol_documentation_updated` | 人类可读文档已同步6角色、5重复、pilot/full 证据职责及缓存/恢复/并行目标；机器随机化、profile gate、缓存身份、聚合器、配置摘要和相关测试仍需原子切换后才能重新提升为 `document_ecosystem_synchronized` |
+| 三份中心文档职责分离 | `protocol_revision_pending_review` | 算法公式和6角色集合保持不变；正式随机化已修订为5个预登记 seed-key 配对，pilot 已登记为主投稿、full 已登记为可选扩展，攻击职责收敛为7项核心 required 与10项补充描述性，并新增等价执行复用边界。尚未完成独立复审和默认 pytest，因此暂不维持 `core_documents_frozen` 状态 |
+| 其他文档生态同步 | `protocol_documentation_updated` | 人类可读文档已同步6角色、5重复、pilot/full 证据职责、7/10攻击分层及缓存/恢复/并行目标；机器随机化、攻击 registry、profile gate、质量/主张过滤器、缓存身份、聚合器、配置摘要和相关测试仍需原子切换后才能重新提升为 `document_ecosystem_synchronized` |
 | 目标核心方法实现 | `not_implemented` | 正式运行仍执行716维特征、Jacobian Null Space、JVP/VJP、PSD-CG 和三时刻注入路径 |
 | 内容自适应路由 | `not_implemented` | 尚无由 Prompt 条件空间显著性、Sobel 纹理、相邻 latent 响应和公开探针敏感性共同构造的 `S/T/R/Q` 路由 |
 | 路由 reference registry | `not_materialized` | `configs/content_routing_reference_registry.json` 尚不存在，真实 `g_ref/r_ref/q_ref` 及其隔离参数划分仍未物化 |
@@ -44,13 +45,14 @@
 | 几何恢复与同阈值救回 | `partially_reusable` | 有界搜索、回正、重新编码、aligned 内容分数和同阈值救回基础存在，但仍绑定旧内容载体和旧方法身份 |
 | 近阈值后按需几何搜索 | `nonconformant` | 现有检测基础可复用，但目标接口尚未显式分离 raw measurement、geometry search 和 frozen decision 编排 |
 | 等价执行复用与样本级并行 | `documented_not_implemented` | clean 跨角色复用、公开原子/质量特征/攻击缓存、共享生成前缀、Prompt-repeat checkpoint 和多 GPU ownership 已冻结文档边界；runtime、cache manifest、等价性测试和调度 validator 尚未实现 |
+| 核心/补充攻击证据职责 | `documented_not_implemented` | 目标文档冻结7项核心攻击进入6角色、4 baseline 和 required claims，10项补充攻击只作描述性结果；当前 `default_attack_configs()` 仍以 `resource_profile` 区分18项配置，闭合链仍把17项正式攻击全部视为共同 required 矩阵 |
 | 完整 fixed-FPR 校准 | `nonconformant` | 现有 `image_only_evidence.py` 只使用 clean negative，并拟合 geometry score/confidence/sync 门；目标协议要求三组负观测分别受预算约束，几何结构门预先冻结 |
 | 最终图像 Q/K 双归因 | `partially_reusable` | runtime 已有 full/carrier-only 对照基础，但尚未按新方法冻结 registered/wrong-key 与 matched content-only 原子 schema |
 | 204维手工结构分量 | `remove_from_core_gate` | 当前资格化和配置仍把它作为机制保持门禁；目标方法只允许在 `experiments/` 中保留诊断，不允许筛除正式样本 |
 | 单时刻三分支一次写回 | `not_implemented` | `configs/model_sd35.yaml` 仍登记 `injection_step_indices: [6, 10, 14]` |
 | 目标方法 CPU 性质测试 | `not_implemented` | 现有测试主要冻结迁移前实现，不能证明目标原语 |
 | 目标方法 GPU 资格化 | `blocked` | 资格化仍要求716维 JVP/VJP、PSD-CG 和三时刻写回事实 |
-| 三档正式实验 | `blocked` | runner、方法摘要、消融、记录和结果包仍绑定迁移前方法身份；目标上 pilot 为主投稿证据，full 只作为可选扩展 |
+| 三档正式实验 | `blocked` | runner、方法摘要、攻击证据职责、消融、记录和结果包仍绑定迁移前方法身份；目标上 pilot 只由7项核心攻击闭合主投稿证据，full 只作为可选规模扩展，10项补充攻击不进入 required gate |
 
 结论：仓库拥有可复用的 LF、真实 Q/K、几何恢复和同阈值救回基础，但还不是两份无状态规范定义的“内容域自适应嵌入 + 几何链救回重判”实现。
 
@@ -137,14 +139,15 @@ CRITICAL 风险处理原则：先建立目标 schema 和消费者迁移清单，
 | `configs/method_semantic_registry.json` | 迁移前方法不变量 | 原子替换为双链不变量 | 旧 definition pointer 全部退出正式登记 |
 | `configs/core_method_dependency_identity.json` | 迁移前核心方法依赖身份 | 重新绑定目标模型、PRG、Q/K、reference registry 和单注入身份 | 摘要可从新配置逐字段重建 |
 | `configs/content_routing_reference_registry.json` | 不存在 | 新建并绑定真实参数划分、观测摘要和 `g_ref/r_ref/q_ref` | 隔离 GPU 参数物化作业可逐字段重建 |
-| `configs/paper_profile_protocol_registry.json`、`paper_experiments/analysis/paper_profile_protocol_isomorphism.py` | 目标登记已包含最小6角色、三类样本角色和 success/failure schema 身份，但随机化实现仍登记9重复，尚未机器登记 pilot 主投稿/full 扩展证据角色，正式 runtime 尚未生产目标 schema | 保持三档共享角色、字段摘要、决策程序、诊断 schema 和精确5个预登记 seed-key 配对；登记 pilot 为主投稿、full 为可选扩展，只允许规模、目标 FPR 与派生统计强度变化 | 对角色、样本角色、schema 字段、5重复、profile 证据职责或操作路径角色的任一漂移均失败关闭 |
+| `configs/paper_profile_protocol_registry.json`、`paper_experiments/analysis/paper_profile_protocol_isomorphism.py` | 目标登记已包含最小6角色、三类样本角色和 success/failure schema 身份，但随机化实现仍登记9重复，尚未机器登记 pilot 主投稿/full 扩展证据角色及7/10攻击职责，正式 runtime 尚未生产目标 schema | 保持三档共享角色、字段摘要、决策程序、诊断 schema、7项核心/10项补充攻击和精确5个预登记 seed-key 配对；登记 pilot 为主投稿、full 为可选扩展，只允许规模、目标 FPR 与派生统计强度变化 | 对角色、样本角色、schema 字段、5重复、核心攻击 exact-set、补充攻击身份、profile 证据职责或操作路径角色的任一漂移均失败关闭 |
+| `experiments/protocol/attacks.py`、攻击矩阵 writer 与 validator | 当前1项 probe、9项 `full_main` 和8项 `full_extra` 只按资源档位分类；17项均进入正式共同矩阵 | 保留18项攻击 ID 和参数，新增与资源档位正交的 `attack_evidence_role`：7项 `core_claim_required`、10项 `supplementary_descriptive`、1项非主张 probe；核心矩阵进入全部角色/baseline/required gate，补充只允许完整方法描述性执行 | 资源档位推断证据职责、核心集合不精确、补充进入 calibration/claim、结果后改角色或部分补充冒充完整集合时失败关闭 |
 | 目标 cache/checkpoint manifest 与多 GPU 调度 validator | 尚无覆盖共享生成前缀、公开 measurement package、攻击缓存和样本 ownership 的统一机器身份 | 新增完整输入摘要、producer 版本、依赖、schema、内容摘要、命中来源和等价性状态；缓存与 checkpoint 固定不支持论文主张 | 身份不全、跨密钥复用依赖原子、跨图像攻击命中、重复 ownership 或共享/独立执行不等价时失败关闭 |
 | `configs/field_lifecycle_registry.json`、`docs/field_registry.md` | 已建立目标、迁移前和共享字段的确定性优先级及显式 legacy 集合，但 runtime writer 尚未整体迁移 | 核心与证据 writer 迁移时必须按同一分类拒绝 legacy 字段进入目标记录，并保持 field_name 全局唯一 | 代表字段分类、全表唯一性和目标结果禁用 legacy 的约束测试全部通过 |
 | `experiments/runners/semantic_watermark_runtime.py` | 旧主 runtime | 切换为新核心接口和单次写回 | 不再导入 subspace 或旧方法定义 |
 | `experiments/protocol/method_runtime_config.py` | 解析迁移前多注入、Null Space 和风险配置 | 解析唯一 `B=1`、post-step callback、reference、双载体和几何配置 | 旧字段和兼容分支失败关闭 |
 | `experiments/protocol/gpu_method_qualification.py` | 716维、CG、三写回资格化 | 改为新算子、盲统计、最终 Q/K 双归因和救回顺序 | 新报告通过且 `supports_paper_claim=false` |
 | `experiments/protocol/image_only_evidence.py` | clean-negative-only 嵌套校准、geometry score/confidence/sync 阈值和完整决策应用 | 保留 Prompt 分区与同阈值语义；改为三组负观测分别受预算约束，接入 lazy geometry 和冻结结构门禁 | 三组原始记录能够正向重建完整 fixed-FPR 决策，且不再拟合 geometry 分数门 |
-| `experiments/protocol/paper_fixed_fpr.py` | 仍生成迁移前 `*_claim` 三档别名并把正式摘要绑定 clean-negative-only calibration 角色 | 迁移为 `probe_paper/pilot_paper/full_paper`，并登记 clean/attacked/wrong-key 三组负观测各自计数、预算和置信边界 | 旧命名或单一 clean calibration 身份不能进入目标摘要与同构记录 |
+| `experiments/protocol/paper_fixed_fpr.py` | 仍生成迁移前 `*_claim` 三档别名并把正式摘要绑定 clean-negative-only calibration 角色 | 迁移为 `probe_paper/pilot_paper/full_paper`，并只用7项核心攻击登记 clean/attacked/wrong-key 三组负观测各自计数、预算和置信边界；补充攻击使用冻结核心决策器而不回调 | 旧命名、单一 clean calibration、补充攻击进入拟合或补充结果回写核心阈值时不能进入目标摘要 |
 | `experiments/ablations/` | 迁移前 branch risk 敏感性和旧机制消融 | 收敛为最小6角色开关和独立 calibration；参数敏感性只保留第7.2节单模型单因素方案 | 不存在逐项 `S/T/R/Q` 正式三档矩阵或第二套方法实现 |
 | `paper_experiments/runners/randomization_ablation_necessity.py` | 聚合迁移前消融身份 | 只聚合最小6角色及其预登记比较 | 缺角色、额外角色或阈值复用均失败关闭 |
 | `paper_experiments/runners/randomization_parameter_sensitivity.py` | 聚合旧 branch risk 参数且按9重复形成迁移前统计 | 退出目标入口；由目标单模型诊断 writer 聚合 reference 分位数、探针步长、内容共同倍率和 geometry 倍率的一个固定 repeat | 目标诊断产物使用新语义身份，缺失不阻断四项主张，存在时必须严格复验且不得回写正式参数 |
@@ -175,6 +178,7 @@ CRITICAL 风险处理原则：先建立目标 schema 和消费者迁移清单，
 5. 原子替换 `configs/method_semantic_registry.json`；不得让新旧方法不变量同时被标记为正式。
 6. 将机器随机化协议从迁移前3 seed × 3 key 的9重复原子切换为权威登记的5个有序 seed-key 配对；三档固定复用同一集合与顺序，只在 Prompt / 样本规模、目标 FPR、统计强度及其派生记录数量上变化；FPR 固定为 `0.1/0.01/0.001`。
 7. 在 profile registry 和主张 gate 中登记 `pilot_paper` 为主投稿证据、`full_paper` 为可选扩展；full 缺失不得进入 pilot required gate，full 自身主张仍要求独立闭合。
+8. 为18项攻击配置登记与 `resource_profile` 正交的证据职责：7项核心攻击完整进入6角色、4 baseline、三组 calibration 和四项 required claims；10项补充攻击只允许完整方法使用冻结核心决策器形成描述性结果；probe JPEG 保持非主张工程职责。
 
 ### 6.4 运行、检测与实验
 
@@ -182,7 +186,7 @@ CRITICAL 风险处理原则：先建立目标 schema 和消费者迁移清单，
 2. 将 GPU 资格化从“716维 JVP/VJP + PSD-CG + 三写回”改为验证 `S/T/R/Q`、HF-tail、真实 Q/K、单时刻三分支、一次写回和几何救回。
 3. 从同一核心实现生成最小6角色：`full_dual_chain`、`uniform_content_routing`、`lf_only_content`、`hf_tail_only_content`、`content_chain_only`、`geometry_recovery_without_embedded_sync`；删除逐项 `S/T/R/Q` 消融和 `geometry_sync_without_rescue` 等非必要完整三档矩阵。
 4. 新增单模型小规模参数敏感性 runner，固定一个 Prompt 子集和一个 repeat，只运行无反馈的单因素候选。
-5. 迁移 `method_role`、`watermarked_positive`、`clean_negative`、`attacked_negative`、registered/wrong-key、`scoring_key_identity_digest`、图像成员路径、`content_threshold`、可空 `rescue_margin_low`、攻击后检出率、质量记录和生成式攻击对称评测。
+5. 迁移 `method_role`、`watermarked_positive`、`clean_negative`、`attacked_negative`、registered/wrong-key、`scoring_key_identity_digest`、图像成员路径、`content_threshold`、可空 `rescue_margin_low`、`attack_evidence_role`、核心/补充攻击后检出率、质量记录和生成式攻击对称评测。
 6. 使单 repeat、5-repeat 聚合和完整结果包消费新的方法摘要、字段和产物 schema。
 7. 实现受摘要约束的 clean/measurement/attack/profile-invariant cache、Prompt-repeat 幂等 checkpoint、惰性几何搜索和样本级多 GPU ownership；共享前缀必须具有对六次独立运行的等价性测试和 fail-closed 回退。
 
@@ -259,11 +263,11 @@ CRITICAL 风险处理原则：先建立目标 schema 和消费者迁移清单，
 
 ### 构建单元 F：实验与证据迁移
 
-1. 迁移 `method_role`、三类样本、评分密钥身份、完整单样本来源身份和三组 calibration 负观测；单样本记录显式绑定 Prompt/生成输入、生成与攻击随机 seed、PRG、模型 revision、运行组件、方法定义、运行配置和路由 reference registry。以 Prompt 为单位执行1/3窗口拟合、2/3阈值冻结，并分别约束 clean、attacked、wrong-key 的 fixed-FPR 预算。
+1. 迁移 `method_role`、三类样本、评分密钥身份、攻击证据职责、完整单样本来源身份和三组 calibration 负观测；单样本记录显式绑定 Prompt/生成输入、生成与攻击随机 seed、PRG、模型 revision、运行组件、方法定义、运行配置和路由 reference registry。以 Prompt 为单位执行1/3窗口拟合、2/3阈值冻结，并只对7项核心攻击分别约束 clean、attacked、wrong-key 的 fixed-FPR 预算；补充攻击不得进入拟合。
 2. 实现 `FormalEvaluationSuccess | FormalEvaluationFailure` 判别联合 schema：冻结稳定 `failure_boundary/failure_code`，失败前可得事实照实保存、不可得字段为 `null`、`evidence_positive=false`；单 repeat 与5-repeat 聚合器必须保留失败记录在对应 detection/FPR 正式分母，禁止按缺失值删除或用 NaN、0、随机值、placeholder 插补。
 3. 迁移最小6个正式方法/消融角色和单模型小规模参数敏感性。
-4. 迁移单 repeat、5-repeat 聚合、结果包和 release profile。
-5. 核验 `probe_paper`、`pilot_paper`、`full_paper` 的 schema 和决策规则同构，并核验 full 缺失不阻断 pilot 主投稿 gate。
+4. 迁移单 repeat、5-repeat 聚合、核心结果包、补充描述性报告和 release profile。
+5. 核验 `probe_paper`、`pilot_paper`、`full_paper` 的 schema、7项核心攻击和决策规则同构，并核验 full 或10项补充攻击缺失均不阻断 pilot 主投稿 gate。
 6. 核验缓存只复用角色/密钥/profile 无关原子，Prompt-repeat 恢复不选择样本，样本级多 GPU 聚合无遗漏、重复或额外身份。
 7. 执行分层 import audit 和三种 release profile dry-run，要求禁止依赖为零且 `missing_paths` 为空。
 
@@ -273,10 +277,11 @@ CRITICAL 风险处理原则：先建立目标 schema 和消费者迁移清单，
 2. 从包含该 registry 的新 clean detached 提交运行单 Prompt GPU 方法资格化。
 3. 运行单模型内部敏感性，确认名义参数附近没有明显不稳定，但不得自动回写正式参数。
 4. 单攻击几何恢复和救回闭环。
-5. 单 repeat 全矩阵闭环。
-6. 5-repeat `probe_paper`；通过后只能证明 FPR=0.1 的同构全流程及其统计结论。
-7. 5-repeat `pilot_paper`；作为主投稿证据独立闭合 FPR=0.01 下的四项主张和结果包。
-8. 资源允许时再运行可选 `full_paper`；其 FPR=0.001 结论独立闭合，缺失不回退或否定 pilot 证据。
+5. 单 repeat 7项核心攻击共同矩阵闭环。
+6. 5-repeat `probe_paper`；通过后只能证明7项核心攻击、FPR=0.1 的同构全流程及其统计结论。
+7. 5-repeat `pilot_paper`；作为主投稿证据独立闭合7项核心攻击、FPR=0.01 下的四项主张和结果包。
+8. 核心 pilot 闭合后，资源允许时由完整方法在冻结决策器下运行10项补充攻击并形成独立描述性报告；缺失不阻断 pilot，部分结果不得冒充完整补充集合。
+9. 资源允许时再运行可选 `full_paper`；其7项核心攻击和 FPR=0.001 结论独立闭合，缺失不回退或否定 pilot 证据。
 
 ---
 
@@ -289,10 +294,11 @@ CRITICAL 风险处理原则：先建立目标 schema 和消费者迁移清单，
 | `cpu_conformant` | 目标公式、接口、配置和禁止路径均有 CPU 性质测试；旧正式入口不可选 |
 | `routing_references_materialized` | 隔离参数划分在真实 GPU 上生成受摘要绑定的 `g_ref/r_ref/q_ref` registry，且不支持论文主张 |
 | `gpu_operator_qualified` | clean detached 提交产生真实单 Prompt GPU 报告，`gpu_operator_preflight_ready=true` 且 `supports_paper_claim=false` |
-| `single_repeat_closed` | 一个完整 repeat 覆盖全部登记方法组件、攻击、消融、质量和主表 baseline，并形成真实证据包 |
-| `probe_paper_closed` | 5重复、FPR=0.1、全部结论集合、质量、baseline、机制必要性和结果包闭合 |
-| `pilot_paper_closed` | 主投稿证据：同一方法和 schema 在 FPR=0.01 下取得独立统计证据并闭合 required claims |
-| `full_paper_closed` | 可选扩展：同一方法和 schema 在 FPR=0.001 下取得独立统计证据；不是 pilot 闭合前置条件 |
+| `single_repeat_closed` | 一个完整 repeat 覆盖全部登记方法组件、7项核心攻击、消融、质量和4个主表 baseline，并形成真实证据包；不要求补充攻击 |
+| `probe_paper_closed` | 5重复、7项核心攻击、FPR=0.1、全部结论集合、质量、baseline、机制必要性和结果包闭合 |
+| `pilot_paper_closed` | 主投稿证据：同一方法、7项核心攻击和 schema 在 FPR=0.01 下取得独立统计证据并闭合 required claims |
+| `supplementary_attacks_reported` | 可选描述性证据：完整方法使用冻结核心决策器报告10项补充攻击；不进入任何 profile 的 required-claim conjunction |
+| `full_paper_closed` | 可选规模扩展：同一方法、7项核心攻击和 schema 在 FPR=0.001 下取得独立统计证据；不是 pilot 闭合前置条件 |
 
 资源预算状态必须与方法真实性状态分开。显存、运行时间或费用超限只阻断调度，不得篡改方法是否真实执行的判断。
 
@@ -302,23 +308,23 @@ CRITICAL 风险处理原则：先建立目标 schema 和消费者迁移清单，
 
 - [x] 两份无状态规范不含仓库历史、实现进度、迁移计划或保留/删除清单。
 - [x] 本文档完整列出真实实现差距、保留项、修改项、移除项和不得误删项。
-- [x] GitNexus 基线与源代码提交一致，CRITICAL 影响被显式登记。
+- [ ] GitNexus 已重新索引到当前源代码提交，并重新确认 CRITICAL 影响；当前索引仍停留在更早提交。
 - [x] CRITICAL 方法定义的9个直接依赖和主要文件均有明确处理方式及验收条件。
-- [x] 三份文档之间没有公式、参数、职责或状态归属冲突；独立智能体已按同一固定标准完成多轮复审并确认全部阻断项闭合。
+- [ ] 三份文档之间没有公式、参数、职责或状态归属冲突；本轮7项核心/10项补充攻击修订仍待独立复审确认。
 - [x] 盲检测、按需几何搜索、最终图像 Q/K 归因、reference registry 和单模型敏感性在三份文档中语义一致。
 - [x] 204维手工结构描述符不再属于目标核心门禁。
-- [x] 智能体2已按固定标准复审，确认三份核心文档不存在定稿阻断项。
-- [x] 只针对三份核心文档的轻量交叉校验和格式检查已通过。
+- [ ] 独立复审者已按固定标准确认三份核心文档不存在定稿阻断项。
+- [x] 本轮只针对三份核心文档的轻量交叉校验和格式检查已重新通过。
 
-上述项目曾在9重复协议下全部通过。当前随机化目标已修订为5个预登记 seed-key 配对，pilot/full 证据职责和等价执行优化边界也已写入文档，算法公式和6角色集合没有变化；机器协议与 runtime 尚未同步，且当前环境缺少 pytest，无法执行默认测试。因此第3节的“三份中心文档职责分离”状态暂记为 `protocol_revision_pending_review`。只有补齐机器同步、独立复审与默认测试后才能再次提升为 `core_documents_frozen`；该提升无论是否完成，都不表示核心代码、GPU 资格化或论文证据完成。
+上述项目曾在9重复、17项共同 required 攻击协议下全部通过。当前随机化目标已修订为5个预登记 seed-key 配对，攻击职责已收敛为7项核心 required 与10项补充描述性，pilot/full 证据职责和等价执行优化边界也已写入文档，算法公式和6角色集合没有变化；机器协议与 runtime 尚未同步，且当前环境缺少 pytest，无法执行默认测试。因此第3节的“三份中心文档职责分离”状态暂记为 `protocol_revision_pending_review`。只有补齐机器同步、独立复审与默认测试后才能再次提升为 `core_documents_frozen`；该提升无论是否完成，都不表示核心代码、GPU 资格化或论文证据完成。
 
 ---
 
 ## 12. 文档生态同步条件
 
-- [x] 已以冻结后的三份核心文档为唯一来源修订其他项目文档和根契约，并通过独立复审。
+- [ ] 已以三份核心文档为唯一来源修订其他项目文档和根契约；本轮独立复审仍待完成。
 - [x] 完整结果包、release profile 和构建文档 inventory 已登记三份核心文档且无第二套方法定义。
 - [x] 其他构建规范不再保存当前项目状态，过期或冗余文档已删除或收敛为无状态协议。
-- [x] 文档生态定向测试、默认 pytest、harness 和 `git diff --check` 已通过。
+- [ ] 本轮文档生态定向测试、默认 pytest、harness 和 `git diff --check` 已重新通过。
 
-上述项目曾在9重复协议下全部通过。当前三份核心文档和外围人类可读规范已经统一5重复、pilot 主投稿/full 可选扩展以及等价执行优化边界，但机器随机化注册表、profile gate、cache/checkpoint manifest、聚合器、配置摘要和对应测试尚未同步，因此该状态暂记为 `protocol_documentation_updated`。只有完成机器协议的原子切换，并重新通过默认 pytest、harness、三档 dry-run 与 diff 检查后，才能再次提升为 `document_ecosystem_synchronized`；该状态无论是否恢复，都不表示目标核心方法、GPU 资格化、单 repeat 闭合或论文证据已经完成。
+上述项目曾在9重复、17项共同 required 攻击协议下全部通过。当前三份核心文档和外围人类可读规范已经统一5重复、7项核心/10项补充攻击职责、pilot 主投稿/full 可选扩展以及等价执行优化边界，但机器随机化注册表、攻击 registry、profile gate、质量/主张过滤器、cache/checkpoint manifest、聚合器、配置摘要和对应测试尚未同步，因此该状态暂记为 `protocol_documentation_updated`。只有完成机器协议的原子切换，并重新通过默认 pytest、harness、三档 dry-run 与 diff 检查后，才能再次提升为 `document_ecosystem_synchronized`；该状态无论是否恢复，都不表示目标核心方法、GPU 资格化、单 repeat 闭合、补充攻击报告或论文证据已经完成。

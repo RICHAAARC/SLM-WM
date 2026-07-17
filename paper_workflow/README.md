@@ -5,7 +5,7 @@
 ## 正式入口
 
 - `gpu_method_qualification_run.ipynb`: 正式批量实验前的单 Prompt GPU 方法资格化与 Google Drive 诊断落盘入口。
-- `semantic_watermark_image_only_run.ipynb`: 主方法、仅图像检测、共同攻击、正式 Inception FID / KID 与正式消融入口。
+- `semantic_watermark_image_only_run.ipynb`: 主方法、仅图像检测、7项核心共同攻击、可选补充攻击、正式 Inception FID / KID 与正式消融入口。
 - `external_baseline_*_run.ipynb`: Tree-Ring、Gaussian Shading、Shallow Diffuse 三个 common-backbone baseline 的单方法独占 SD3.5 入口。
 - `official_reference_t2smark_run.ipynb`: T2SMark 独立正式复现入口。
 - 其余 `official_reference_*_run.ipynb`: 外部方法官方环境补充证据入口。
@@ -14,7 +14,7 @@
 
 `paper_workflow/notebook_utils/workflow_archive_naming.py` 保存 Notebook、method-faithful baseline 与 official-reference 的外层归档角色词表。它只复用 `experiments.runtime.archive_naming` 提供的 UTC 时间和短提交身份原语；`experiments/` 不感知 Notebook 或外部 baseline workflow 名称。
 
-`paper_workflow/colab_utils/paper_run_environment.py` 只记录 Notebook 会话起点并转发到 `scripts/formal_workflow_environment.py`。正式运行配置由 scripts 层统一读取 `SLM_WM_PAPER_RUN_NAME`；未显式设置该变量时, Notebook、服务器与配置解析层唯一默认使用 `probe_paper`, `pilot_paper` 和 `full_paper` 必须由运行者显式选择。三个论文级别采用相同方法、攻击、baseline、消融、统计实现和证据门禁；pilot 是主投稿证据，full 是可选扩展。Prompt、split 和目标 FPR 必须从论文 profile 唯一登记表派生，Notebook 文档不得复制第二套数量。
+`paper_workflow/colab_utils/paper_run_environment.py` 只记录 Notebook 会话起点并转发到 `scripts/formal_workflow_environment.py`。正式运行配置由 scripts 层统一读取 `SLM_WM_PAPER_RUN_NAME`；未显式设置该变量时, Notebook、服务器与配置解析层唯一默认使用 `probe_paper`, `pilot_paper` 和 `full_paper` 必须由运行者显式选择。三个论文级别采用相同方法、7项核心攻击、4个主表 baseline、消融、统计实现和证据门禁；10项补充攻击保持配置身份同构但只作可选描述性扩展。pilot 是主投稿证据，full 是可选扩展。Prompt、split 和目标 FPR 必须从论文 profile 唯一登记表派生，Notebook 文档不得复制第二套数量。
 
 每个 Notebook 在拉取仓库前必须由 `SLM_WM_REPOSITORY_COMMIT` 提供精确40位小写 Git SHA。正式结果入口只以 `python -I scripts/run_formal_workflow_host.py` 调用宿主 launcher, 不在 Colab 系统解释器中导入 repository helper 或直接安装依赖。launcher 先复验 clean detached checkout, 再从固定 SHA-256 的 `uv` wheel 创建 registry 指定的精确 CPython 3.12.13, 按已提交完整哈希锁准备 CPU 父 `workflow_orchestrator`, 最后由该解释器调用 `scripts/formal_workflow_entry.py`。该内层入口再选择 GPU workflow 或单 repeat 证据封装入口, 不引用 `paper_workflow/`。GPU workflow 只准备当前职责对应的一个 CUDA 科学子 profile。正式运行与打包边界仍实时复验 Git 锁、依赖身份和科学执行证据。
 
@@ -24,7 +24,7 @@
 
 主方法 Colab 入口把 clean detached Git 工作树、`outputs/` 和隔离 Python 环境放在 `/content` 本地磁盘, 不在 Drive FUSE 上执行科学代码。外层 helper 只注入 `SLM_WM_RESUME_CHECKPOINT_DIR`; 通用 `experiments.runtime.resume_checkpoint` 在变量未配置时保持无操作, 因而同一 workflow 可脱离 Notebook 在普通 GPU 服务器运行。配置该目录后, 已完成 Prompt、正式消融运行、Inception 特征 batch 和进度记录采用临时副本、SHA-256 复验、原子 rename 与 manifest 最后发布语义同步到持久盘。所有 checkpoint 固定为 `evidence_eligibility=intermediate_state_only` 且 `supports_paper_claim=false`; 只有科学 runner 的完整 manifest 和后续闭合包门禁能够形成论文证据入口。
 
-目标主方法 runtime 以 Prompt-repeat 为恢复原子，可在身份匹配时复用 clean 图像、公开 VAE/Q/K 与质量原子、普通攻击和 profile-invariant 产物，并以样本级 worker 分发到多 GPU。Notebook 只配置持久化位置和 worker 资源，不决定缓存命中、角色分支、几何搜索或样本取舍；这些等价执行规则由内层 runtime 和 validator 实施。
+目标主方法 runtime 以 Prompt-repeat 为恢复原子，可在身份匹配时复用 clean 图像、公开 VAE/Q/K 与质量原子、普通攻击和 profile-invariant 产物，并以样本级 worker 分发到多 GPU。Notebook 只配置持久化位置和 worker 资源，不决定缓存命中、角色分支、几何搜索、核心/补充攻击职责或样本取舍；这些等价执行规则由内层 runtime 和 validator 实施。
 
 Drive 中既有闭合包仅在当前请求的主方法、数据集质量及按需消融角色全部通过包结构、论文运行身份、正式执行锁、代码提交和科学依赖身份校验时整体恢复。只命中部分角色时仅返回诊断信息, 当前会话仍执行完整主命令, 不为旧主方法或质量结果伪造新的执行绑定。
 

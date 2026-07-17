@@ -14,7 +14,7 @@ Tree-Ring 的主表公平对比采用 `method_faithful_sd35` adapter:
 3. 每个 Prompt 只改变内容生成 seed, 并在 SD3.5 Medium 初始 latent 的傅里叶域写入全局固定 key。
 4. clean / watermarked 图像共享同一 Prompt、模型、采样配置和基础 latent。
 5. 图像经 VAE 编码和 SD3 scheduler 流匹配反向 Euler 积分恢复初始噪声, 检测器使用 key 区域距离构造 `negative_tree_ring_fft_key_distance` 分数。
-6. 统一输出包含原子 Prompt 科学单元、图像摘要、仅图像检测分数、fixed-FPR 阈值和共同攻击矩阵观测。
+6. 统一输出包含原子 Prompt 科学单元、图像摘要、仅图像检测分数、fixed-FPR 阈值和7项核心共同攻击矩阵观测；10项补充攻击不属于 baseline 必做范围。
 
 该适配属于方法忠实 SD3.5 adapter, 不是 SLM-WM 的方法创新点。它在保留 Tree-Ring 初始 latent 频域密钥与反演检测机制的同时统一到 SD3.5 Medium, 用于主表 common-backbone 对比。
 

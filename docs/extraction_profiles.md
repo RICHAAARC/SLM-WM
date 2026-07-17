@@ -37,7 +37,7 @@ python -I validate_core_method_package.py --root .
 
 ## `paper_experiment_execution_package`
 
-用途: 在独立 CPU 或 GPU 运行环境中执行 probe_paper、pilot_paper 或 full_paper 的同一正式实验协议。`pilot_paper` 是主投稿证据，`full_paper` 是可选扩展。三个论文运行层级只改变登记的 Prompt / 样本数量、目标 FPR 和统计强度；目标 FPR 分别固定为0.1、0.01和0.001。三档不改变方法、嵌入强度、几何预算、Q/K 公式、搜索参数、baseline、攻击、检测规则、产物 schema 或证据闭合要求。full 未执行不阻断 pilot 结果包和投稿就绪验证。
+用途: 在独立 CPU 或 GPU 运行环境中执行 probe_paper、pilot_paper 或 full_paper 的同一正式实验协议。`pilot_paper` 是主投稿证据，`full_paper` 是可选扩展。三个论文运行层级只改变登记的 Prompt / 样本数量、目标 FPR 和统计强度；目标 FPR 分别固定为0.1、0.01和0.001。三档不改变方法、嵌入强度、几何预算、Q/K 公式、搜索参数、4个主表 baseline、7项核心攻击、检测规则、产物 schema 或证据闭合要求。10项补充攻击保持身份与参数同构但允许不运行，只形成描述性扩展。full 未执行或补充攻击未完成均不阻断 pilot 核心结果包和投稿就绪验证。
 
 该 profile 包含:
 

@@ -71,8 +71,8 @@ runner 返回后必须同时满足以下条件, 才能发布完成 workflow chec
 
 | 路由类型 | 原子完成单元 | 正式聚合条件 |
 | --- | --- | --- |
-| Tree-Ring / Gaussian Shading / Shallow Diffuse common-backbone | 每个 Prompt 的 source pair; 每个 test Prompt × 攻击 × 阴阳角色 | 全部 Prompt source pair 与完整 test 攻击笛卡尔积 |
-| T2SMark | 每个全局 `prompt_index` | 全部 Prompt 单元, 且攻击仅覆盖 test split |
+| Tree-Ring / Gaussian Shading / Shallow Diffuse common-backbone | 每个 Prompt 的 source pair; 每个 test Prompt × 核心攻击 × 阴阳角色 | 全部 Prompt source pair 与7项核心 test 攻击笛卡尔积 |
+| T2SMark | 每个全局 `prompt_index` | 全部 Prompt 单元, 且7项核心攻击仅覆盖 test split |
 | Tree-Ring / Gaussian Shading / Shallow Diffuse official-reference | 连续10个 Prompt 的预注册批次 | 批次范围无缺失、无重叠并完整覆盖当前论文层级 |
 
 每个方法内部单元均由实际科学进程原子发布, 绑定科学配置、Prompt 或索引范围、随机性摘要、代码与依赖锁、真实 CUDA 来源及事实文件摘要。恢复后的 runner 先逐单元复验, 只执行缺失单元; 已存在但损坏、身份漂移或集合之外的单元会直接闭锁, 不会被静默覆盖。
@@ -111,7 +111,7 @@ clean detached Git commit 与正式执行锁摘要
 Prompt 与 L4 会话完成的 Prompt 可以共同进入同一次正式汇总, 但最终记录会准确
 保留两种真实设备, 不会把全部样本错误归因到最后一个会话.
 
-三条 common-backbone 路线会从 source pair 与攻击单元重新生成 observation, 并在完整 calibration source pair 齐备后冻结 fixed-FPR 阈值。T2SMark 会从逐 Prompt 单元重新生成 `results.json`、adapter observations、正式导入候选和校验报告。三条 official-reference 会从预注册批次重新计算 method-specific metric, 再重建受治理 record 与 validation report。任何派生文件与复算值不一致都会阻断归档。
+三条 common-backbone 路线会从 source pair 与核心攻击单元重新生成 observation, 并在完整 calibration source pair 齐备后冻结 fixed-FPR 阈值。T2SMark 会从逐 Prompt 单元重新生成 `results.json`、adapter observations、正式导入候选和校验报告。三条 official-reference 会从预注册批次重新计算 method-specific metric, 再重建受治理 record 与 validation report。任何派生文件与复算值不一致都会阻断归档。10项补充攻击不属于 baseline checkpoint 的完成条件。
 
 打包器不会只信任 summary.主方法打包会重新验证每条 result 的完整配置、run id、
 Prompt 身份和正式机制开关; 消融打包会重新绑定逐条机制规范、Prompt 摘要与输出
@@ -136,13 +136,13 @@ evidence_eligibility = intermediate_state_only
 
 主方法正式运行允许采用以下可验证优化，所有命中记录和 checkpoint 本身仍是中间态：
 
-1. 以 Prompt-repeat 为最小幂等单元，完整保存6角色、三类样本角色、两种密钥关系、登记攻击和 failure 记录。恢复只跳过通过成员集合、配置身份和逐文件摘要复验的单元，不按结果得分选择重跑。
+1. 以 Prompt-repeat 为最小幂等单元，完整保存6角色、三类样本角色、两种密钥关系、7项核心登记攻击和 failure 记录。补充攻击另按攻击 ID 保存可选描述性单元。恢复只跳过通过成员集合、配置身份和逐文件摘要复验的单元，不按结果得分选择重跑。
 2. clean 图像按 generation identity 跨方法角色复用；同一图像的 VAE latent、公开 Q/K、S/T/R/Q 观测和质量特征存入只读 measurement package。角色阈值、密钥模板和最终决策不进入该共享包。
 3. registered-key 与 wrong-key 共享图像和密钥无关测量；切换 scoring key 后重新计算密钥依赖载体、稳定 token、几何目标、搜索和判定。
 4. 普通攻击以 source image SHA-256、攻击完整配置、种子、代码和依赖为缓存身份。缓存发布和恢复沿用逐文件 SHA-256、manifest 自摘要和两阶段验证，不允许 clean 与 watermarked 图像因 Prompt 相同而共享结果。
 5. test/application 几何搜索保持近阈值惰性；calibration 每条负观测最多真实搜索一次，候选窗口与阈值只重算决策。
 6. 样本级多 GPU worker 使用预注册样本 identity 分片、唯一 ownership 和原子发布，保持单样本 `batch_size=1`。聚合前拒绝缺失、重复、额外 identity 或未登记环境漂移；GPU 设备信息保留为逐单元 provenance。
-7. profile 嵌套 Prompt 可复用 profile-invariant 图像、攻击和公开特征；各 profile 的 calibration、阈值、决策、统计和 claim audit 必须独立重建。
+7. profile 嵌套 Prompt 可复用 profile-invariant 图像、攻击和公开特征；各 profile 的 calibration、阈值、核心统计和 claim audit 必须独立重建。补充攻击只重建描述性报告及其完成状态，不参与 claim audit。
 
 可选共享生成前缀必须保存 callback 索引10以前的 Prompt 条件、scheduler、`z_9`、`z_10`、随机状态、模型和依赖身份，再为6角色分叉后缀。正式启用前必须用同一 Prompt-repeat 的六次独立运行作对照，验证逐角色图像、latent、测量和记录等价；验证失败时回退独立执行。缓存、共享前缀和多 GPU 调度不能改变正式样本集合、失败分母、随机化配对或统计单位。
 

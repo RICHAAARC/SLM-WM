@@ -599,6 +599,7 @@ rescue_margin_low <= raw_content_score - content_threshold < 0
 - 攻击执行和仅图像检测。
 - clean/攻击后的配对 SSIM、独立视觉内容 cosine 和分布质量原始证据生产；独立视觉内容评估器必须唯一绑定 `configs/independent_semantic_quality_evaluator.json`，其中 `independent_semantic` 只是兼容标识符，不表示 Prompt 语义或图文对齐。
 - 对登记生成式攻击执行正样本与受攻击负样本的对称评测。
+- 从唯一攻击 registry 解析 `attack_evidence_role`：7项 `core_claim_required` 攻击进入 calibration、6角色、4 baseline、质量和 required claims；10项 `supplementary_descriptive` 攻击只在核心决策冻结后形成补充结果。
 - 方法消融。
 - 冻结单模型小规模参数敏感性。
 - 单 repeat 原子记录和证据包。
@@ -608,6 +609,8 @@ rescue_margin_low <= raw_content_score - content_threshold < 0
 ### 6.2 `paper_experiments/`
 
 `paper_experiments/` 只负责5重复聚合、Prompt 聚类置信区间、主张决策、baseline 对比和论文产物重建。它必须分别聚合 clean detection rate、逐攻击 attacked detection rate、clean/attacked/wrong-key FPR、救回增益与质量指标，但不得重新计算水印分数、修改几何恢复结果或用聚合逻辑推断缺失的 `rescue_applied`。
+
+聚合器必须维护两个互斥攻击总体：核心总体要求精确7项、完整6角色和4 baseline 并进入 required claims；补充总体要求精确识别10项注册身份，但允许整体或逐项未运行。补充记录不得进入核心跨攻击均值、核心质量合取、核心 FPR gate 或主张决策；若实际存在则必须按同一 success/failure schema 复验，不能静默忽略失败或额外记录。
 
 ### 6.3 `scripts/` 与 Notebook
 
@@ -857,6 +860,7 @@ FormalEvaluationObservation: TypeAlias = (
 - 单样本记录 schema。
 - 决策记录 schema。
 - 攻击记录 schema。
+- 7项核心攻击的 ID、顺序、参数与 `core_claim_required` 证据职责，以及10项补充攻击的稳定身份和 `supplementary_descriptive` 结论边界。
 - 消融角色集合。
 - 质量记录和结果包清单。
 - 几何恢复与救回字段。
@@ -869,7 +873,7 @@ pilot_paper = 0.01
 full_paper = 0.001
 ```
 
-三档使用完全相同且精确为5的 seed-key 交叉重复集合与顺序。5个重复由权威随机化登记表预先冻结为5个身份互异的 `(generation_seed_offset, watermark_key_index)` 有序配对，不构造 seed 与 key 的完整笛卡尔积，也不得按结果筛选。允许变化的字段只能来自 profile 登记的 Prompt / 样本数量、上述目标 FPR 和由二者派生的统计强度；操作输出路径只允许由 `profile_id` 确定性派生，不能成为独立协议变量。嵌入强度、几何预算、Q/K 关系公式、搜索参数、样本角色、攻击职责、质量指标、决策规则、最小6角色集合和产物 schema 均不得变化。三档的 `full_dual_chain` 不得关闭几何链或使用 content-only 快速路径；第7.1节登记的消融按其固定开关执行，不能替代主方法结果。
+三档使用完全相同且精确为5的 seed-key 交叉重复集合与顺序。5个重复由权威随机化登记表预先冻结为5个身份互异的 `(generation_seed_offset, watermark_key_index)` 有序配对，不构造 seed 与 key 的完整笛卡尔积，也不得按结果筛选。允许变化的字段只能来自 profile 登记的 Prompt / 样本数量、上述目标 FPR 和由二者派生的统计强度；操作输出路径只允许由 `profile_id` 确定性派生，不能成为独立协议变量。嵌入强度、几何预算、Q/K 关系公式、搜索参数、样本角色、7项核心攻击职责、质量指标、决策规则、最小6角色集合和产物 schema 均不得变化。10项补充攻击可整体不执行，但其身份、参数和不进入 required claims 的边界不得跨档变化。三档的 `full_dual_chain` 不得关闭几何链或使用 content-only 快速路径；第7.1节登记的消融按其固定开关执行，不能替代主方法结果。
 
 三档的证据职责固定为：`probe_paper` 验证同构流程和初步可行性；`pilot_paper` 是主投稿证据 profile；`full_paper` 是更严格 FPR 和更大样本规模的可选扩展。实际执行的 profile 必须形成相同结论集合的自身闭合结果。`full_paper` 未运行或未闭合不阻断完整 `pilot_paper` 的结果闭合、投稿就绪和作用域内主张；任何较低层结果都不能替代更严格 profile 自身的 calibration 与统计证据。
 
@@ -1045,10 +1049,11 @@ full_paper = 0.001
 ### 11.5 正式样本、检测与质量
 
 - `sample_role` 只允许 `watermarked_positive`、`clean_negative`、`attacked_negative`；`key_relation` 只允许 `registered_key`、`wrong_key`。
+- 每条攻击记录必须绑定 `attack_evidence_role`；核心记录只允许 `core_claim_required`，补充记录只允许 `supplementary_descriptive`，不得由 `resource_profile` 派生该职责。
 - `attacked_negative` 必须从未嵌入水印的真实源图像执行同一登记攻击，不得由 wrong-key 正样本替代。
-- 记录 clean detection rate、逐攻击 detection rate、clean/attacked/wrong-key FPR 的分子和分母。
+- 记录 clean detection rate、核心逐攻击 detection rate、clean/core-attacked/wrong-key FPR 的分子和分母；补充攻击使用独立描述性分子和分母。
 - 记录可靠恢复数、救回候选数、`rescue_applied` 数和净 `rescue_gain`。
-- 记录配对 SSIM、独立视觉内容 cosine、FID、KID、Prompt 条件 KID 及协议登记的逐攻击质量原始证据。
+- 记录配对 SSIM、独立视觉内容 cosine、FID、KID、Prompt 条件 KID 及7项核心攻击的逐攻击质量原始证据；补充质量不进入核心合取。
 - 生成式攻击必须同时覆盖 `watermarked_positive` 与 `attacked_negative`，记录同一攻击实现、revision、参数和随机化摘要。
 - 域外几何失败、生成式攻击失败和门禁失败必须留在相应检出率分母，不能作为缺失值静默删除。
 - 攻击、持久化、VAE、Q/K、几何搜索、回正或 schema 阶段的执行失败必须形成 `FormalEvaluationFailure`；不可得字段为 `None`，`evidence_positive=false`，禁止 NaN、0、随机值或 placeholder 插补。
@@ -1072,7 +1077,7 @@ full_paper = 0.001
 8. geometry score 永远不能独立产生正式阳性。
 9. Q/K 几何链必须独立于 Jacobian、JVP/VJP、PSD-CG 和 Null Space。
 10. 三类 `sample_role` 不得合并，attacked negative 不得由 wrong-key positive 冒充；`key_relation` 不得只改标签而继续使用另一密钥评分。
-11. 生成式攻击必须同时报告正样本检出、受攻击负样本误报和图像质量。
+11. 核心生成式攻击必须同时报告正样本检出、受攻击负样本误报和图像质量；补充生成式攻击若运行也使用相同对称职责，但只形成描述性结果。
 12. 三档必须固定使用 `0.1/0.01/0.001` 目标 FPR，且 `full_dual_chain` 不得使用弱化方法或关闭几何链；必要消融只能按第7.1节固定角色执行。
 13. 正式消融固定为第7.1节的最小6角色集合；三档不得增加逐项 `S/T/R/Q` 矩阵或删减必要角色。
 14. 任何方法语义变化必须先修改权威算法原语，再修改方法机制设计和实现。

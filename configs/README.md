@@ -17,11 +17,11 @@
 
 - 模型 ID 与精确 revision。
 - Prompt 来源与三档嵌套集合。
-- 攻击集合和 baseline 来源登记。
+- 攻击集合、核心/补充证据职责和 baseline 来源登记；执行资源档位不得替代攻击证据职责。
 - 三档 profile 的产物 schema 与命令依赖图。
 - 目标字段、迁移前字段和共享字段的唯一机器生命周期登记。
 - 独立 DINOv2 质量评估器。
 - 依赖 profile 和全哈希锁。
 - PRG 跨平台固定向量。
 
-`probe_paper`、`pilot_paper` 和 `full_paper` 只能在登记的样本规模、目标 FPR `0.1/0.01/0.001` 和统计强度字段上变化。
+`probe_paper`、`pilot_paper` 和 `full_paper` 只能在登记的样本规模、目标 FPR `0.1/0.01/0.001` 和统计强度字段上变化。三档必须共享同一7项核心证据攻击；10项补充攻击保持同一配置身份但不进入任一 profile 的 required-claim conjunction。

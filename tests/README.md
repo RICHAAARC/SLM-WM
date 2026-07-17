@@ -20,6 +20,7 @@
 3. 生产者到消费者测试必须从真实格式原始记录正向重建统计与决策，不能手工注入最终支持状态。
 4. release 测试必须比较真实 writer、结果闭合规格和 profile 登记，并验证抽离包内文档引用闭合。
 5. 迁移前测试只能证明旧实现回归稳定，不能支持目标方法完成状态。
+6. 目标协议测试必须验证 `attack_evidence_role` 与资源档位正交、7项核心攻击 exact set 进入 required gate、10项补充攻击不进入 calibration 或 claim conjunction，并拒绝部分补充结果冒充完整集合。
 
 默认检查：
 

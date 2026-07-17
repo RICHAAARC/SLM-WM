@@ -115,6 +115,16 @@ Notebook 与 repository module 的跨边界数据
 | target_parameter_prompt_subset_digest | provenance | none | true | false | false | 登记小规模 Prompt 子集的稳定摘要。 |
 | target_parameter_sensitivity_record_digest | provenance | none | true | false | false | 单因素候选、固定身份、真实测量和诊断结果的稳定摘要。 |
 | target_parameter_sensitivity_diagnostic_ready | governance | none | false | false | true | 四个轴在一个固定 repeat 上完成真实描述性诊断并通过 schema 复验；不得支持论文主张或 release gate。 |
+| attack_evidence_role | protocol | none | true | true | false | 与 `resource_profile` 正交的攻击证据职责，只允许 `core_claim_required`、`supplementary_descriptive` 或非主张 probe；不得按执行成本推断。 |
+| core_attack_ids | protocol | none | true | true | false | 唯一攻击 registry 中精确7项 `core_claim_required` 攻击的规范顺序集合。 |
+| supplementary_attack_ids | protocol | none | true | false | false | 唯一攻击 registry 中精确10项 `supplementary_descriptive` 攻击的规范顺序集合。 |
+| core_attack_registry_digest | provenance | none | true | true | false | 7项核心攻击 ID、完整配置摘要和证据职责的稳定 registry 摘要。 |
+| supplementary_attack_registry_digest | provenance | none | true | false | false | 10项补充攻击 ID、完整配置摘要和证据职责的稳定 registry 摘要。 |
+| core_attack_count | metric | none | true | true | false | 当前核心攻击 exact set 的数量，目标协议固定为7。 |
+| supplementary_attack_count | metric | none | true | false | false | 当前补充攻击登记集合的数量，目标协议固定为10。 |
+| supplementary_attack_completion_status | governance | none | true | false | false | 补充攻击描述性运行的完成状态；未运行或部分完成合法，但不得支持核心 claim。 |
+| supplementary_attack_completed_ids | protocol | none | true | false | false | 已真实完成描述性评测的补充攻击规范 ID 集合，禁止只按成功结果筛选。 |
+| supplementary_attack_missing_ids | governance | none | true | false | false | 登记但尚未形成完整描述性记录的补充攻击 ID 集合。 |
 | lf_mask | method | none | false | false | false | 目标内容路由输出的 LF-origin 空间容量 Tensor，必须由 `S/T/R/Q` 公式真实计算；只能在进程内消费，不得直接序列化。 |
 | hf_tail_mask | method | none | false | false | false | 目标内容路由输出的 HF-tail-origin 空间容量 Tensor，必须由 `S/T/R/Q` 公式真实计算；只能在进程内消费，不得直接序列化。 |
 | content_threshold | protocol | none | true | true | false | 当前 `method_role` 由三组 calibration 负观测预算共同冻结的唯一内容阈值。 |
@@ -1108,7 +1118,7 @@ Notebook 与 repository module 的跨边界数据
 | attacked_image_count_by_baseline | metric | none | false | false | false | 按 baseline id 聚合的攻击后图像数量。 |
 | formal_image_attack_families | protocol | none | false | false | false | method-faithful adapter 默认覆盖的正式图像级攻击名称列表。 |
 | attack_strength | protocol | none | true | false | false | 攻击配置使用的归一化强度。 |
-| resource_profile | protocol | none | true | false | false | 攻击矩阵运行使用的资源档位, 例如 probe、full_main 或 full_extra。 |
+| resource_profile | protocol | none | true | false | false | 攻击矩阵运行使用的计算资源档位, 例如 probe、full_main 或 full_extra；不得用于推断核心或补充证据职责。 |
 | requires_gpu | protocol | none | true | false | false | 攻击配置是否需要真实 GPU 推理或重生成能力。 |
 | attack_parameters | protocol | none | true | false | false | 攻击配置的具体参数字典。 |
 | attack_config_digest | artifact | none | true | false | false | 攻击配置 payload 的稳定摘要。 |
@@ -1173,7 +1183,7 @@ Notebook 与 repository module 的跨边界数据
 | unsupported_record_count | metric | none | false | false | false | 因真实资源或输入缺失而不能进入本地统计的记录数量。 |
 | gpu_attack_unsupported_count | metric | none | false | false | false | 需要真实 GPU 但当前尚未由真实 formal records 覆盖的攻击类型数量。 |
 | attack_manifest_path | artifact | none | true | false | false | 攻击矩阵专用 manifest 路径。 |
-| attack_metrics_ready | artifact | none | false | false | false | 完整正式攻击矩阵的真实检测指标是否可从记录重建。 |
+| attack_metrics_ready | artifact | none | false | false | false | 7项核心正式攻击 exact-set 矩阵的真实检测指标是否可从记录重建；不表示补充攻击已经运行。 |
 | clean_false_positive_rate | metric | none | false | false | false | clean negative 在攻击矩阵统计中的 false positive rate。 |
 | attacked_false_positive_rate | metric | none | false | false | false | attacked negative 在攻击矩阵统计中的 false positive rate。 |
 | score_retention_mean | metric | none | false | false | false | 单一检测器内部的攻击前后分数稳定性诊断均值, 合法范围为 [0,1], 不用于跨方法正式比较. |
@@ -1191,9 +1201,9 @@ Notebook 与 repository module 的跨边界数据
 | conventional_attack_names | protocol | none | false | false | false | 当前攻击矩阵登记的常规攻击名称集合。 |
 | regeneration_attack_names | protocol | none | false | false | false | 当前攻击矩阵登记的再扩散攻击名称集合。 |
 | real_regeneration_attack_names | protocol | none | false | false | false | 已由真实 attacked image formal records 覆盖的再扩散攻击名称集合。 |
-| required_real_gpu_attack_count | metric | none | true | false | false | 共同攻击矩阵中需要真实 GPU 图像攻击闭环覆盖的攻击名称数量。|
+| required_real_gpu_attack_count | metric | none | true | false | false | 7项核心共同攻击矩阵中需要真实 GPU 图像攻击闭环覆盖的攻击名称数量。|
 | measured_real_gpu_attack_count | metric | none | true | false | false | 已由真实 GPU 图像攻击 formal records 覆盖的攻击名称数量。|
-| real_gpu_attack_validation_ready | governance | none | true | false | false | 再扩散、高级编辑和自适应去水印等真实 GPU 攻击是否已全部覆盖。|
+| real_gpu_attack_validation_ready | governance | none | true | false | false | 核心集合中要求真实 GPU 的再生成攻击是否已全部覆盖；补充高级编辑或自适应去水印缺失不改变该值。|
 | real_gpu_attack_names | protocol | none | true | false | false | 已由真实 GPU attacked image formal records 覆盖的攻击名称集合。|
 | evaluation_boundary | protocol | none | false | false | false | 攻击后检测复用的 fixed-FPR 与 rescue 统计边界。 |
 | regeneration_attack_status | governance | none | false | false | false | 再扩散攻击是否已有真实产物支持的状态说明。 |
@@ -1213,7 +1223,7 @@ Notebook 与 repository module 的跨边界数据
 | baseline_observation_digest | artifact | none | true | false | false | 外部 baseline 观测记录 payload 的稳定摘要。 |
 | comparable_operating_point | protocol | none | true | false | false | 外部 baseline 与当前方法对齐使用的可比较 operating point。 |
 | common_prompt_protocol_ready | protocol | none | false | false | false | 是否已将 baseline 对齐到相同 prompt 协议。 |
-| common_attack_protocol_ready | protocol | none | false | false | false | 是否已将 baseline 对齐到相同攻击矩阵协议。 |
+| common_attack_protocol_ready | protocol | none | false | false | false | baseline 是否已对齐到相同7项核心攻击 exact-set 协议；不要求补充攻击。 |
 | common_threshold_protocol_ready | protocol | none | false | false | false | 是否已将 baseline 对齐到相同 fixed-FPR 或可比较阈值协议。 |
 | baseline_protocol_compatible | protocol | none | false | false | false | baseline adapter 是否可登记到当前共同协议边界。 |
 | baseline_requires_gpu | runtime | none | false | false | false | 外部 baseline 是否需要 GPU 才能复现实验结果。 |
@@ -1230,7 +1240,7 @@ Notebook 与 repository module 的跨边界数据
 | baseline_result_ready | metric | none | false | false | false | 外部 baseline 对比 manifest 中的单数结果就绪状态。 |
 | baseline_results_ready | metric | none | false | false | false | 外部 baseline 对比运行中所有 baseline 结果是否就绪。 |
 | comparison_protocol_ready | protocol | none | false | false | false | 外部 baseline 对比所需共同协议边界是否已经可审计。 |
-| attack_manifest_supports_paper_claim | claim | none | false | false | false | 外部 baseline 对比输入的攻击矩阵 manifest 是否支持论文主张。 |
+| attack_manifest_supports_paper_claim | claim | none | false | false | false | 外部 baseline 对比输入的7项核心攻击矩阵 manifest 是否支持论文主张；补充 manifest 固定不支持。 |
 | method_id | protocol | none | true | false | false | 对比表中的方法标识。 |
 | method_role | protocol | none | true | false | false | 对比表中的方法角色, 精确区分 proposed_method 与 primary_baseline。 |
 | comparison_scope | protocol | none | true | false | false | 对比表行对应的统计或协议范围。 |
@@ -1274,7 +1284,7 @@ Notebook 与 repository module 的跨边界数据
 | core_ablation_claim_ids | protocol | none | false | false | false | 进入强消融 standalone claim 的核心消融标识集合。 |
 | core_ablation_ready_count | metric | none | false | false | false | 已通过正式 claim gate 的核心消融数量。 |
 | core_ablation_required_count | metric | none | false | false | false | 强消融 standalone claim 要求覆盖的核心消融数量。 |
-| attack_formal_evidence_ready | governance | none | false | false | false | 消融 claim 依赖的攻击矩阵是否已完成真实图像级 formal evidence。 |
+| attack_formal_evidence_ready | governance | none | false | false | false | 消融 claim 依赖的7项核心攻击矩阵是否已完成真实图像级 formal evidence。 |
 | ablation_real_linkage_boundary | governance | none | false | false | false | 内部消融与真实攻击闭环之间的证据链接边界说明。 |
 | ablation_claim_input_filter | governance | none | false | false | false | 内部消融 claim 输入筛选报告的嵌套摘要。 |
 | mechanism_group_count | metric | none | false | false | false | 内部消融覆盖的机制组数量。 |
@@ -1675,12 +1685,12 @@ Notebook 与 repository module 的跨边界数据
 | prompt_limit | protocol | none | false | false | false | 当前论文运行层级的 Prompt 处理上限。 |
 | paper_run_prompt_count | metric | none | false | false | false | 当前论文运行层级的 Prompt 源文件总数。 |
 | paper_run_prompt_source_path | artifact | none | false | false | false | 当前论文运行层级的 Prompt 源文件路径。 |
-| t2smark_formal_reproduction_ready | artifact | none | false | false | false | T2SMark SD3.5 Medium 正式攻击矩阵运行与 adapter 转换链路是否跑通。 |
+| t2smark_formal_reproduction_ready | artifact | none | false | false | false | T2SMark SD3.5 Medium 7项核心攻击矩阵运行与 adapter 转换链路是否跑通。 |
 | t2smark_formal_import_validation_report_path | artifact | none | false | false | false | T2SMark formal 正式导入候选记录的 validator 报告路径。 |
-| formal_attack_families | protocol | none | false | false | false | T2SMark formal 运行要求官方入口实际执行的正式攻击名称集合。 |
-| t2smark_formal_attack_names | protocol | none | false | false | false | T2SMark formal 结果必须覆盖的受治理攻击名称集合。 |
-| t2smark_formal_attack_result_count | metric | none | false | false | false | 同时包含全部正式攻击结果的 T2SMark 样本数。 |
-| t2smark_formal_attack_ready | governance | none | false | false | false | T2SMark 每个已选 Prompt 样本是否均完成全部正式攻击。 |
+| formal_attack_families | protocol | none | false | false | false | T2SMark formal 运行要求官方入口实际执行的7项核心攻击名称集合。 |
+| t2smark_formal_attack_names | protocol | none | false | false | false | T2SMark formal 结果必须覆盖的7项核心受治理攻击名称集合。 |
+| t2smark_formal_attack_result_count | metric | none | false | false | false | 同时包含7项核心正式攻击结果的 T2SMark 样本数。 |
+| t2smark_formal_attack_ready | governance | none | false | false | false | T2SMark 每个已选 test Prompt 样本是否均完成7项核心正式攻击。 |
 | example_digest_random | random | _digest_random | true | false | false | 可复现随机轨迹的 digest 字段。 |
 | example_state_intermediate | intermediate | _intermediate | true | false | true | 跨步骤保存的示例中间状态字段, 正式产物生成前需要清理或迁移。 |
 | example_artifact_temporary | temporary | _temporary | false | false | true | 可清理的示例临时产物标记。 |
@@ -1730,7 +1740,7 @@ Notebook 与 repository module 的跨边界数据
 | input_observation_count | metric | none | false | false | false | 协议写出脚本读取到的输入 observation 数量。|
 | paper_run_prompt_protocol_ready | governance | none | false | false | false | 主表 external baseline 是否已覆盖当前论文运行层级的完整 Prompt 协议。|
 | fixed_fpr_baseline_calibration_ready | governance | none | false | false | false | 主表 external baseline 是否已完成 fixed-FPR 校准。|
-| attack_matrix_baseline_detection_ready | governance | none | false | false | false | 主表 external baseline 是否已完成共同攻击矩阵下的检测。|
+| attack_matrix_baseline_detection_ready | governance | none | false | false | false | 主表 external baseline 是否已完成7项核心共同攻击矩阵下的检测。|
 | formal_evidence_paths_ready | governance | none | false | false | false | 主表 external baseline 是否已绑定正式证据路径。|
 | formal_result_ready | governance | none | false | false | false | 单个主表 external baseline 是否已具备正式共同协议结果。|
 | formal_result_ready_count | metric | none | false | false | false | 已具备正式共同协议结果的主表 external baseline 数量。|
@@ -1741,18 +1751,18 @@ Notebook 与 repository module 的跨边界数据
 | blocking_reasons | governance | none | false | false | false | 证据边界记录中阻断正式结果声明的原因集合。|
 | dominant_blocking_reasons | governance | none | false | false | false | 主表 baseline 正式导入 readiness 摘要中的主要阻断原因集合。|
 | dominant_formal_import_blocking_reasons | governance | none | false | false | false | 外部 baseline 对比运行报告中透传的正式导入主要阻断原因集合。|
-| missing_formal_attack_resource_profile | governance | none | false | false | false | 主表 baseline 候选是否缺少当前正式攻击矩阵要求的资源档位边界。|
+| missing_formal_attack_resource_profile | governance | none | false | false | false | 主表 baseline 候选是否缺少当前核心攻击矩阵要求的资源档位边界。|
 | missing_paper_run_prompt_protocol | governance | none | false | false | false | 主表 baseline 候选是否缺少当前论文运行层级的完整 Prompt 协议边界。|
 | missing_fixed_fpr_baseline_calibration | governance | none | false | false | false | 主表 baseline 候选是否缺少 fixed-FPR baseline 校准边界。|
-| missing_attack_matrix_baseline_detection | governance | none | false | false | false | 主表 baseline 候选是否缺少共同攻击矩阵检测边界。|
+| missing_attack_matrix_baseline_detection | governance | none | false | false | false | 主表 baseline 候选是否缺少7项核心共同攻击矩阵检测边界。|
 | expected_formal_template_count | metric | none | false | false | false | 单个主表 baseline 需要覆盖的正式共同协议模板数量。|
 | formal_template_record_count | metric | none | false | false | false | 主表 baseline 正式共同协议模板总数量。|
 | candidate_template_match_count | metric | none | false | false | false | 单个主表 baseline 候选记录中匹配正式模板键的数量。|
 | accepted_template_match_count | metric | none | false | false | false | 单个主表 baseline 已通过 validator 且匹配正式模板键的数量。|
 | missing_candidate_template_count | metric | none | false | false | false | 主表 baseline 正式共同协议模板中尚未出现候选记录匹配的数量。|
 | missing_formal_template_count | metric | none | false | false | false | 主表 baseline 正式共同协议模板仍缺失的数量。|
-| unexpected_candidate_record_count | metric | none | false | false | false | 候选记录中不属于当前正式攻击模板键的记录数量。|
-| unexpected_accepted_record_count | metric | none | false | false | false | 通过行级校验但不属于当前正式攻击模板键的记录数量。|
+| unexpected_candidate_record_count | metric | none | false | false | false | 候选记录中不属于当前7项核心攻击模板键的记录数量。|
+| unexpected_accepted_record_count | metric | none | false | false | false | 通过行级校验但不属于当前7项核心攻击模板键的记录数量。|
 | duplicate_candidate_template_count | metric | none | false | false | false | 候选记录中重复的 baseline 与攻击模板键数量。|
 | duplicate_accepted_template_count | metric | none | false | false | false | 已通过行级校验记录中重复的 baseline 与攻击模板键数量。|
 | formal_template_coverage_ready | governance | none | false | false | false | 单个主表 baseline 是否已覆盖所有正式共同协议模板。|
@@ -1825,11 +1835,11 @@ Notebook 与 repository module 的跨边界数据
 | minimum_clean_negative_count | metric | none | false | false | false | `legacy_only`：迁移前 clean-negative-only 规模字段；目标 profile 使用三组 `minimum_negative_role_counts` 映射。|
 | minimum_result_positive_count | metric | none | false | false | false | 结果导入 schema 要求的完整 test split positive 样本数, 与当前运行层级的 test 数量一致。|
 | minimum_result_negative_count | metric | none | false | false | false | 结果导入 schema 要求的完整 test split negative 样本数, 不允许不完整统计进入论文 claim 边界。|
-| minimum_result_attacked_negative_count | metric | none | false | false | false | 结果导入 schema 要求的每个攻击设置完整 test split attacked negative 样本数。|
+| minimum_result_attacked_negative_count | metric | none | false | false | false | 结果导入 schema 要求的每项核心攻击完整 test split attacked negative 样本数。|
 | paper_negative_count_ready | governance | none | false | false | false | 当前论文运行层级 prompt split 中 clean negative 数量是否满足最小要求。|
-| paper_attack_count | metric | none | false | false | false | 当前论文运行层级共同协议攻击矩阵中的攻击配置数量。|
+| paper_attack_count | metric | none | false | false | false | 当前论文运行层级 required 共同协议核心攻击配置数量，目标值为7。|
 | paper_method_count | metric | none | false | false | false | 当前论文运行层级共同协议覆盖的方法数量。|
-| paper_import_template_count | metric | none | false | false | false | 当前论文运行层级共同协议生成的 method × attack 导入模板数量。|
+| paper_import_template_count | metric | none | false | false | false | 当前论文运行层级共同协议生成的五种方法 × 7项核心攻击导入模板数量。|
 | paper_result_import_ready | governance | none | false | false | false | 当前论文运行层级结果候选记录是否已通过受治理导入 schema。|
 | accepted_paper_import_count | metric | none | false | false | false | 已通过 当前论文运行层级受治理导入 schema 的结果记录数量。|
 | rejected_paper_import_count | metric | none | false | false | false | 未通过 当前论文运行层级受治理导入 schema 的结果记录数量。|
@@ -1839,18 +1849,18 @@ Notebook 与 repository module 的跨边界数据
 | paper_evidence_coverage_ready | governance | none | false | false | false | 当前论文运行层级结果是否已覆盖共同协议模板并完成受治理证据导入。|
 | paper_effectiveness_gate_ready | governance | none | false | false | false | 当前论文运行层级结果是否通过方法效果门禁并允许支持优势性主张。|
 | paper_effectiveness_gate_reason | governance | none | false | false | false | 当前论文运行层级方法效果门禁未通过或通过的原因代码。|
-| slm_wm_mean_true_positive_rate | metric | none | false | false | false | SLM-WM 在共同攻击模板上的平均 true positive rate。|
-| slm_wm_mean_false_positive_rate | metric | none | false | false | false | SLM-WM 在共同攻击模板上的平均 false positive rate。|
+| slm_wm_mean_true_positive_rate | metric | none | false | false | false | SLM-WM 在7项核心共同攻击模板上的平均 true positive rate。|
+| slm_wm_mean_false_positive_rate | metric | none | false | false | false | SLM-WM 在7项核心共同攻击模板上的平均 false positive rate。|
 | slm_wm_fixed_fpr_boundary_ready | governance | none | false | false | false | SLM-WM 平均 false positive rate 是否满足 fixed-FPR 目标边界。|
 | best_baseline_mean_true_positive_rate | metric | none | false | false | false | 主表 baseline 中平均 true positive rate 最高的方法结果。|
 | best_baseline_method_id | protocol | none | false | false | false | 主表 baseline 中平均 true positive rate 最高的方法标识。|
 | missing_baseline_methods | governance | none | false | false | false | 方法效果门禁中缺失结果记录的 baseline 方法集合。|
-| method_attack_templates_aligned | governance | none | false | false | false | SLM-WM 与 baseline 是否在相同攻击模板上进行比较。|
+| method_attack_templates_aligned | governance | none | false | false | false | SLM-WM 与4个 baseline 是否在相同7项核心攻击模板上进行比较。|
 | method_attack_template_keys_unique | governance | none | false | false | false | 各方法的攻击模板结果键是否均无重复记录。|
-| paper_run_result_import_coverage_ready | governance | none | false | false | false | 当前论文运行的已接受结果是否严格覆盖 method × attack 模板。|
-| paper_run_result_missing_template_count | metric | none | false | false | false | 当前论文运行已接受结果中缺失的 method × attack 模板数。|
-| paper_run_result_unexpected_template_count | metric | none | false | false | false | 当前论文运行已接受结果中额外的 method × attack 模板数。|
-| paper_run_result_duplicate_template_count | metric | none | false | false | false | 当前论文运行已接受结果中重复的 method × attack 模板行数。|
+| paper_run_result_import_coverage_ready | governance | none | false | false | false | 当前论文运行的已接受结果是否严格覆盖五种方法 × 7项核心攻击模板。|
+| paper_run_result_missing_template_count | metric | none | false | false | false | 当前论文运行已接受结果中缺失的核心 method × attack 模板数。|
+| paper_run_result_unexpected_template_count | metric | none | false | false | false | 当前论文运行已接受结果中额外的非核心 method × attack 模板数。|
+| paper_run_result_duplicate_template_count | metric | none | false | false | false | 当前论文运行已接受结果中重复的核心 method × attack 模板行数。|
 | paper_run_template_registry_unique | governance | none | false | false | false | 当前论文运行的正式导入模板注册表是否无重复键。|
 | paper_run_supports_superiority_claim | governance | none | false | false | false | 当前论文运行层级结果是否允许在自身作用域内支撑方法优越性主张；主投稿以 pilot_paper 为准，full_paper 只增加可选扩展作用域。|
 | paper_claim_scale | governance | none | false | false | false | 当前结果或协议允许支撑的论文主张规模；pilot_paper 是主投稿作用域，full_paper 是可选扩展作用域。|
@@ -1861,7 +1871,7 @@ Notebook 与 repository module 的跨边界数据
 | paper_run_complete_result_package_ready | governance | none | false | false | false | 当前论文运行层级完整结果包是否已经覆盖所有必需输出目录并完成归档。|
 | paper_run_claim_ready | governance | none | false | false | true | 完整结果包中的兼容字段, 只能等于经过复验的 `registered_claim_set_supported`, 不表示打包流程就绪。|
 | prompt_split_digest | artifact | none | false | false | false | 共同协议使用的 prompt split 稳定摘要。|
-| attack_matrix_digest | artifact | none | false | false | false | 共同协议使用的攻击矩阵稳定摘要。|
+| attack_matrix_digest | artifact | none | false | false | false | 共同协议使用的7项核心攻击矩阵稳定摘要。|
 | fixed_fpr_protocol_digest | artifact | none | false | false | false | fixed-FPR 校准协议的稳定摘要。|
 | confidence_interval_method | protocol | none | false | false | false | 显式有界样本均值使用的分布无关置信区间方法, 当前固定为 `bounded_hoeffding`, 区间宽度由对应指标的上下界决定.|
 | confidence_level | protocol | none | false | false | false | 置信区间使用的置信水平。|
@@ -1881,7 +1891,7 @@ Notebook 与 repository module 的跨边界数据
 | score_retention_ci_low | metric | none | true | false | false | 攻击后分数保持率 Hoeffding 置信区间下界, 使用 [0,1] 观测范围和 range_width=1.|
 | score_retention_ci_high | metric | none | true | false | false | 攻击后分数保持率 Hoeffding 置信区间上界, 使用 [0,1] 观测范围和 range_width=1.|
 | baseline_formal_import_record_accepted | governance | none | true | false | false | 外部 baseline 候选记录是否已经被主表受治理导入报告接受。|
-| template_covered | governance | none | true | false | false | 单个 当前论文运行层级 method × attack 模板是否已被结果记录覆盖。|
+| template_covered | governance | none | true | false | false | 单个当前论文运行层级核心 method × attack 模板是否已被结果记录覆盖。|
 | paper_result_record_digest | artifact | none | true | false | false | 当前论文运行层级共同协议结果记录的稳定摘要。|
 | paper_result_record_id | artifact | none | true | false | false | 当前论文运行层级共同协议结果记录的稳定标识。|
 | result_source_kind | governance | none | true | false | false | 当前论文运行层级结果记录来源类型, 区分 SLM-WM 攻击矩阵与外部 baseline 结果。|
@@ -1916,26 +1926,26 @@ Notebook 与 repository module 的跨边界数据
 | input_package_paths | artifact | none | true | false | false | 参与结果物化的 zip 结果包路径集合。|
 | materialization_report | artifact | none | true | false | false | 从 Google Drive 或其他结果包物化 outputs 条目的摘要报告对象。|
 | missing_template_examples | governance | none | true | false | false | 当前论文运行层级结果记录物化摘要中用于诊断的缺失模板示例集合。|
-| paper_template_coverage_ready | governance | none | true | false | false | 当前论文运行层级结果记录是否覆盖全部 method × attack 导入模板。|
+| paper_template_coverage_ready | governance | none | true | false | false | 当前论文运行层级结果记录是否覆盖五种方法 × 7项核心攻击导入模板。|
 | paper_template_missing_count | metric | none | true | false | false | 尚未被结果记录覆盖的 当前论文运行层级导入模板数量。|
 | paper_template_covered_count | metric | none | true | false | false | 已被结果记录覆盖的 当前论文运行层级导入模板数量。|
-| paper_template_record_count | metric | none | true | false | false | 当前论文运行层级共同协议结果导入模板总数量。|
-| paper_result_record_count | metric | none | true | false | false | 当前论文运行层级共同协议结果记录物化后的记录数量。|
-| expected_superiority_row_count | metric | none | true | false | false | 正式攻击矩阵应产生的逐攻击优越性比较行数。|
-| expected_result_record_count | metric | none | true | false | false | 五种方法与正式攻击矩阵笛卡尔积对应的预期结果记录数。|
+| paper_template_record_count | metric | none | true | false | false | 当前论文运行层级7项核心共同协议结果导入模板总数量。|
+| paper_result_record_count | metric | none | true | false | false | 当前论文运行层级7项核心共同协议结果记录物化后的记录数量。|
+| expected_superiority_row_count | metric | none | true | false | false | 7项核心攻击矩阵应产生的逐攻击优越性比较行数。|
+| expected_result_record_count | metric | none | true | false | false | 五种方法与7项核心攻击矩阵笛卡尔积对应的预期结果记录数。|
 | actual_result_record_count | metric | none | true | false | false | 结果分析实际读取的记录行数, 包含可能的重复键。|
 | unique_result_record_key_count | metric | none | true | false | false | 结果记录中唯一 method × attack 模板键的数量。|
 | duplicate_result_record_count | metric | none | true | false | false | 结果记录中重复 method × attack 模板键的多余行数。|
-| missing_result_record_count | metric | none | true | false | false | 五种方法的正式 method × attack 模板中缺失的记录数。|
-| unexpected_result_record_count | metric | none | true | false | false | 不属于当前正式 method × attack 模板的记录键数。|
-| result_template_coverage_ready | governance | none | true | false | false | 结果记录是否无缺失、无额外且无重复地覆盖正式 method × attack 模板。|
+| missing_result_record_count | metric | none | true | false | false | 五种方法 × 7项核心攻击模板中缺失的记录数。|
+| unexpected_result_record_count | metric | none | true | false | false | 不属于当前五种方法 × 7项核心攻击模板的记录键数。|
+| result_template_coverage_ready | governance | none | true | false | false | 结果记录是否无缺失、无额外且无重复地覆盖五种方法 × 7项核心攻击模板。|
 | confidence_interval_row_count | metric | none | true | false | false | 结果分析表中完成披露的 method × attack 置信区间行数。|
 | per_attack_superiority_row_count | metric | none | true | false | false | 逐攻击表中 SLM-WM 与当前攻击下最强主表 baseline 的比较行数。|
 | superiority_claim_ready_count | metric | none | true | false | false | 逐攻击比较中保守置信区间下达到显著优势的披露行数, 不作为完整分析闭合的必要条件。|
-| per_attack_ci_coverage_ready | governance | none | true | false | false | 所有正式结果记录是否均形成完整、自洽且可审计的逐攻击置信区间行。|
-| per_attack_superiority_evaluation_ready | governance | none | true | false | false | 每个正式攻击是否均形成可审计的 SLM-WM 与最强主表 baseline 比较行。|
-| universal_per_attack_superiority_claim_ready | governance | none | true | false | false | 是否每个正式攻击的保守置信区间均支持 SLM-WM 显著胜出; 该字段只限定全攻击普遍优势主张。|
-| all_test_negative_populations_fixed_fpr_ready | governance | none | true | false | false | 是否由样本级原始判定重建的精确5个 seed-key 重复中, 所有方法的未攻击 clean negatives、主方法 wrong-key negatives 以及每项正式攻击下的 attacked negatives 均通过逐重复单侧 Wilson 95% 上界的最不利值门禁。|
+| per_attack_ci_coverage_ready | governance | none | true | false | false | 7项核心正式结果记录是否均形成完整、自洽且可审计的逐攻击置信区间行。|
+| per_attack_superiority_evaluation_ready | governance | none | true | false | false | 每项核心攻击是否均形成可审计的 SLM-WM 与最强主表 baseline 比较行。|
+| universal_per_attack_superiority_claim_ready | governance | none | true | false | false | 是否7项核心攻击的保守置信区间均支持 SLM-WM 显著胜出；不得外推到10项补充攻击。|
+| all_test_negative_populations_fixed_fpr_ready | governance | none | true | false | false | 是否由样本级原始判定重建的精确5个 seed-key 重复中, 所有方法的未攻击 clean negatives、主方法 wrong-key negatives 以及每项核心攻击下的 attacked negatives 均通过逐重复单侧 Wilson 95% 上界的最不利值门禁。|
 | failure_case_record_count | metric | none | true | false | false | 失败案例图绑定的真实攻击检测失败记录数量。|
 | failure_case_figure_ready | governance | none | true | false | false | 失败案例图是否已由受治理攻击记录和实际攻击图像重建。|
 | missing_result_record_examples | governance | none | true | false | false | 结果模板覆盖报告中的缺失键示例。|
@@ -2110,7 +2120,7 @@ Notebook 与 repository module 的跨边界数据
 | execution_manifest_path | artifact | none | true | false | false | 单 baseline transfer manifest 绑定的 execution manifest 路径。 |
 | execution_manifest_sha256 | provenance | none | true | false | false | 当前 baseline execution manifest 文件 SHA-256。 |
 | paper_run_name | protocol | none | true | false | false | 产物所属的唯一论文运行层级, 取值为 probe_paper、pilot_paper 或 full_paper。 |
-| formal_attack_names | protocol | none | true | false | false | 当前正式运行实际要求完整覆盖的受治理攻击名称集合。 |
+| formal_attack_names | protocol | none | true | false | false | 当前正式 baseline 运行实际要求完整覆盖的7项核心受治理攻击名称集合。 |
 | threshold | protocol | none | true | false | false | `legacy_only`：迁移前 observation 及 transfer 记录共享的 clean-negative-only 冻结阈值。目标协议不得读取该字段。 |
 | generation_protocol | protocol | none | true | false | false | common-backbone 模型、采样步数、guidance 和图像尺寸的结构化配置。 |
 | detection_protocol | protocol | none | true | false | false | 仅图像访问边界、反演步数与目标 FPR 的结构化配置。 |
@@ -2286,7 +2296,7 @@ Notebook 与 repository module 的跨边界数据
 | expected_calibration_prompt_id_digest | provenance | none | false | false | false | 结果闭合门禁从当前 Prompt 文件独立重算的 calibration Prompt 标识集合摘要。 |
 | expected_test_prompt_id_digest | provenance | none | false | false | false | 结果闭合门禁从当前受治理 Prompt 文件独立重算的规范 test split 标识集合摘要。 |
 | calibration_prompt_id_digest | provenance | none | true | false | false | 共同协议从当前受治理 Prompt 文件重算的 calibration Prompt 标识集合摘要。 |
-| attack_detection_records | artifact | none | false | false | false | 结果闭合门禁实际读取并逐条复验身份与摘要的正式攻击检测记录集合。 |
+| attack_detection_records | artifact | none | false | false | false | 结果闭合门禁实际读取并逐条复验身份与摘要的7项核心攻击检测记录集合。 |
 | attacked_image_registry | artifact | none | false | false | false | 结果闭合门禁实际读取并与攻击检测记录精确投影比对的 attacked image registry。 |
 | result_record_validation_report | artifact | none | false | false | false | 正式 result records 的 schema validation 报告, 最终门禁会独立重算并精确比对。 |
 | result_record_template_coverage | artifact | none | false | false | false | 正式 method x attack 六元身份模板覆盖表, 最终门禁会按规范注册表重建。 |
@@ -2445,12 +2455,12 @@ Notebook 与 repository module 的跨边界数据
 | official_source_cipher_contract_ready | governance | none | true | false | false | Gaussian Shading ChaCha20 known-answer 比较是否同时绑定官方源码调用契约。 |
 | stable_scientific_execution_identity | provenance | none | true | false | false | 跨 Colab 会话必须一致的代码锁、依赖锁、Python、PyTorch 与 CUDA build 身份。 |
 | stable_scientific_execution_identity_digest | provenance | none | true | false | false | stable_scientific_execution_identity 的稳定 SHA-256 摘要。 |
-| method_faithful_scientific_unit_count | metric | none | true | false | false | 当前 common-backbone 运行完整复验的 source pair 与攻击单元总数。 |
+| method_faithful_scientific_unit_count | metric | none | true | false | false | 当前 common-backbone 运行完整复验的 source pair 与核心攻击单元总数。 |
 | method_faithful_scientific_unit_record_paths | artifact | none | true | false | false | 当前 common-backbone 运行全部原子完成记录的仓库相对路径列表。 |
 | method_faithful_scientific_unit_records_digest | provenance | none | true | false | false | 按正式计划顺序排列的全部 common-backbone 原子记录稳定摘要。 |
 | method_faithful_scientific_unit_resume_ready | governance | none | true | false | false | Common-backbone 完成单元集合是否可恢复且满足 Prompt 与攻击 exact set。 |
 | method_faithful_source_prompt_unit_count | metric | none | true | false | false | Common-backbone 完整 source pair 单元覆盖的 Prompt 数量。 |
-| method_faithful_formal_attack_unit_count | metric | none | true | false | false | Common-backbone 完整 test Prompt 攻击角色单元数量。 |
+| method_faithful_formal_attack_unit_count | metric | none | true | false | false | Common-backbone 完整 test Prompt × 7项核心攻击 × 阴阳角色单元数量。 |
 | method_faithful_run_identity_path | artifact | none | true | false | false | Common-backbone 原子运行稳定身份记录的仓库相对路径。 |
 | method_faithful_run_identity_sha256 | provenance | none | true | false | false | method_faithful_run_identity_path 指向文件的字节 SHA-256。 |
 | method_faithful_run_identity_digest | provenance | none | true | false | false | Common-backbone 原子运行身份对象排除自指字段后的稳定摘要。 |
@@ -2473,12 +2483,12 @@ Notebook 与 repository module 的跨边界数据
 | t2smark_formal_unit_record_count | metric | none | true | false | false | T2SMark 运行摘要绑定的 Prompt 完成单元数量。 |
 | t2smark_formal_unit_records_digest | provenance | none | true | false | false | T2SMark 运行摘要绑定的全部 Prompt 单元记录摘要。 |
 | t2smark_formal_unit_aggregate_digest | provenance | none | true | false | false | T2SMark 运行摘要绑定的单元来源聚合摘要。 |
-| t2smark_formal_attack_expected_test_count | metric | none | true | false | false | T2SMark 正式攻击结果应覆盖的 test Prompt 数量。 |
+| t2smark_formal_attack_expected_test_count | metric | none | true | false | false | T2SMark 7项核心攻击结果应覆盖的 test Prompt 数量。 |
 | complete_result_set_ready | governance | none | true | false | false | Adapter 是否已读取连续无缺失的完整 Prompt 结果集合。 |
 | calibration_result_count | metric | none | true | false | false | Adapter 用于 fixed-FPR 冻结的 calibration Prompt 结果数量。 |
 | calibration_result_indices | protocol | none | true | false | false | Adapter fixed-FPR 校准引用的全局 Prompt 索引列表。 |
 | calibration_result_digest | provenance | none | true | false | false | 按 calibration_result_indices 排列的原始结果稳定摘要。 |
-| test_result_count | metric | none | true | false | false | Adapter 进入正式攻击聚合的 test Prompt 结果数量。 |
+| test_result_count | metric | none | true | false | false | Adapter 进入7项核心攻击聚合的 test Prompt 结果数量。 |
 | artifact_sha256 | provenance | none | true | false | false | 单个科学单元内事实文件角色到字节 SHA-256 的映射。 |
 | formal_reproduction_config | protocol | none | true | false | false | T2SMark 排除 Drive、checkout 与控制开关后的正式科学复现配置。 |
 | paper_run_identity | protocol | none | true | false | false | T2SMark 单元契约绑定的论文层级、规模和 fixed-FPR 身份。 |
@@ -2488,13 +2498,13 @@ Notebook 与 repository module 的跨边界数据
 | source_identity | provenance | none | true | false | false | T2SMark 单元契约绑定的官方 commit、固定补丁与精确工作树身份。 |
 | formal_unit_aggregate | provenance | none | true | false | false | T2SMark 完整 Prompt 单元的记录摘要与跨会话来源聚合对象。 |
 | formal_randomization_protocol | protocol | none | true | false | false | 主方法与全部正式 baseline 共同采用的生成种子和水印密钥交叉重复协议名称。 |
-| formal_randomization_protocol_digest | provenance | none | true | false | false | 完整交叉重复注册表、预注册3-key 计划、基础 latent 分布和设备无关 PRG 约定的稳定摘要。 |
+| formal_randomization_protocol_digest | provenance | none | true | false | false | 5个预登记 seed-key 配对、基础 latent 分布和设备无关 PRG 约定的稳定摘要。 |
 | formal_generation_seed_derivation_protocol | protocol | none | true | true | false | 由冻结基础 seed、repeat offset 与 Prompt 索引构造实际生成 seed 的唯一协议。 |
 | generation_seed_formula | protocol | none | true | true | false | 顶层计划声明的 `base_generation_seed_random + generation_seed_offset + prompt_index` 公式。 |
 | base_generation_seed_random | random | _random | true | true | false | 顶层运行计划保存的公开基础生成 seed；各 Prompt 实际 seed 由冻结公式派生。 |
 | formal_watermark_key_plan_protocol | protocol | none | true | false | false | 在任何正式运行前冻结3个水印 key 身份的预注册计划协议。 |
 | formal_watermark_key_plan_digest | provenance | none | true | true | false | 按 key index 排列的3个预注册 key seed 与 key material 摘要联合承诺。 |
-| watermark_key_records | protocol | none | true | true | false | 预注册3-key 计划中按 key index 排列的 seed 与 material 摘要记录。 |
+| watermark_key_records | protocol | none | true | true | false | 5个预登记 seed-key 配对中按 repeat 顺序排列的 key identity 与 material 摘要记录。 |
 | formal_randomization_repeat_registry_digest | provenance | none | true | false | false | 仅对权威5个 repeat 身份记录按规范顺序计算的稳定摘要。 |
 | formal_randomization_repeat_coverage_digest | provenance | none | true | false | false | 对实际 repeat 记录、权威注册表摘要、协议摘要和覆盖状态计算的稳定摘要。 |
 | exact_repeat_registry_ready | governance | none | true | false | false | 实际 repeat 记录是否无遗漏、无重复、无额外身份且逐字段匹配权威5重复注册表。 |
@@ -2546,15 +2556,15 @@ Notebook 与 repository module 的跨边界数据
 | annotations | protocol | none | true | false | false | T2SMark 官方数据集输入中的规范 Prompt annotation 列表。 |
 | artifact_root | artifact | none | false | false | false | Adapter 内部事实图像与原子记录的受限 outputs 根路径。 |
 | attack_condition | protocol | none | true | false | false | Observation 对应的规范攻击条件名称。 |
-| attack_execution_split | protocol | none | true | false | false | 正式攻击允许执行的唯一 Prompt split。 |
-| attack_families | protocol | none | true | false | false | 当前外部 baseline 运行按顺序冻结的正式攻击名称列表。 |
+| attack_execution_split | protocol | none | true | false | false | 核心正式攻击允许执行的唯一 Prompt split。 |
+| attack_families | protocol | none | true | false | false | 当前外部 baseline 运行按顺序冻结的7项核心攻击名称列表。 |
 | attacked_image_id | protocol | none | true | false | false | 单个攻击后图像的稳定标识。 |
 | attacked_image_manifest_path | artifact | none | true | false | false | Adapter 攻击图像事实清单的仓库相对路径。 |
 | attacked_record | artifact | none | true | false | false | 单个攻击单元用于重建 observation 与图像清单的规范事实对象。 |
 | dependency_environment_ready | governance | none | true | false | false | 当前隔离科学依赖环境是否通过完整锁门禁。 |
 | dependency_profile_digest | provenance | none | true | false | false | 科学依赖 profile 规范内容的稳定 SHA-256 摘要。 |
 | dependency_profile_id | provenance | none | true | false | false | 当前科学执行使用的受治理依赖 profile 标识。 |
-| formal_attacks | protocol | none | true | false | false | T2SMark 单个 Prompt 按正式攻击名称组织的正负攻击结果映射。 |
+| formal_attacks | protocol | none | true | false | false | T2SMark 单个 Prompt 按7项核心攻击名称组织的正负攻击结果映射。 |
 | formal_unit_contract | protocol | none | true | false | false | T2SMark runner 返回并持久化的完整原子单元契约。 |
 | gen_seed | protocol | none | true | false | false | 官方参考脚本用于生成逐 Prompt seed 的固定基值。 |
 | generated_image_digest | provenance | none | true | false | false | 生成图像文件的字节 SHA-256。 |
@@ -2711,7 +2721,7 @@ Notebook 与 repository module 的跨边界数据
 | max_absolute_embedding_pair_ssim_gap | metric | none | true | true | false | 当前 baseline 比较中所有 repeat-Prompt 绝对 SSIM 差的最大值。 |
 | quality_match_coverage_ready | governance | none | true | true | false | 单个 baseline 的质量匹配 Prompt 覆盖是否达到预注册最低比例。 |
 | quality_matched_randomization_repeat_count | metric | none | true | true | false | 质量匹配检测效应完整覆盖的注册重复数量, 固定为5。 |
-| quality_matched_attack_count | metric | none | true | true | false | 每个质量匹配 Prompt 完整覆盖的正式攻击数量。 |
+| quality_matched_attack_count | metric | none | true | true | false | 每个质量匹配 Prompt 完整覆盖的核心攻击数量，目标 exact-set 值为7。 |
 | quality_matched_observation_count | metric | none | true | true | false | 单个 baseline 质量匹配子集覆盖的 Prompt x registered-repeat x attack 原子观测数量, 不作为推断样本量。 |
 | quality_matched_statistical_unit | protocol | none | true | true | false | 质量匹配推断的独立统计单位, 固定为 prompt_cluster。 |
 | quality_matched_mean_paired_true_positive_rate_difference | metric | none | true | true | false | 在当前 baseline 质量匹配 Prompt 子集上重算的平均二元检测差值。 |
@@ -2750,10 +2760,10 @@ Notebook 与 repository module 的跨边界数据
 | baseline_method_threshold_digest | provenance | none | true | true | false | 单条配对 outcome 中对应主表 baseline 实际使用的审计冻结阈值摘要。 |
 | paired_prompt_count | metric | none | true | true | false | 单个主表 baseline 参与总体配对统计的唯一 test Prompt 数量。 |
 | randomization_repeat_count | metric | none | true | true | false | 正式配对统计实际覆盖的注册 seed-key 配对数量, 当前固定为5。 |
-| paired_attack_count | metric | none | true | true | false | 单个主表 baseline 对每个 Prompt 完整覆盖的攻击条件数量。 |
+| paired_attack_count | metric | none | true | true | false | 单个主表 baseline 对每个 Prompt 完整覆盖的核心攻击条件数量，目标值为7。 |
 | paired_observation_count | metric | none | true | true | false | 单个主表 baseline 参与总体统计的原子 Prompt x registered-repeat x attack 配对观测数量; 该数量不是独立推断样本量。 |
-| statistical_unit | protocol | none | true | true | false | 正式总体优势推断使用的独立统计单位, 固定为 prompt_cluster; 同一 Prompt 的5重复和完整攻击观测作为一个整体。 |
-| mean_paired_true_positive_rate_difference | metric | none | true | true | false | 先在每个 Prompt 的单 repeat 内跨完整攻击集合求均值, 再对同一 Prompt 的5个注册 repeat 等权平均, 最后跨 Prompt 聚合得到的 SLM-WM 相对 baseline 平均二元检测差值。 |
+| statistical_unit | protocol | none | true | true | false | 正式总体优势推断使用的独立统计单位, 固定为 prompt_cluster；同一 Prompt 的5重复和7项核心攻击观测作为一个整体。 |
+| mean_paired_true_positive_rate_difference | metric | none | true | true | false | 先在每个 Prompt 的单 repeat 内跨7项核心攻击 exact set 求均值, 再对同一 Prompt 的5个注册 repeat 等权平均, 最后跨 Prompt 聚合得到的 SLM-WM 相对 baseline 平均二元检测差值。 |
 | mean_paired_difference_ci_low | metric | none | true | true | false | Prompt-clustered bootstrap 对总体平均配对差值给出的 percentile CI 下界。 |
 | mean_paired_difference_ci_high | metric | none | true | true | false | Prompt-clustered bootstrap 对总体平均配对差值给出的 percentile CI 上界。 |
 | positive_prompt_cluster_count | metric | none | true | true | false | 平均配对差值大于0的 Prompt 聚类数量。 |
@@ -2770,12 +2780,12 @@ Notebook 与 repository module 的跨边界数据
 | bootstrap_analysis_schema | protocol | none | true | false | false | 精确5重复 bootstrap 固定分析规范, 正式值为 paired_prompt_cluster_registered_repeat_mean_bootstrap。 |
 | bootstrap_bit_generator | protocol | none | true | false | false | bootstrap 使用的 NumPy bit generator, 正式值为 PCG64。 |
 | bootstrap_quantile_method | protocol | none | true | false | false | percentile CI 的 NumPy quantile 算法, 正式值为 linear。 |
-| paired_attack_registry_digest | provenance | none | true | true | false | 配对 outcome 共同覆盖的正式攻击身份、资源档位与配置摘要 registry 的稳定摘要。 |
+| paired_attack_registry_digest | provenance | none | true | true | false | 配对 outcome 共同覆盖的7项核心攻击身份、证据职责、资源档位与配置摘要 registry 的稳定摘要。 |
 | registered_repeat_ids_digest | provenance | none | true | true | false | 对精确5个正式 randomization repeat ID 按冻结顺序计算的稳定摘要。 |
 | proposed_method_repeat_threshold_map_digest | provenance | none | true | true | false | 单个 baseline 统计行中 SLM-WM 的5个 repeat 独立 fixed-FPR 阈值映射摘要。 |
 | baseline_method_repeat_threshold_map_digest | provenance | none | true | true | false | 单个 baseline 统计行中该 baseline 的5个 repeat 独立 fixed-FPR 阈值映射摘要。 |
 | protocol_digest | provenance | none | true | true | false | 单行配对统计绑定规范 threshold 行、审计报告与审计 manifest 配置摘要的统一 fixed-FPR 协议摘要。 |
-| randomization_paired_statistics_ready | governance | none | true | true | false | 精确5重复、4个 baseline、完整 test Prompt 与攻击笛卡尔积是否已完成可重建统计; 该字段不等价于质量匹配后的论文 claim readiness。 |
+| randomization_paired_statistics_ready | governance | none | true | true | false | 精确5重复、4个 baseline、完整 test Prompt 与7项核心攻击笛卡尔积是否已完成可重建统计；补充攻击不参与该值。 |
 | paired_superiority_ready | governance | none | true | true | false | 单个主表 baseline 是否同时满足正平均差值、正 CI 下界和 Holm 校正后显著性门禁。 |
 | paired_superiority_row_count | metric | none | true | true | false | 配对总体优势表实际包含的主表 baseline 统计行数, 闭合值为4。 |
 | paired_superiority_ready_ids | governance | none | true | true | false | 已通过单方法配对总体优势门禁的主表 baseline 身份序列。 |
@@ -2815,8 +2825,8 @@ Notebook 与 repository module 的跨边界数据
 | fid_evidence_role | governance | none | false | true | false | `probe_paper` 小样本条件下 FID 的描述性证据角色。 |
 | generation_quality_against_real_reference_allowed_without_reference | governance | none | false | true | false | 缺少共同真实参考分布时是否允许声明相对真实分布的生成质量, 固定为 false。 |
 | primary_metric | protocol | none | true | true | false | 当前子主张的主要统计指标标识。 |
-| registered_attack_ids | protocol | none | true | true | true | 质量协议从正式攻击注册表解析的完整攻击标识集合。 |
-| registered_attack_registry_digest | provenance | none | true | true | true | 正式攻击标识和配置摘要集合的稳定摘要。 |
+| registered_attack_ids | protocol | none | true | true | true | 质量协议从唯一攻击 registry 解析的7项核心攻击标识 exact set；补充攻击不得进入。 |
+| registered_attack_registry_digest | provenance | none | true | true | true | 7项核心攻击标识、配置摘要和证据职责集合的稳定摘要。 |
 | paper_quality_claim_protocol | protocol | none | false | true | true | 绑定非劣效界限、Prompt 推断和攻击集合的完整质量结论协议。 |
 | paper_quality_claim_protocol_digest | provenance | none | true | true | true | 完整质量结论协议的稳定摘要。 |
 | analysis_id | protocol | none | true | true | false | Prompt 聚类推断所服务的稳定分析标识。 |
@@ -2826,8 +2836,8 @@ Notebook 与 repository module 的跨边界数据
 | confidence_interval_high | metric | none | true | true | true | Prompt 聚类 bootstrap 双侧区间上界。 |
 | prompt_cluster_inference_digest | provenance | none | true | true | true | Prompt 聚类估计、区间和随机协议的稳定摘要。 |
 | quality_subclaim_decisions | governance | none | false | true | true | 感知、独立视觉内容与分布保持三类质量子主张的独立三态决策。 |
-| per_attack_quality_decisions | governance | none | false | true | true | 以正式攻击 ID 为键保存的逐攻击质量三态决策。 |
-| cross_attack_quality_decision | governance | none | false | true | true | 只能由完整逐攻击质量决策集合派生的跨攻击三态结论。 |
+| per_attack_quality_decisions | governance | none | false | true | true | 以7项核心攻击 ID 为键保存的逐攻击质量三态决策。 |
+| cross_attack_quality_decision | governance | none | false | true | true | 只能由7项核心逐攻击质量决策 exact set 派生的跨攻击三态结论。 |
 | quality_preservation_claim_decision | governance | none | false | true | true | 三类质量子主张和跨攻击决策共同派生的总体质量保持决策。 |
 | distributional_preservation_inference | artifact | none | false | true | true | Prompt 条件 KID 的 Prompt 聚类均值与区间记录。 |
 | prompt_distribution_record_digest | provenance | none | true | false | true | 单个 Prompt 内5个 repeat 条件 KID 记录的稳定摘要。 |
@@ -2842,7 +2852,7 @@ Notebook 与 repository module 的跨边界数据
 | artifact_contract_digests | provenance | none | false | false | false | 三个 profile 完整产物契约的稳定摘要映射。 |
 | assignment_block_size | protocol | none | false | false | false | 稳定 split 分配使用的连续 Prompt 块大小。 |
 | assignment_rule | protocol | none | false | false | false | Prompt 在固定块内按风险分层和摘要顺序分配 split 的规则标识。 |
-| attack_definitions | protocol | none | false | false | false | profile 规范协议中的完整正式攻击定义与攻击随机协议。 |
+| attack_definitions | protocol | none | false | false | false | profile 规范协议中的完整攻击定义、核心/补充证据职责与攻击随机协议。 |
 | attack_records | protocol | none | true | false | false | 参与 profile 同构比较的规范攻击配置记录集合。 |
 | attack_registry_digest | provenance | none | true | false | false | 完整规范攻击记录集合的稳定摘要。 |
 | baseline_definitions | protocol | none | false | false | false | profile 规范协议中的主表 baseline 身份与输入机制定义。 |
@@ -2884,7 +2894,7 @@ Notebook 与 repository module 的跨边界数据
 | randomization_protocol | protocol | none | false | false | false | 三个 profile 共享的 seed-key 交叉重复完整协议。 |
 | ready_field | artifact | none | false | false | false | 一个统计 writer manifest 中由闭合器复验的就绪字段。 |
 | record_count_derivation | protocol | none | false | false | false | 由 Prompt、repeat 和 split 规模派生预期记录数量的结构化说明。 |
-| registered_repeat_ids | protocol | none | false | false | false | 三个 profile 共享的9个正式随机化重复有序标识。 |
+| registered_repeat_ids | protocol | none | false | false | false | 三个 profile 共享的5个正式随机化重复有序标识。 |
 | registered_repeat_registry_digest | provenance | none | false | false | false | 完整 seed-key 重复身份注册表的稳定摘要。 |
 | requirement_role | governance | none | false | false | false | gate 对应主张属于 required 还是 optional 的冻结角色。 |
 | requires_training | protocol | none | true | false | false | baseline 机制是否要求训练的规范布尔属性。 |
@@ -2906,9 +2916,9 @@ Notebook 与 repository module 的跨边界数据
 | paired_superiority_protocol_digest | provenance | none | true | true | false | 配对优势 summary、共同协议与结果分析共同绑定的统一 fixed-FPR 协议摘要。 |
 | paired_test_prompt_count | metric | none | true | true | false | 4个主表 baseline 共享的规范 test Prompt 集合大小。 |
 | paired_test_prompt_id_digest | provenance | none | true | true | false | 对4个主表 baseline 共享的规范 test Prompt 身份集合排序后计算的稳定摘要。 |
-| expected_attack_count | protocol | none | true | false | false | 当前论文层级必须完整覆盖的正式攻击配置数量。 |
+| expected_attack_count | protocol | none | true | false | false | 当前论文层级 required gate 必须完整覆盖的核心攻击配置数量，目标值为7。 |
 | method_observation_source_path_map | provenance | none | true | false | false | 主方法与四个外部 baseline 身份到 fixed-FPR 审计和配对统计实际读取的 observation 文件路径映射。 |
-| paired_superiority_scale_ready | governance | none | true | true | false | 配对结果是否覆盖当前论文运行要求的完整 test Prompt 数量与同一非空攻击集合。 |
+| paired_superiority_scale_ready | governance | none | true | true | false | 配对结果是否覆盖当前论文运行要求的完整 test Prompt 数量与同一7项核心攻击 exact set。 |
 | point_estimate_effect_direction_ready | governance | none | true | true | false | 正式结果记录中 SLM-WM 的跨攻击平均 TPR 是否高于最强主表 baseline。 |
 | official_reference_fidelity_digest | provenance | none | false | true | false | 结果闭合门禁对三方法 official-reference records、summary 与 manifest 计算的组合摘要。 |
 | paired_superiority_digest | provenance | none | false | true | false | 结果闭合门禁对配对 outcomes、统计 rows、summary 与 manifest 计算的组合摘要。 |
@@ -3374,7 +3384,7 @@ Notebook 与 repository module 的跨边界数据
 | per_ablation_frozen_protocols_digest | provenance | none | true | true | false | 逐消融冻结检测协议解析内容的稳定摘要。 |
 | ablation_rebuilt_runtime_aggregates_digest | provenance | none | true | true | false | 由冻结协议和检测原子独立重建的逐 Prompt 正式聚合字段摘要。 |
 | ablation_expected_runtime_configs_digest | provenance | none | true | true | false | 正式消融身份到精确机制配置映射的稳定摘要, 用于证明每个 ablation_id 实际执行了对应开关组合。 |
-| ablation_runtime_aggregate_rebuild_ready | governance | none | true | true | false | 消融 runtime 中全部检测判定、率、计数和攻击覆盖是否能由原子记录独立重建。 |
+| ablation_runtime_aggregate_rebuild_ready | governance | none | true | true | false | 消融 runtime 中全部检测判定、率、计数和7项核心攻击覆盖是否能由原子记录独立重建。 |
 | formal_ablation_detection_atoms_digest | provenance | none | true | true | false | 最终结果闭合报告直接绑定的全部消融正式检测原子摘要。 |
 | formal_ablation_frozen_protocols_digest | provenance | none | true | true | false | 最终结果闭合报告直接绑定的全部消融冻结协议摘要。 |
 | dataset_quality_image_records | artifact | none | true | true | false | 正式 FID/KID 每个 Prompt 的 source/comparison 图像路径、SHA 与配对身份记录。 |
@@ -3398,9 +3408,9 @@ Notebook 与 repository module 的跨边界数据
 | main_comparison_rebuilt_rows_digest | provenance | none | true | true | false | 由正式 result records 独立聚合的主比较表规范行摘要。 |
 | main_comparison_semantic_rebuild_ready | governance | none | true | true | false | 主比较表全部方法行和指标是否与正式 result records 独立聚合值一致。 |
 | attack_table_rebuilt_rows_digest | provenance | none | true | true | false | 由逐攻击 detection records 独立聚合的攻击表规范行摘要。 |
-| attack_table_semantic_rebuild_ready | governance | none | true | true | false | 攻击表全部攻击族指标是否与逐样本正式检测原子一致。 |
-| slm_result_attack_consistency_digest | provenance | none | true | true | false | SLM-WM result records 与正式攻击表交叉核对后的规范联合摘要。 |
-| slm_result_attack_consistency_ready | governance | none | true | true | false | SLM-WM 主结果行与攻击矩阵是否在攻击身份、率和样本计数上完全一致。 |
+| attack_table_semantic_rebuild_ready | governance | none | true | true | false | 核心攻击表7项攻击指标是否与逐样本正式检测原子一致。 |
+| slm_result_attack_consistency_digest | provenance | none | true | true | false | SLM-WM result records 与7项核心攻击表交叉核对后的规范联合摘要。 |
+| slm_result_attack_consistency_ready | governance | none | true | true | false | SLM-WM 主结果行与7项核心攻击矩阵是否在攻击身份、率和样本计数上完全一致。 |
 | result_analysis_semantic_rebuild_digest | provenance | none | true | true | false | 由正式结果和检测原子独立重建 CI、逐攻击结论、失败记录与 SVG 的联合摘要。 |
 | result_analysis_semantic_rebuild_ready | governance | none | true | true | false | 结果分析目录内两张派生表和失败案例表图是否可由原子记录独立重建。 |
 | failure_case_observed_false_negative_count | metric | none | true | true | false | 正式检测原子中观测到的全部假阴性数量, 不受展示上限截断。 |
@@ -3773,8 +3783,8 @@ Notebook 与 repository module 的跨边界数据
 | paired_quality_independent_semantic_feature_records_digest | provenance | none | false | true | true | 单 repeat 或5-repeat 独立视觉内容原始特征集合的稳定摘要；字段名中的 `independent_semantic` 是兼容标识符。 |
 | paired_quality_metric_record_id | provenance | none | true | false | true | base 或逐攻击 SSIM、诊断 CLIP 与独立视觉内容配对原始记录标识。 |
 | paired_quality_metric_record_digest | provenance | none | true | false | true | 配对质量指标、图像摘要、estimand scope 及两套冻结特征摘要的稳定摘要。 |
-| attack_prompt_distribution_record_digest | provenance | none | true | false | true | 单一注册攻击和 Prompt 下5个 repeat 的无偏 Prompt 条件 KID 记录摘要。 |
-| attack_conditioned_quality_component_ready | governance | none | false | true | true | 单 repeat 是否完整产生 test Prompt 乘注册攻击的四图、Inception、诊断 CLIP、独立 DINOv2 和配对指标证据。 |
+| attack_prompt_distribution_record_digest | provenance | none | true | false | true | 单一核心注册攻击和 Prompt 下5个 repeat 的无偏 Prompt 条件 KID 记录摘要。 |
+| attack_conditioned_quality_component_ready | governance | none | false | true | true | 单 repeat 是否完整产生 test Prompt × 7项核心注册攻击的四图、Inception、诊断 CLIP、独立 DINOv2 和配对指标证据。 |
 | attack_conditioned_quality_statistics_ready | governance | none | false | true | true | 5-repeat 聚合是否完成逐攻击 Prompt bootstrap 与跨攻击质量决策。 |
 | gpu_operator_preflight_ready | governance | none | false | true | true | 单 Prompt 真实 CUDA 方法算子、数值门禁、三图保持、Q/K 归因和 PRG 固定向量是否全部通过。 |
 | gpu_resource_budget_ready | governance | none | false | true | true | 已登记 GPU 资源上限是否覆盖显存、单 Prompt 时间和估计总 GPU 小时。该字段不改变方法算子结论。 |

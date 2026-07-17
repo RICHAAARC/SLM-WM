@@ -34,7 +34,7 @@
 
 该包仍排除每个 baseline 的 `source/` 官方源码缓存。运行时按固定来源登记拉取官方源码。
 
-probe_paper、pilot_paper 与 full_paper 使用同一执行包、同一方法设置、同一攻击/检测协议、同一正式角色登记和同一产物 schema，只改变 profile 登记的科学规模字段。pilot 是主投稿证据，full 是可选扩展；full 未执行不阻断 pilot 作用域内的结果包、发布候选或投稿就绪验证。单模型内部参数敏感性只作为诊断运行，不属于正式主张或 release gate。执行包内部使用自己的 Git 提交作为正式运行代码身份；`extraction_manifest.json` 保存源开发仓库提交与逐文件 SHA-256 映射。
+probe_paper、pilot_paper 与 full_paper 使用同一执行包、同一方法设置、同一核心攻击/检测协议、同一正式角色登记和同一产物 schema，只改变 profile 登记的科学规模字段。7项核心攻击在三档中保持 exact-set 同构并进入 release gate；10项补充攻击保持登记身份与参数同构，但只形成可选描述性报告。pilot 是主投稿证据，full 是可选扩展；full 未执行或补充攻击未完成不阻断 pilot 核心作用域内的结果包、发布候选或投稿就绪验证。单模型内部参数敏感性只作为诊断运行，不属于正式主张或 release gate。执行包内部使用自己的 Git 提交作为正式运行代码身份；`extraction_manifest.json` 保存源开发仓库提交与逐文件 SHA-256 映射。
 
 GPU 服务器层直接调用 `scripts/` 和更内层模块, 可以完全脱离 Notebook 产出单重复结果包、跨重复聚合证据和最终论文结果包。`paper_workflow/` 只负责 Colab 环境输入、宿主命令调用、会话恢复和归档镜像, 不保存方法机制或统计实现。删除 `paper_workflow/` 不影响服务器层运行; 删除 `scripts/`、`experiments/` 和 `paper_experiments/` 后仍可保留独立核心方法发布包。
 
