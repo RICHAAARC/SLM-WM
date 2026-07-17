@@ -119,14 +119,42 @@ def test_legacy_trace_is_explicitly_non_authoritative() -> None:
 
 @pytest.mark.constraint
 def test_project_contract_blocks_paper_production_during_method_migration() -> None:
-    """项目契约必须阻止旧实现生产新方法论文结果。"""
+    """契约与权威状态必须共同阻止旧实现生产新方法论文结果。"""
 
     text = (ROOT / ".codex" / "project_contract.md").read_text(encoding="utf-8")
-    assert "`project_unit`: `document_ecosystem_synchronization`" in text
-    assert "`target_construction_unit`: `core_method_runtime_construction`" in text
+    construction_text = CONSTRUCTION_DOCUMENT.read_text(encoding="utf-8")
+    assert "`project_unit`: `core_method_runtime_construction`" in text
+    assert "`target_construction_unit`: `experiment_protocol_validation`" in text
     assert "二者都不表示完成状态" in text
+    assert "核心方法 runtime 构建只以 `core_documents_frozen` 为启动前置条件" in text
+    assert "`document_ecosystem_synchronized` 不是核心方法实现的前置条件且当前仍未完成" in text
+    assert (
+        "进入 `experiment_protocol_validation`、正式证据生产和论文结果生产前的硬门禁"
+        in text
+    )
+    assert "攻击职责 writer、聚合器、正式证据和论文产物不属于本单元" in text
     assert "正式论文结果生产处于阻断状态" in text
     assert "历史 `c6139ced` 结果" in text
+    assert "| 三份中心文档职责分离 | `core_documents_frozen` |" in construction_text
+    assert (
+        "| 其他文档生态同步 | `protocol_documentation_updated` |"
+        in construction_text
+    )
+    assert (
+        "| 其他文档生态同步 | `document_ecosystem_synchronized` |"
+        not in construction_text
+    )
+    assert "`document_ecosystem_synchronized` 保持未完成" in construction_text
+    assert (
+        "- [ ] 机器随机化、攻击职责 writer、attack/profile registry、配置摘要、"
+        "聚合器和正式记录 producer 已按冻结目标协议完成原子同步。"
+        in construction_text
+    )
+    assert (
+        "只有 `document_ecosystem_synchronized` 与目标核心 runtime 的 CPU 一致性门禁"
+        "均闭合后，才能进入 `experiment_protocol_validation`"
+        in construction_text
+    )
 
 
 @pytest.mark.constraint

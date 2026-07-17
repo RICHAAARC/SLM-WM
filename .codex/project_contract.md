@@ -6,17 +6,18 @@
 
 ## Current Construction Unit
 
-- `project_unit`: `document_ecosystem_synchronization`
-- `target_construction_unit`: `core_method_runtime_construction`
-- `project_unit` 只表示当前治理动作；`target_construction_unit` 表示文档定稿后的下一代码构建目标，二者都不表示完成状态。完成状态只由项目构建状态规范登记。
+- `project_unit`: `core_method_runtime_construction`
+- `target_construction_unit`: `experiment_protocol_validation`
+- `project_unit` 只表示当前允许推进的构建范围；`target_construction_unit` 表示当前单元闭合后的下一构建目标，二者都不表示完成状态。完成状态只由项目构建状态规范登记。
 - 当前唯一算法原语权威来源是 `docs/builds/algorithm_primitives_content_adaptive_dual_carrier_latent_watermark.md`。
 - 当前唯一方法机制与接口设计来源是 `docs/builds/method_mechanism_design_content_adaptive_dual_carrier_latent_watermark.md`。
 - 当前唯一项目状态、保留/修改/移除清单和实施顺序来源是 `docs/builds/project_construction_state.md`。
-- 三份核心文档是当前权威设计来源；当前5重复、主投稿 profile 与等价执行复用修订尚待机器协议同步和复核。外围契约、README、构建清单和发布文档只能单向消费三份核心文档，不得复制第二套公式、接口或迁移状态。
+- 三份核心文档是当前权威设计来源，且已完成职责排他、公式唯一、接口/schema 闭合与独立复审。外围契约、README、构建清单和发布文档只能单向消费三份核心文档，不得复制第二套公式、接口或迁移状态。
 - 正式方法固定为“语义显著性自适应内容-几何双链潜空间水印”。具体数学语义、禁止主张和参数边界只以算法原语文档为准，本契约不重复定义。
 - 当前实现与目标方法的差距只以 `docs/builds/project_construction_state.md` 为准。迁移前代码和兼容记录不得覆盖三份核心文档，也不得支持目标方法主张。
 - 在核心实现、配置、登记表、CPU 性质测试和 GPU 资格化全部迁移前，正式论文结果生产处于阻断状态。历史 `c6139ced` 结果及其他旧提交结果只能作为历史工程证据。
-- 当前治理单元只同步文档、机器可读目标契约及其约束测试，不修改核心方法实现；下一构建单元才允许按有状态清单修改核心方法及其直接配置、测试和 runtime 接线。任何单元都不得扩充攻击集合或 baseline，也不得用 synthetic、proxy、placeholder 或兼容性回退替代真实方法。
+- 当前活动单元只允许按有状态清单构建核心方法 runtime 及其直接配置、CPU 性质测试和必要接口接线；激活该单元不表示任何 runtime 已实现，也不自动授权具体实现补丁。实验协议、攻击职责 writer、聚合器、正式证据和论文产物不属于本单元。任何单元都不得扩充攻击集合或 baseline，也不得用 synthetic、proxy、placeholder 或兼容性回退替代真实方法。
+- 核心方法 runtime 构建只以 `core_documents_frozen` 为启动前置条件；`document_ecosystem_synchronized` 不是核心方法实现的前置条件且当前仍未完成。机器随机化、攻击职责 writer、registry/config、profile gate、聚合器和结果包的剩余同步，是进入 `experiment_protocol_validation`、正式证据生产和论文结果生产前的硬门禁，不得因核心 runtime 单元激活而跳过。
 - 方法规范冻结只定义可证伪公式、唯一配置、失败条件、禁止替代项和验证职责，不表示实现已经通过。实现状态必须由独立测试和真实 GPU 记录决定。
 - 单个 seed-key 重复只允许形成 `supports_paper_claim=false` 的证据组件。任何正式论文结论仍必须通过版本化精确5重复聚合验证。
 - `pilot_paper` 是主投稿证据 profile；`full_paper` 是更严格 FPR 与更大样本规模的可选扩展。未运行或未闭合 `full_paper` 不阻断基于完整 `pilot_paper` 证据形成的投稿就绪状态，也不得被解释为 `full_paper` 科学结论已经成立。
