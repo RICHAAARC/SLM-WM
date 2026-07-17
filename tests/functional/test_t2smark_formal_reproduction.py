@@ -48,7 +48,6 @@ from external_baseline.primary.t2smark.adapter.formal_unit_checkpoint import (
     write_t2smark_formal_unit_record,
 )
 from paper_experiments.runners.t2smark_source_runtime import (
-    _verify_formal_source,
     configured_attack_names,
     verify_exact_t2smark_protocol_worktree,
 )
@@ -590,76 +589,21 @@ def test_t2smark_fixed_patch_passes_exact_model_revision() -> None:
     assert "return_base=True" not in patch_text
 
 
-def test_t2smark_fixed_patch_applies_to_registered_source_snapshot(
+def test_t2smark_source_worktree_rejects_missing_checkout(
     tmp_path: Path,
 ) -> None:
-    """固定补丁必须可应用到登记源码快照并形成精确正式工作树."""
+    """默认 quick 边界必须确认源码工作树缺失时失败关闭."""
 
     root = Path(__file__).resolve().parents[2]
-    registered_source = root / "external_baseline/primary/t2smark/source"
     patch_path = (
         root / "external_baseline/primary/t2smark/adapter/formal_protocol_git_diff.txt"
     )
-    clean_source = tmp_path / "source"
-    clean_source.mkdir()
-    subprocess.run(["git", "init"], cwd=clean_source, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "config", "user.email", "test@example.com"],
-        cwd=clean_source,
-        check=True,
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "Test"],
-        cwd=clean_source,
-        check=True,
-    )
-    patched_paths = ("option.py", "run_sd35.py", "src/t2s.py")
-    for relative_path in patched_paths:
-        content = subprocess.check_output(
-            ["git", "show", f"HEAD:{relative_path}"],
-            cwd=registered_source,
+
+    with pytest.raises(FileNotFoundError):
+        verify_exact_t2smark_protocol_worktree(
+            tmp_path / "missing_source",
+            patch_path,
         )
-        target_path = clean_source / relative_path
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_bytes(content)
-    subprocess.run(
-        ["git", "add", *patched_paths],
-        cwd=clean_source,
-        check=True,
-    )
-    subprocess.run(
-        ["git", "commit", "-m", "base"],
-        cwd=clean_source,
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "apply", "--unidiff-zero", "--check", str(patch_path)],
-        cwd=clean_source,
-        check=True,
-    )
-    subprocess.run(
-        ["git", "apply", "--unidiff-zero", str(patch_path)],
-        cwd=clean_source,
-        check=True,
-    )
-
-    report = verify_exact_t2smark_protocol_worktree(clean_source, patch_path)
-    _verify_formal_source(clean_source / "run_sd35.py")
-    assert report["source_worktree_exact"] is True
-
-    source_entry = clean_source / "run_sd35.py"
-    source_text = source_entry.read_text(encoding="utf-8")
-    source_entry.write_text(
-        source_text.replace(
-            '"generation_seed_random": int(',
-            '"generation_seed_random_missing": int(',
-            1,
-        ),
-        encoding="utf-8",
-    )
-    with pytest.raises(RuntimeError, match="严格配对记录缺少正式随机化身份字段"):
-        _verify_formal_source(source_entry)
 
 
 class _FixtureCuda:

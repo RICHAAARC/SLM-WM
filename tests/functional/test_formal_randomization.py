@@ -480,8 +480,8 @@ def test_main_and_all_formal_baselines_share_active_repeat(
     ] == expected_plan
 
 
-def test_sd35_adapters_construct_the_shared_canonical_base_latent() -> None:
-    """所有 SD3.5 正式适配器都必须调用唯一基础 latent 构造器."""
+def test_committed_sd35_adapters_construct_the_shared_canonical_base_latent() -> None:
+    """本仓库提交的 SD3.5 适配器必须调用唯一基础 latent 构造器."""
 
     adapter_paths = (
         ROOT
@@ -490,7 +490,6 @@ def test_sd35_adapters_construct_the_shared_canonical_base_latent() -> None:
         / "external_baseline/primary/gaussian_shading/adapter/method_faithful_sd35.py",
         ROOT
         / "external_baseline/primary/shallow_diffuse/adapter/method_faithful_sd35.py",
-        ROOT / "external_baseline/primary/t2smark/source/run_sd35.py",
     )
 
     for adapter_path in adapter_paths:

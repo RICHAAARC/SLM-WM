@@ -442,13 +442,14 @@ def test_independent_visual_quality_claim_does_not_assert_prompt_alignment() -> 
 
 
 @pytest.mark.constraint
-def test_profile_document_freezes_nine_repeats_and_four_claims() -> None:
-    """三档必须固定9重复，且输出位置只能是操作派生事实。"""
+def test_profile_document_freezes_five_repeats_and_four_claims() -> None:
+    """三档必须固定5重复，且输出位置只能是操作派生事实。"""
 
     text = (
         ROOT / "docs/builds/paper_profile_protocol_isomorphism.md"
     ).read_text(encoding="utf-8-sig")
-    assert "固定9重复" in text
+    assert "固定5重复" in text
+    assert "固定9重复" not in text
     assert "四项正式论文主张" in text
     assert "操作存储位置，不是科学协议变化字段" in text
     assert "五项论文主张" not in text
