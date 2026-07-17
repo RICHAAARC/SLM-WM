@@ -20,13 +20,13 @@
 | 重复协议文档修订日期 | `2026-07-17` |
 | profile 与等价执行文档修订日期 | `2026-07-17` |
 | 攻击证据职责文档修订日期 | `2026-07-17` |
-| 源代码基线提交 | `6f2077e13b10b28324e89f8823135d6873c9795b` |
-| GitNexus 索引提交 | `942585e7c0f95005dbee861edd01b54b32817e52` |
-| GitNexus 索引时间 | `2026-07-15T17:28:41.464Z` |
-| 工作树说明 | 存在未提交的人类可读协议文档修改；本次不把它们解释为机器协议、核心方法实现或论文证据已经迁移 |
+| 源代码基线提交 | `3c4ecc51db24e8688de46491bf1e7a8fde8f2d26` |
+| GitNexus 索引提交 | `3c4ecc51db24e8688de46491bf1e7a8fde8f2d26` |
+| GitNexus 索引时间 | `2026-07-17T04:38:24Z` |
+| 工作树说明 | 准入检查时工作树干净；本轮只准备未提交的治理顺序补丁，不把它解释为机器协议、核心方法实现或论文证据已经迁移 |
 | 核心实现判断范围 | `main/`、`experiments/`、`configs/model_sd35.yaml`、`configs/method_semantic_registry.json` 及其测试和运行入口 |
 
-当前 GitNexus 索引早于源代码基线，表中既有影响数据只作历史规划参考；进入任何符号修改前必须先重新索引并重跑 impact。正式 GPU 运行必须重新绑定完成核心迁移后的精确 clean detached 提交。本表只用于安排构建，不支持论文主张。
+当前 GitNexus 索引精确绑定源代码基线；`semantic_conditioned_latent_method_definition` 的现场 upstream impact 仍为 CRITICAL，具有9个直接依赖、84个累计影响符号和8组受影响流程。该结果只允许用于当前治理排序和后续原子切换规划；进入任何其他符号修改前仍必须对精确符号重跑 impact。正式 GPU 运行必须重新绑定完成核心迁移后的精确 clean detached 提交。本表只用于安排构建，不支持论文主张。
 
 ---
 
@@ -34,7 +34,7 @@
 
 | 构建面 | 状态 | 判断 |
 |---|---|---|
-| 三份中心文档职责分离 | `protocol_revision_pending_review` | 算法公式和6角色集合保持不变；正式随机化已修订为5个预登记 seed-key 配对，pilot 已登记为主投稿、full 已登记为可选扩展，攻击职责收敛为7项核心 required 与10项补充描述性，并新增等价执行复用边界。尚未完成独立复审和默认 pytest，因此暂不维持 `core_documents_frozen` 状态 |
+| 三份中心文档职责分离 | `protocol_revision_pending_review` | 算法公式和6角色集合保持不变；正式随机化已修订为5个预登记 seed-key 配对，pilot 已登记为主投稿、full 已登记为可选扩展，攻击职责收敛为7项核心 required 与10项补充描述性，并新增等价执行复用边界。GitNexus 已绑定当前基线，默认 pytest 已恢复执行，但独立复审尚未完成且文档生态约束测试仍有失败，因此暂不维持 `core_documents_frozen` 状态 |
 | 其他文档生态同步 | `protocol_documentation_updated` | 人类可读文档已同步6角色、5重复、pilot/full 证据职责、7/10攻击分层及缓存/恢复/并行目标；机器随机化、攻击 registry、profile gate、质量/主张过滤器、缓存身份、聚合器、配置摘要和相关测试仍需原子切换后才能重新提升为 `document_ecosystem_synchronized` |
 | 目标核心方法实现 | `not_implemented` | 正式运行仍执行716维特征、Jacobian Null Space、JVP/VJP、PSD-CG 和三时刻注入路径 |
 | 内容自适应路由 | `not_implemented` | 尚无由 Prompt 条件空间显著性、Sobel 纹理、相邻 latent 响应和公开探针敏感性共同构造的 `S/T/R/Q` 路由 |
@@ -230,17 +230,18 @@ CRITICAL 风险处理原则：先建立目标 schema 和消费者迁移清单，
 2. 确认方法机制设计不包含当前文件、保留/删除清单、GitNexus 快照和实施进度。
 3. 确认所有有状态事实只出现在本文档。
 4. 通过只针对三份中心文档的职责排他、公式唯一性、schema 闭合和交叉一致性审计。
+5. 本单元只冻结三份人类可读核心文档的规范职责；机器随机化、攻击 registry、profile gate、质量/主张过滤器、缓存身份、聚合器和运行配置的迁移不属于本状态前置条件，统一留到构建单元 B。
 
 ### 构建单元 B：其他文档生态同步
 
 1. 仅在 `core_documents_frozen` 后开始，以三份核心文档为唯一依据修订其余项目文档。
-2. 更新完整结果包、release profile、构建文档 inventory、根契约和 README 引用，不复制第二套方法定义。
-3. 删除或移出过期、冗余且不能承担唯一职责的旧文档。
-4. 运行文档生态定向测试、默认 pytest、harness 和 `git diff --check`，通过后提升为 `document_ecosystem_synchronized`。
+2. 先同步其他人类可读文档、根契约、README、完整结果包、release profile 和构建文档 inventory，再同步直接消费核心文档的机器目标契约、registry、配置摘要和约束测试；不得在本单元修改核心方法 runtime 或物化未冻结科学身份。
+3. 删除或移出过期、冗余且不能承担唯一职责的旧文档，不复制第二套公式、方法接口或迁移状态。
+4. 运行文档生态定向测试、默认 pytest、harness 和 `git diff --check`，通过后提升为 `document_ecosystem_synchronized`；机器协议迁移是该状态的完成证据，不是 `core_documents_frozen` 的循环前置条件。
 
 ### 构建单元 C：低风险内容算子
 
-1. 实现 Prompt 条件 patch 显著图、Sobel 纹理图、相邻 post-step latent 响应图和公开探针敏感性图，统一固定 `B=1`。
+1. 仅在 `document_ecosystem_synchronized` 后开始，实现 Prompt 条件 patch 显著图、Sobel 纹理图、相邻 post-step latent 响应图和公开探针敏感性图，统一固定 `B=1`。
 2. 实现 `S/T/R/Q` 路由和先高通、再按 `ceil(0.20*C*H*W)` 稳定选取的 HF-tail。
 3. 实现未掩码盲相关统计量，并记录掩码与有效能量。
 4. 增加 CPU 性质测试；默认 pytest 不加载真实大模型。
@@ -289,7 +290,7 @@ CRITICAL 风险处理原则：先建立目标 schema 和消费者迁移清单，
 
 | 状态 | 必须满足的证据 |
 |---|---|
-| `core_documents_frozen` | 三份中心文档内部职责排他、公式唯一、接口/schema 闭合，并由独立智能体按固定标准确认定向审计无阻断项 |
+| `core_documents_frozen` | 三份人类可读中心文档内部职责排他、公式唯一、接口/schema 闭合，并由独立智能体按固定标准确认定向审计无阻断项；后续机器协议迁移不属于该状态的前置条件 |
 | `document_ecosystem_synchronized` | `core_documents_frozen` 后，其余文档、契约、构建清单、结果包与 release profile 完成单向同步，冗余文档处理完成，默认 pytest、harness 和 diff 检查通过 |
 | `cpu_conformant` | 目标公式、接口、配置和禁止路径均有 CPU 性质测试；旧正式入口不可选 |
 | `routing_references_materialized` | 隔离参数划分在真实 GPU 上生成受摘要绑定的 `g_ref/r_ref/q_ref` registry，且不支持论文主张 |
@@ -308,7 +309,7 @@ CRITICAL 风险处理原则：先建立目标 schema 和消费者迁移清单，
 
 - [x] 两份无状态规范不含仓库历史、实现进度、迁移计划或保留/删除清单。
 - [x] 本文档完整列出真实实现差距、保留项、修改项、移除项和不得误删项。
-- [ ] GitNexus 已重新索引到当前源代码提交，并重新确认 CRITICAL 影响；当前索引仍停留在更早提交。
+- [x] GitNexus 已重新索引到当前源代码提交，并重新确认 CRITICAL 影响；旧方法定义现场结果为9个直接依赖、84个累计影响符号和8组受影响流程。
 - [x] CRITICAL 方法定义的9个直接依赖和主要文件均有明确处理方式及验收条件。
 - [ ] 三份文档之间没有公式、参数、职责或状态归属冲突；本轮7项核心/10项补充攻击修订仍待独立复审确认。
 - [x] 盲检测、按需几何搜索、最终图像 Q/K 归因、reference registry 和单模型敏感性在三份文档中语义一致。
@@ -316,7 +317,7 @@ CRITICAL 风险处理原则：先建立目标 schema 和消费者迁移清单，
 - [ ] 独立复审者已按固定标准确认三份核心文档不存在定稿阻断项。
 - [x] 本轮只针对三份核心文档的轻量交叉校验和格式检查已重新通过。
 
-上述项目曾在9重复、17项共同 required 攻击协议下全部通过。当前随机化目标已修订为5个预登记 seed-key 配对，攻击职责已收敛为7项核心 required 与10项补充描述性，pilot/full 证据职责和等价执行优化边界也已写入文档，算法公式和6角色集合没有变化；机器协议与 runtime 尚未同步，且当前环境缺少 pytest，无法执行默认测试。因此第3节的“三份中心文档职责分离”状态暂记为 `protocol_revision_pending_review`。只有补齐机器同步、独立复审与默认测试后才能再次提升为 `core_documents_frozen`；该提升无论是否完成，都不表示核心代码、GPU 资格化或论文证据完成。
+上述项目曾在9重复、17项共同 required 攻击协议下全部通过。当前随机化目标已修订为5个预登记 seed-key 配对，攻击职责已收敛为7项核心 required 与10项补充描述性，pilot/full 证据职责和等价执行优化边界也已写入文档，算法公式和6角色集合没有变化。默认 pytest 已在隔离 CPython 3.12.13 环境恢复执行；当前与本轮治理直接相关的失败来自字段生命周期登记尚未同步，以及旧测试仍要求固定9重复，另有外部 baseline 源码未检出的独立失败。机器协议与 runtime 尚未同步，但它们属于构建单元 B 及后续单元，不再作为 `core_documents_frozen` 的循环前置条件。当前仍缺独立复审和三份核心文档定向审计的无阻断结论，因此第3节的“三份中心文档职责分离”事实保持未完成；任何后续状态提升都不表示核心代码、GPU 资格化或论文证据完成。
 
 ---
 
