@@ -5,10 +5,13 @@ from main.methods.content.latent_response import (
     build_adjacent_latent_response_map,
 )
 from main.methods.content.routing import ContentRoutingResult, route_content_carriers
+from main.methods.content.texture import TextureResult, build_texture_complexity_map
 
 __all__ = (
     "LatentResponseResult",
     "ContentRoutingResult",
     "build_adjacent_latent_response_map",
     "route_content_carriers",
+    "TextureResult",
+    "build_texture_complexity_map",
 )

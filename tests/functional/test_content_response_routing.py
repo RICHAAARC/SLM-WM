@@ -10,7 +10,9 @@ from main.core.digest import build_stable_digest, tensor_content_sha256
 from main.methods.content import (
     ContentRoutingResult,
     LatentResponseResult,
+    TextureResult,
     build_adjacent_latent_response_map,
+    build_texture_complexity_map,
     route_content_carriers,
 )
 
@@ -24,11 +26,15 @@ def test_content_subpackage_exports_exact_public_interface() -> None:
         "ContentRoutingResult",
         "build_adjacent_latent_response_map",
         "route_content_carriers",
+        "TextureResult",
+        "build_texture_complexity_map",
     )
     assert content.LatentResponseResult is LatentResponseResult
     assert content.ContentRoutingResult is ContentRoutingResult
     assert content.build_adjacent_latent_response_map is build_adjacent_latent_response_map
     assert content.route_content_carriers is route_content_carriers
+    assert content.TextureResult is TextureResult
+    assert content.build_texture_complexity_map is build_texture_complexity_map
     assert tuple(field.name for field in fields(LatentResponseResult)) == (
         "response_map",
         "reference_response",

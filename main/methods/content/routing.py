@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import torch
+import torch.nn.functional as functional
 
 from main.core.digest import build_stable_digest, tensor_content_sha256
 
@@ -41,6 +42,38 @@ def _validate_routing_contents(name: str, value: torch.Tensor) -> None:
         raise ValueError(f"{name} must contain only finite values")
     if bool(((value < 0.0) | (value > 1.0)).any().item()):
         raise ValueError(f"{name} values must lie in [0, 1]")
+
+
+def _resize_content_map_to_latent(
+    content_map: Any,
+    latent_spatial_shape: Any,
+) -> torch.Tensor:
+    """按唯一内容图协议将单通道空间图映射到 latent H×W。"""
+
+    resolved_map = _validate_routing_metadata("content_map", content_map)
+    if (
+        not isinstance(latent_spatial_shape, (tuple, list))
+        or len(latent_spatial_shape) != 2
+        or any(type(size) is not int or size <= 0 for size in latent_spatial_shape)
+    ):
+        raise ValueError(
+            "latent_spatial_shape must contain exactly two positive integers"
+        )
+    _validate_routing_contents("content_map", resolved_map)
+    content_float = resolved_map.to(dtype=torch.float32)
+    _validate_routing_contents("content_map after float32 cast", content_float)
+    target_shape = tuple(latent_spatial_shape)
+    resized = functional.interpolate(
+        content_float,
+        size=target_shape,
+        mode="bilinear",
+        align_corners=False,
+        antialias=False,
+    )
+    if resized.shape != (1, 1, *target_shape):
+        raise ValueError("resized content map does not match latent_spatial_shape")
+    _validate_routing_contents("resized content_map", resized)
+    return resized
 
 
 def route_content_carriers(
