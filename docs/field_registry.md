@@ -97,6 +97,7 @@ Notebook 与 repository module 的跨边界数据
 | raw_hf_tail_score | metric | none | true | true | false | 未回正图像的 HF-tail 连续内容分数。 |
 | registered_key_geometry_score | metric | none | true | true | false | 最终图像对登记密钥的直接 Q/K 几何诊断分数。 |
 | wrong_key_geometry_score | metric | none | true | true | false | 最终图像对 wrong key 的直接 Q/K 几何诊断分数。 |
+| registered_wrong_key_geometry_score_margin | metric | none | true | true | false | `registered_key_geometry_score - wrong_key_geometry_score` 的最终图像 Q/K 归因诊断差值；不得参与内容阈值、救回资格或阳性判决。 |
 | aligned_hf_tail_score | metric | none | true | true | false | 回正图像的 HF-tail 连续内容分数。 |
 | geometry_measurement | provenance | none | true | true | false | 可选的 `FormalGeometryRecoveryObservation` 嵌套对象。 |
 | geometry_search_required | governance | none | true | true | false | 原始内容 margin 是否进入冻结近阈值窗口。 |
@@ -115,7 +116,7 @@ Notebook 与 repository module 的跨边界数据
 | target_parameter_prompt_subset_digest | provenance | none | true | false | false | 登记小规模 Prompt 子集的稳定摘要。 |
 | target_parameter_sensitivity_record_digest | provenance | none | true | false | false | 单因素候选、固定身份、真实测量和诊断结果的稳定摘要。 |
 | target_parameter_sensitivity_diagnostic_ready | governance | none | false | false | true | 四个轴在一个固定 repeat 上完成真实描述性诊断并通过 schema 复验；不得支持论文主张或 release gate。 |
-| attack_evidence_role | protocol | none | true | true | false | 与 `resource_profile` 正交的攻击证据职责，只允许 `core_claim_required`、`supplementary_descriptive` 或非主张 probe；不得按执行成本推断。 |
+| attack_evidence_role | protocol | none | true | true | false | 与 `resource_profile` 正交的正式观测攻击证据职责；clean 精确为 null，登记攻击只允许 `core_claim_required` 或 `supplementary_descriptive` 并与唯一 registry 一致，非主张 probe 不进入正式 success/failure 总体。 |
 | core_attack_ids | protocol | none | true | true | false | 唯一攻击 registry 中精确7项 `core_claim_required` 攻击的规范顺序集合。 |
 | supplementary_attack_ids | protocol | none | true | false | false | 唯一攻击 registry 中精确10项 `supplementary_descriptive` 攻击的规范顺序集合。 |
 | core_attack_registry_digest | provenance | none | true | true | false | 7项核心攻击 ID、完整配置摘要和证据职责的稳定 registry 摘要。 |

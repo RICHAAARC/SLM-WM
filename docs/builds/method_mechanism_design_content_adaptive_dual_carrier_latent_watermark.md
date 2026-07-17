@@ -371,6 +371,7 @@ class RawContentMeasurement:
     scoring_key_identity_digest: str
     registered_key_geometry_score: float
     wrong_key_geometry_score: float
+    registered_wrong_key_geometry_score_margin: float
     measurement_digest: str
 
 
@@ -487,7 +488,7 @@ def measure_dual_chain_watermark(
     """通过原始测量和惰性几何 factory 执行唯一的完整双链检测入口。"""
 ```
 
-`measure_raw_content_watermark()` 不得读取嵌入掩码，只能用未掩码标准载体形成盲相关统计量。它必须按 `key_relation` 从 `registered_key_material` 与 `wrong_key_material` 中选择该条观测 LF、HF-tail、原始内容分数和后续几何搜索的唯一评分密钥，并写入不泄露密钥材料的 `scoring_key_identity_digest`；两个显式密钥参数仍分别用于同一最终图像的 registered/wrong-key Q/K 并列诊断。生成端必须另行记录 LF/HF-tail 掩码均值、非零比例和有效 L2 能量；低容量导致的分数衰减必须留在 calibration/test 分布中。
+`measure_raw_content_watermark()` 不得读取嵌入掩码，只能用未掩码标准载体形成盲相关统计量。它必须按 `key_relation` 从 `registered_key_material` 与 `wrong_key_material` 中选择该条观测 LF、HF-tail、原始内容分数和后续几何搜索的唯一评分密钥，并写入不泄露密钥材料的 `scoring_key_identity_digest`；两个显式密钥参数仍分别用于同一最终图像的 registered/wrong-key Q/K 并列诊断。`registered_wrong_key_geometry_score_margin` 必须精确等于 `registered_key_geometry_score-wrong_key_geometry_score`，并与两个分数共同绑定 `measurement_digest`。三个字段只用于最终图像 Q/K 归因诊断，不得进入内容阈值、几何搜索资格、几何可靠性、救回资格或最终阳性判决。生成端必须另行记录 LF/HF-tail 掩码均值、非零比例和有效 L2 能量；低容量导致的分数衰减必须留在 calibration/test 分布中。
 
 `apply_frozen_dual_chain_decision()` 只能消费由 `experiments/` 校准并冻结的决策参数。它先计算 `raw_content_score-content_threshold`：直接通过或远离窗口时不得调用 `geometry_measurement_factory`；只有近阈值失败时才调用 `measure_geometry_recovery()`。当 `rescue_enabled=false` 且 `rescue_margin_low=None` 时，不计算窗口、不调用 factory，并固定 geometry/rescue 布尔字段为 false。`geometry_reliable` 必须由实际搜索调用返回，不能作为调用前置输入。
 
@@ -645,6 +646,10 @@ class FormalEvaluationIdentity:
     ]
     key_relation: Literal["registered_key", "wrong_key"]
     attack_id: str
+    attack_evidence_role: Literal[
+        "core_claim_required",
+        "supplementary_descriptive",
+    ] | None
     attack_config_digest: str
     attack_seed_random: int
     code_commit: str
@@ -737,6 +742,7 @@ class FormalEvaluationSuccess:
     raw_content_score: float
     registered_key_geometry_score: float
     wrong_key_geometry_score: float
+    registered_wrong_key_geometry_score_margin: float
     aligned_lf_score: float | None
     aligned_hf_tail_score: float | None
     aligned_content_score: float | None
@@ -783,6 +789,7 @@ class FormalEvaluationFailure:
     raw_content_score: float | None
     registered_key_geometry_score: float | None
     wrong_key_geometry_score: float | None
+    registered_wrong_key_geometry_score_margin: float | None
     aligned_lf_score: float | None
     aligned_hf_tail_score: float | None
     aligned_content_score: float | None
@@ -805,11 +812,11 @@ FormalEvaluationObservation: TypeAlias = (
 )
 ```
 
-`key_relation` 必须决定该条记录用于 LF、HF-tail、raw/aligned 内容分数、几何模板与最终判定的唯一评分密钥，并与 `scoring_key_identity_digest` 一致；不得只修改标签而继续使用 registered key。`content_chain_only` 必须记录 `rescue_margin_low=None`，且成功记录的 geometry/rescue 相关布尔字段全部为 false；其他启用救回协议的角色必须记录有限负值。
+`key_relation` 必须决定该条记录用于 LF、HF-tail、raw/aligned 内容分数、几何模板与最终判定的唯一评分密钥，并与 `scoring_key_identity_digest` 一致；不得只修改标签而继续使用 registered key。`attack_evidence_role` 是 `FormalEvaluationIdentity` 的组成字段，因此 success/failure 共同绑定并由 `measurement_identity_digest` 间接覆盖：当 `attack_id="clean"` 时必须精确为 `None`；当 `attack_id` 为登记攻击时只允许 `core_claim_required` 或 `supplementary_descriptive`，且必须与唯一 attack registry 一致。不得从 `resource_profile` 推断；非主张 probe 不得进入本正式联合 schema。`content_chain_only` 必须记录 `rescue_margin_low=None`，且成功记录的 geometry/rescue 相关布尔字段全部为 false；其他启用救回协议的角色必须记录有限负值。
 
-成功记录的全部必需数值必须有限且非空；没有启动几何搜索时 `geometry_measurement=None`，启动并完成搜索时必须显式保存不含 Tensor 的 `FormalGeometryRecoveryObservation`。运行时 `GeometryRecoveryMeasurement.aligned_image` 不得直接进入 JSONL；实际回正图像只能通过 SHA-256、成员路径和尺寸进入正式嵌套对象。`geometry_measurement_digest` 绑定嵌套对象除自身外全部字段，顶层 `measurement_identity_digest` 再绑定 `identity`、顶层测量、source/evaluated 图像身份和可选嵌套摘要。若失败发生在几何测量完成之后，失败记录也必须保留已经完成的嵌套对象。
+成功记录的全部必需数值必须有限且非空；`registered_wrong_key_geometry_score_margin` 必须精确等于同一记录的 `registered_key_geometry_score-wrong_key_geometry_score`。没有启动几何搜索时 `geometry_measurement=None`，启动并完成搜索时必须显式保存不含 Tensor 的 `FormalGeometryRecoveryObservation`。运行时 `GeometryRecoveryMeasurement.aligned_image` 不得直接进入 JSONL；实际回正图像只能通过 SHA-256、成员路径和尺寸进入正式嵌套对象。`geometry_measurement_digest` 绑定嵌套对象除自身外全部字段，顶层 `measurement_identity_digest` 再绑定 `identity`、顶层测量（包括该差值）、source/evaluated 图像身份和可选嵌套摘要。若失败发生在几何测量完成之后，失败记录也必须保留已经完成的嵌套对象。
 
-攻击生成、Q/K 提取、VAE 编码、图像持久化或其他登记阶段失败时，必须形成 `FormalEvaluationFailure`，不能删除该样本。失败记录保持同一 Prompt/repeat/role/key/attack/code/config/decision 身份；失败发生前已经取得的图像身份、分数和布尔事实照实记录，尚未取得的字段记为 `None`。`failure_code` 必须来自受治理的稳定错误码且不得以 `_placeholder` 结尾。失败记录禁止使用 NaN、0、随机向量或 placeholder 冒充缺失测量，固定 `evidence_positive=false`，按其 `sample_role/key_relation/attack_id` 进入对应正式检出率或 FPR 分母且对分子贡献0。质量测量缺失必须另报失败计数，不得插补质量分数。成功/失败两类使用同一三档 schema 和聚合规则。
+攻击生成、Q/K 提取、VAE 编码、图像持久化或其他登记阶段失败时，必须形成 `FormalEvaluationFailure`，不能删除该样本。失败记录保持同一 Prompt/repeat/role/key/attack/attack-evidence/code/config/decision 身份；失败发生前已经取得的图像身份、分数和布尔事实照实记录，尚未取得的字段记为 `None`。当两个最终图像几何分数尚未同时取得时，`registered_wrong_key_geometry_score_margin=None`；当二者均已取得时，该差值必须同步取得并精确等于两者之差。`failure_code` 必须来自受治理的稳定错误码且不得以 `_placeholder` 结尾。失败记录禁止使用 NaN、0、随机向量或 placeholder 冒充缺失测量，固定 `evidence_positive=false`，按其 `sample_role/key_relation/attack_id` 进入对应正式检出率或 FPR 分母且对分子贡献0。质量测量缺失必须另报失败计数，不得插补质量分数。成功/失败两类使用同一三档 schema 和聚合规则。
 
 质量记录必须以同一 `method_role`、`prompt_id`、repeat、sample role、attack ID 和图像 SHA-256 连接 SSIM、独立视觉内容特征与分布质量特征；不得只靠行号连接。
 
@@ -1007,12 +1014,12 @@ full_paper = 0.001
 ### 11.1 输入与身份
 
 - `prompt_text_digest` 和 `generation_input_identity_digest`，分别绑定 Prompt 文本及完整生成输入身份。
-- `method_role`、`prompt_id`、`randomization_repeat_id`、`sample_role`、`key_relation`、`attack_id`。
+- `method_role`、`prompt_id`、`randomization_repeat_id`、`sample_role`、`key_relation`、`attack_id` 和可空 `attack_evidence_role`；clean 固定为空，登记攻击必须与唯一 registry 一致，非主张 probe 不得进入正式联合 schema。
 - `generation_seed_random`、`attack_seed_random`、`scoring_key_identity_digest`、`prg_version` 和 `prg_identity_digest`；`key_relation` 必须与实际评分密钥一致。
 - 成功记录必须包含 source/evaluated 图像 SHA-256、宽高和持久化成员路径；失败记录只对已经真实产生的图像填写这些身份，其余显式为 `None`。两类记录都必须包含攻击配置摘要和攻击随机种子。
 - `model_id`、`model_revision`、`runtime_component_identity_digest` 和 `dependency_profile_digest`。
 - `method_definition_digest`、`runtime_config_digest` 和 `content_routing_reference_registry_digest`。
-- `measurement_status`、可空 `failure_boundary/failure_code` 和 `measurement_identity_digest`；摘要必须绑定本记录除自身外的全部身份、显式 null 与测量字段，成功记录还要绑定嵌套几何测量对象的完整摘要。
+- `measurement_status`、可空 `failure_boundary/failure_code` 和 `measurement_identity_digest`；摘要必须绑定本记录除自身外的全部身份、显式 null 与测量字段，包括 `attack_evidence_role` 和 `registered_wrong_key_geometry_score_margin`，成功记录还要绑定嵌套几何测量对象的完整摘要。
 
 ### 11.2 内容链
 
@@ -1033,7 +1040,7 @@ full_paper = 0.001
 - 几何更新前后关系分数。
 - 几何更新、接受比例和预算记录。
 - Q/K 四分量、极性、稳定 token、pair 权重和关系公式身份。
-- 最终图像 registered-key/wrong-key 几何分数；GPU 资格化另记录 matched content-only 归因差值。
+- 最终图像 registered-key/wrong-key 几何分数及其 `registered_wrong_key_geometry_score_margin`；该差值只作 Q/K 归因诊断，GPU 资格化另记录 matched content-only 归因差值。
 - 恢复变换、output-to-input 坐标约定、规范候选索引、捕获域、候选目标、coverage、unique ratio、inlier、residual、registration objective margin 和直接 Q/K identity 门禁。
 
 ### 11.4 写回与检测

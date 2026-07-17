@@ -20,10 +20,10 @@
 | 重复协议文档修订日期 | `2026-07-17` |
 | profile 与等价执行文档修订日期 | `2026-07-17` |
 | 攻击证据职责文档修订日期 | `2026-07-17` |
-| 源代码基线提交 | `3c4ecc51db24e8688de46491bf1e7a8fde8f2d26` |
-| GitNexus 索引提交 | `3c4ecc51db24e8688de46491bf1e7a8fde8f2d26` |
-| GitNexus 索引时间 | `2026-07-17T04:38:24Z` |
-| 工作树说明 | 准入检查时工作树干净；本轮只准备未提交的治理顺序补丁，不把它解释为机器协议、核心方法实现或论文证据已经迁移 |
+| 源代码基线提交 | `bcce07e0b120886b49d13b580592dbc885aebc99` |
+| GitNexus 索引提交 | `bcce07e0b120886b49d13b580592dbc885aebc99` |
+| GitNexus 索引时间 | `2026-07-17T05:34:14Z` |
+| 工作树说明 | 治理顺序补丁已作为 `bcce07e0b120886b49d13b580592dbc885aebc99` 单独提交；当前只准备未提交的文档/schema 闭合补丁，不把它解释为机器协议、核心方法实现或论文证据已经迁移 |
 | 核心实现判断范围 | `main/`、`experiments/`、`configs/model_sd35.yaml`、`configs/method_semantic_registry.json` 及其测试和运行入口 |
 
 当前 GitNexus 索引精确绑定源代码基线；`semantic_conditioned_latent_method_definition` 的现场 upstream impact 仍为 CRITICAL，具有9个直接依赖、84个累计影响符号和8组受影响流程。该结果只允许用于当前治理排序和后续原子切换规划；进入任何其他符号修改前仍必须对精确符号重跑 impact。正式 GPU 运行必须重新绑定完成核心迁移后的精确 clean detached 提交。本表只用于安排构建，不支持论文主张。
@@ -34,7 +34,7 @@
 
 | 构建面 | 状态 | 判断 |
 |---|---|---|
-| 三份中心文档职责分离 | `protocol_revision_pending_review` | 算法公式和6角色集合保持不变；正式随机化已修订为5个预登记 seed-key 配对，pilot 已登记为主投稿、full 已登记为可选扩展，攻击职责收敛为7项核心 required 与10项补充描述性，并新增等价执行复用边界。GitNexus 已绑定当前基线，默认 pytest 已恢复执行，但独立复审尚未完成且文档生态约束测试仍有失败，因此暂不维持 `core_documents_frozen` 状态 |
+| 三份中心文档职责分离 | `protocol_revision_pending_review` | 算法公式和6角色集合保持不变；正式随机化已修订为5个预登记 seed-key 配对，pilot 已登记为主投稿、full 已登记为可选扩展，攻击职责收敛为7项核心 required 与10项补充描述性，并新增等价执行复用边界。首次独立复审发现 `attack_evidence_role` 未闭合到正式联合 schema、registered/wrong-key 几何差值缺少持久化字段两项阻断；当前未提交文档补丁已闭合两项，并经新一轮独立只读复审确认本次文档/schema 定稿范围无剩余阻断，但机器字段生命周期和旧约束测试尚未同步，因此不修改本行正式状态且不得提升 `core_documents_frozen` |
 | 其他文档生态同步 | `protocol_documentation_updated` | 人类可读文档已同步6角色、5重复、pilot/full 证据职责、7/10攻击分层及缓存/恢复/并行目标；机器随机化、攻击 registry、profile gate、质量/主张过滤器、缓存身份、聚合器、配置摘要和相关测试仍需原子切换后才能重新提升为 `document_ecosystem_synchronized` |
 | 目标核心方法实现 | `not_implemented` | 正式运行仍执行716维特征、Jacobian Null Space、JVP/VJP、PSD-CG 和三时刻注入路径 |
 | 内容自适应路由 | `not_implemented` | 尚无由 Prompt 条件空间显著性、Sobel 纹理、相邻 latent 响应和公开探针敏感性共同构造的 `S/T/R/Q` 路由 |
@@ -317,7 +317,7 @@ CRITICAL 风险处理原则：先建立目标 schema 和消费者迁移清单，
 - [ ] 独立复审者已按固定标准确认三份核心文档不存在定稿阻断项。
 - [x] 本轮只针对三份核心文档的轻量交叉校验和格式检查已重新通过。
 
-上述项目曾在9重复、17项共同 required 攻击协议下全部通过。当前随机化目标已修订为5个预登记 seed-key 配对，攻击职责已收敛为7项核心 required 与10项补充描述性，pilot/full 证据职责和等价执行优化边界也已写入文档，算法公式和6角色集合没有变化。默认 pytest 已在隔离 CPython 3.12.13 环境恢复执行；当前与本轮治理直接相关的失败来自字段生命周期登记尚未同步，以及旧测试仍要求固定9重复，另有外部 baseline 源码未检出的独立失败。机器协议与 runtime 尚未同步，但它们属于构建单元 B 及后续单元，不再作为 `core_documents_frozen` 的循环前置条件。当前仍缺独立复审和三份核心文档定向审计的无阻断结论，因此第3节的“三份中心文档职责分离”事实保持未完成；任何后续状态提升都不表示核心代码、GPU 资格化或论文证据完成。
+上述项目曾在9重复、17项共同 required 攻击协议下全部通过。当前随机化目标已修订为5个预登记 seed-key 配对，攻击职责已收敛为7项核心 required 与10项补充描述性，pilot/full 证据职责和等价执行优化边界也已写入文档，算法公式和6角色集合没有变化。默认 pytest 已在隔离 CPython 3.12.13 环境恢复执行；当前与本轮治理直接相关的既有失败来自字段生命周期登记尚未同步，以及旧测试仍要求固定9重复，另有外部 baseline 源码未检出的独立失败。首次独立复审另外确认正式联合 schema 缺少 `attack_evidence_role`，且最终图像 registered/wrong-key 几何差值没有显式持久化字段；本轮只准备文档与规范 schema 闭合补丁，并登记 `registered_wrong_key_geometry_score_margin`，不修改机器 registry 或 runtime。新一轮独立只读复审已确认两项原阻断在本次文档/schema 定稿范围内闭合，且没有新增文档定稿阻断；机器字段生命周期、旧9重复测试和外部 baseline 源仍是明确的后续或环境门禁。机器协议与 runtime 尚未同步，但它们属于构建单元 B 及后续单元，不再作为 `core_documents_frozen` 的循环前置条件。第3节的正式状态和 `core_documents_frozen` 均保持不变；任何后续状态提升都不表示核心代码、GPU 资格化或论文证据完成。
 
 ---
 
