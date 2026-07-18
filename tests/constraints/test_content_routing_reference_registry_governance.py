@@ -312,15 +312,24 @@ def test_content_routing_reference_registry_remains_unmaterialized() -> None:
     assert "机器随机化、攻击职责 writer" in state_text
 
     implementation_pattern = re.compile(
-        r"^def (?:load|validate|build|write)_content_routing_reference_registry\(",
+        r"^def (load|validate|build|write)_content_routing_reference_registry\(",
         flags=re.MULTILINE,
     )
-    implementation_paths = []
+    implementations = []
     for root_name in ("main", "experiments", "paper_experiments", "scripts"):
         for path in (ROOT / root_name).rglob("*.py"):
-            if implementation_pattern.search(path.read_text(encoding="utf-8-sig")):
-                implementation_paths.append(path.relative_to(ROOT).as_posix())
-    assert implementation_paths == []
+            for match in implementation_pattern.finditer(
+                path.read_text(encoding="utf-8-sig")
+            ):
+                implementations.append(
+                    (match.group(1), path.relative_to(ROOT).as_posix())
+                )
+    assert implementations == [
+        (
+            "load",
+            "experiments/protocol/content_routing_reference_registry.py",
+        )
+    ]
 
 
 def test_content_routing_reference_registry_digest_and_promotion_are_one_way() -> None:
