@@ -76,6 +76,45 @@ def _resize_content_map_to_latent(
     return resized
 
 
+def _route_content_observations_to_latent(
+    saliency_map: Any,
+    texture_map: Any,
+    response_map: Any,
+    local_sensitivity_map: Any,
+) -> ContentRoutingResult:
+    """将原始内容观测统一映射到响应图的 latent 空间后执行路由。"""
+
+    named_maps = (
+        ("saliency_map", _validate_routing_metadata("saliency_map", saliency_map)),
+        ("texture_map", _validate_routing_metadata("texture_map", texture_map)),
+        ("response_map", _validate_routing_metadata("response_map", response_map)),
+        (
+            "local_sensitivity_map",
+            _validate_routing_metadata(
+                "local_sensitivity_map", local_sensitivity_map
+            ),
+        ),
+    )
+    expected_device = named_maps[0][1].device
+    if any(value.device != expected_device for _, value in named_maps[1:]):
+        raise ValueError("content observation maps must use the same device")
+
+    response = named_maps[2][1]
+    _validate_routing_contents("response_map", response)
+    target_shape = tuple(response.shape[-2:])
+    saliency = _resize_content_map_to_latent(named_maps[0][1], target_shape)
+    texture = _resize_content_map_to_latent(named_maps[1][1], target_shape)
+    local_sensitivity = _resize_content_map_to_latent(
+        named_maps[3][1], target_shape
+    )
+    return route_content_carriers(
+        saliency,
+        texture,
+        response,
+        local_sensitivity,
+    )
+
+
 def route_content_carriers(
     saliency_map: Any,
     texture_map: Any,
