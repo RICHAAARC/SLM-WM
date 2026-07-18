@@ -35,14 +35,22 @@ _EXPECTED_OPEN_FLAGS = (
 )
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 _BINARY32_PATTERN = re.compile(r"[0-9a-f]{8}")
+_GIT_COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
 _SUPPORTED_PREDICATES = frozenset(
     {
+        "exact_bool",
         "exact_object",
         "exact_list",
+        "exact_null",
+        "exact_null_or_nonempty_exact_str",
+        "exact_status_token",
         "exact_token_str",
+        "git_commit_lower_hex_str",
         "nonempty_exact_str",
         "sha256_lower_hex_str",
         "binary32_lower_hex_str",
+        "positive_int_list",
+        "safe_relative_posix_path_str",
         "strict_positive_int",
         "nonnegative_int",
         "strict_positive_finite_json_float",
@@ -174,12 +182,30 @@ def _validate_predicate(
     *,
     label: str,
 ) -> None:
-    if predicate == "exact_object":
+    if predicate == "exact_bool":
+        valid = type(value) is bool
+    elif predicate == "exact_object":
         valid = type(value) is dict
     elif predicate == "exact_list":
         valid = type(value) is list
+    elif predicate == "exact_null":
+        valid = value is None
+    elif predicate == "exact_null_or_nonempty_exact_str":
+        valid = value is None or (
+            type(value) is str
+            and bool(value)
+            and value == value.strip()
+            and not any(character in value for character in "\0\r\n\t")
+        )
+    elif predicate == "exact_status_token":
+        valid = type(value) is str
     elif predicate == "exact_token_str":
         valid = type(value) is str
+    elif predicate == "git_commit_lower_hex_str":
+        valid = (
+            type(value) is str
+            and _GIT_COMMIT_PATTERN.fullmatch(value) is not None
+        )
     elif predicate == "nonempty_exact_str":
         valid = (
             type(value) is str
@@ -191,6 +217,22 @@ def _validate_predicate(
         valid = type(value) is str and _SHA256_PATTERN.fullmatch(value) is not None
     elif predicate == "binary32_lower_hex_str":
         valid = type(value) is str and _BINARY32_PATTERN.fullmatch(value) is not None
+    elif predicate == "positive_int_list":
+        valid = (
+            type(value) is list
+            and all(type(member) is int and member > 0 for member in value)
+        )
+    elif predicate == "safe_relative_posix_path_str":
+        valid = False
+        if (
+            type(value) is str
+            and bool(value)
+            and not value.startswith("/")
+            and "\\" not in value
+            and not any(character in value for character in "\0\r\n\t")
+        ):
+            segments = value.split("/")
+            valid = all(segment not in {"", ".", ".."} for segment in segments)
     elif predicate == "strict_positive_int":
         valid = type(value) is int and value > 0
     elif predicate == "nonnegative_int":
@@ -208,11 +250,36 @@ def _validate_predicate(
 def _validate_rule(value: Any, rule: dict[str, Any], *, label: str) -> None:
     if type(rule) is not dict or type(rule.get("predicate")) is not str:
         raise ValueError(f"machine contract rule is invalid for {label}")
-    _validate_predicate(value, rule["predicate"], label=label)
+    predicate = rule["predicate"]
+    _validate_predicate(value, predicate, label=label)
     if "exact_value" in rule and value != rule["exact_value"]:
         raise ValueError(f"{label} does not match the governed exact value")
     if "exact_length" in rule and len(value) != rule["exact_length"]:
         raise ValueError(f"{label} does not match the governed exact length")
+    has_allowed_tokens = "allowed_tokens" in rule
+    if predicate == "exact_status_token":
+        allowed_tokens = rule.get("allowed_tokens")
+        if (
+            type(allowed_tokens) is not tuple
+            or not allowed_tokens
+            or not all(type(token) is str for token in allowed_tokens)
+            or len(set(allowed_tokens)) != len(allowed_tokens)
+            or value not in allowed_tokens
+        ):
+            raise ValueError(f"{label} is not a governed allowed token")
+    elif has_allowed_tokens:
+        raise ValueError(f"{label} attaches allowed_tokens to an invalid predicate")
+    if "exact_prefix" in rule:
+        exact_prefix = rule["exact_prefix"]
+        if (
+            predicate != "positive_int_list"
+            or type(exact_prefix) is not tuple
+            or not exact_prefix
+            or not all(type(member) is int and member > 0 for member in exact_prefix)
+            or len(value) < len(exact_prefix)
+            or tuple(value[: len(exact_prefix)]) != exact_prefix
+        ):
+            raise ValueError(f"{label} does not match the governed exact prefix")
 
 
 def _validate_exact_object(
