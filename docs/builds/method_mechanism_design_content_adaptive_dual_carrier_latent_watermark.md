@@ -979,6 +979,13 @@ CONTENT_ROUTING_REFERENCE_REGISTRY_MACHINE_CONTRACT = {
         "strict_positive_int": "type(value) is int and value > 0",
         "nonnegative_int": "type(value) is int and value >= 0",
         "strict_positive_finite_json_float": "type(value) is float and isfinite(value) and value > 0 and float32(value) remains finite and positive",
+        "exact_bool": "type(value) is bool",
+        "exact_null": "value is None",
+        "exact_null_or_nonempty_exact_str": "value is None or (type(value) is str and value is nonempty, stripped, and contains no NUL, CR, LF, or TAB)",
+        "exact_status_token": "type(value) is str and value equals one token from the governed allowed token tuple",
+        "git_commit_lower_hex_str": "type(value) is str and fullmatch('[0-9a-f]{40}', value)",
+        "positive_int_list": "type(value) is list and every member has type int, is not bool, and is greater than zero",
+        "safe_relative_posix_path_str": "type(value) is str and value is a nonempty relative POSIX path with no NUL, CR, LF, TAB, backslash, empty segment, dot segment, or parent segment",
     },
     "registry_top_level_field_rules": {
         "registry_schema": {
@@ -1331,6 +1338,542 @@ CONTENT_ROUTING_REFERENCE_REGISTRY_MACHINE_CONTRACT = {
             "device_index",
         ),
     },
+    "materialization_contract": {
+        "contract_schema_token": "content_routing_reference_materialization_contract_v1",
+        "type_predicate_extensions": (
+            "exact_bool",
+            "exact_null",
+            "exact_null_or_nonempty_exact_str",
+            "exact_status_token",
+            "git_commit_lower_hex_str",
+            "positive_int_list",
+            "safe_relative_posix_path_str",
+        ),
+        "generation_input_identity_payload_contract": {
+            "field_rules": {
+                "prompt_id": {
+                    "predicate": "nonempty_exact_str",
+                },
+                "prompt_text": {
+                    "predicate": "nonempty_exact_str",
+                },
+                "prompt_text_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "generation_seed_random": {
+                    "predicate": "nonnegative_int",
+                },
+                "base_latent_identity_digest_random": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "formal_randomization_protocol_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "model_id": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "stabilityai/stable-diffusion-3.5-medium",
+                },
+                "model_revision": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
+                },
+                "negative_prompt": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "low quality, blurry",
+                },
+                "width": {
+                    "predicate": "strict_positive_int",
+                    "exact_value": 512,
+                },
+                "height": {
+                    "predicate": "strict_positive_int",
+                    "exact_value": 512,
+                },
+                "inference_steps": {
+                    "predicate": "strict_positive_int",
+                    "exact_value": 20,
+                },
+                "guidance_scale": {
+                    "predicate": "strict_positive_finite_json_float",
+                    "exact_value": 4.5,
+                },
+                "formal_method_config_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "dependency_profile_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "formal_execution_lock_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "runtime_component_identity_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+            },
+            "prompt_text_digest_rule": "build_stable_digest({'prompt_text': exact_prompt_text})",
+            "digest_rule": "build_stable_digest(exact_generation_input_identity_payload)",
+            "order_source": "method_parameter_partition_generation_member_order",
+            "cross_field_invariants": (
+                "model_id_and_revision_equal_registry_and_manifest",
+                "dependency_profile_digest_equals_registry_and_manifest",
+                "formal_execution_lock_digest_equals_registry_and_manifest",
+                "runtime_component_identity_digest_equals_registry_and_manifest",
+                "prompt_and_seed_projection_order_equals_method_parameter_member_order",
+            ),
+        },
+        "base_latent_identity_reconstruction_contract": {
+            "builder_module": "experiments.protocol.formal_randomization",
+            "builder_symbol": "build_canonical_sd35_base_latent",
+            "identity_reconstruction_device": "cpu",
+            "producer_execution_device_source": "actual_qualified_pipeline_execution_device",
+            "shape": (1, 16, 64, 64),
+            "shape_derivation_rule": "exact_512_by_512_rgb_generation_with_vae_scale_8_and_16_latent_channels",
+            "dtype": "torch.float16",
+            "argument_sources": {
+                "shape": "base_latent_identity_reconstruction_contract.shape",
+                "generation_seed_random": "generation_input_identity_payload.generation_seed_random",
+                "model_id": "generation_input_identity_payload.model_id",
+                "model_revision": "generation_input_identity_payload.model_revision",
+                "qualification_device": "base_latent_identity_reconstruction_contract.identity_reconstruction_device",
+                "producer_device": "actual_qualified_pipeline_execution_device",
+                "dtype": "base_latent_identity_reconstruction_contract.dtype",
+            },
+            "returned_identity_fields": (
+                "generation_seed_random",
+                "base_latent_generation_protocol",
+                "base_latent_keyed_prg_version",
+                "base_latent_keyed_prg_protocol_digest",
+                "formal_randomization_protocol_digest",
+                "base_latent_dtype",
+                "base_latent_shape",
+                "base_latent_content_digest_random",
+                "base_latent_identity_digest_random",
+            ),
+            "digest_rule": "build_stable_digest(exact_helper_identity_without_base_latent_identity_digest_random)",
+            "cross_field_invariants": (
+                "returned_generation_seed_random_equals_generation_input_payload",
+                "returned_formal_randomization_protocol_digest_equals_generation_input_payload",
+                "returned_base_latent_generation_protocol_equals_formal_randomization_protocol_record",
+                "returned_keyed_prg_version_and_digest_equal_formal_randomization_protocol_record",
+                "returned_base_latent_dtype_equals_torch_float16",
+                "returned_base_latent_shape_equals_1_16_64_64",
+                "returned_base_latent_identity_digest_random_equals_generation_input_payload",
+                "returned_base_latent_content_digest_random_is_rebuilt_not_caller_supplied",
+                "producer_cuda_tensor_roundtrip_content_digest_equals_returned_base_latent_content_digest_random",
+                "cuda_rng_and_alternate_latent_construction_are_forbidden",
+            ),
+        },
+        "ordered_generation_input_record_contract": {
+            "container_predicate": "exact_list",
+            "field_rules": {
+                "reference_observation_member_sequence_index": {
+                    "predicate": "nonnegative_int",
+                },
+                "generation_input_identity_payload": {
+                    "predicate": "exact_object",
+                },
+                "generation_input_identity_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+            },
+            "nested_contracts": {
+                "generation_input_identity_payload": "generation_input_identity_payload_contract",
+            },
+            "length_rule": "generation_input_record_count_equals_method_parameter_sample_count",
+            "order_rule": "sequence_indices_are_exactly_zero_through_sample_count_minus_one",
+            "prompt_projection_rule": "ordered_prompt_id_and_prompt_text_digest_projection_matches_registry_digest",
+            "seed_projection_rule": "ordered_generation_seed_random_projection_matches_registry_digest",
+        },
+        "raw_member_file_record_contract": {
+            "field_rules": {
+                "reference_observation_kind": {
+                    "predicate": "exact_token_str",
+                    "exact_value_source": "parent_population_kind",
+                },
+                "reference_observation_member_sequence_index": {
+                    "predicate": "nonnegative_int",
+                },
+                "generation_input_identity_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "path": {
+                    "predicate": "safe_relative_posix_path_str",
+                },
+                "sha256": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "tensor_shape": {
+                    "predicate": "positive_int_list",
+                    "exact_length": 4,
+                    "exact_prefix": (1, 1),
+                },
+                "tensor_dtype": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "torch.float32",
+                },
+                "tensor_content_sha256": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+            },
+            "encoding_token": "flat_nchw_ieee754_binary32_big_endian_v1",
+            "encoding_rule": "concatenate_struct_pack_big_endian_float_for_flat_nchw_cpu_float32_values",
+            "decoding_rule": "decode_big_endian_binary32_then_rebuild_cpu_float32_tensor",
+            "file_length_rule": "exact_file_length_equals_product_tensor_shape_times_four",
+            "file_sha256_rule": "sha256(exact_raw_member_file_bytes)",
+            "tensor_digest_rule": "tensor_content_sha256(rebuilt_cpu_float32_tensor)",
+            "path_templates": {
+                "gradient_magnitude_rgb_pre_interpolation": "raw/gradient_magnitude_rgb_pre_interpolation/{sequence_index:08d}.f32be",
+                "latent_response": "raw/latent_response/{sequence_index:08d}.f32be",
+                "local_sensitivity_rgb_pre_interpolation": "raw/local_sensitivity_rgb_pre_interpolation/{sequence_index:08d}.f32be",
+            },
+            "path_rule": "safe_unique_candidate_root_relative_posix_path_without_symlink_follow",
+            "cross_field_invariants": (
+                "kind_equals_parent_population_kind",
+                "sequence_index_and_generation_digest_equal_ordered_generation_input_record",
+                "tensor_is_materialized_finite_nonnegative_cpu_float32_b1c1nchw",
+                "negative_values_fail_before_raw_file_write",
+                "zero_values_remain_in_raw_file_but_are_excluded_from_positive_population",
+                "sequence_index_is_zero_padded_to_at_least_eight_decimal_digits_without_truncation",
+            ),
+        },
+        "raw_member_population_contract": {
+            "container_predicate": "exact_list",
+            "exact_length": 3,
+            "field_rules": {
+                "reference_observation_kind": {
+                    "predicate": "exact_token_str",
+                    "exact_value_source": "population_order_entry",
+                },
+                "raw_member_file_records": {
+                    "predicate": "exact_list",
+                },
+            },
+            "nested_contracts": {
+                "raw_member_file_records": "raw_member_file_record_contract",
+            },
+            "order_source": "population_order",
+            "member_length_rule": "raw_member_file_record_count_equals_method_parameter_sample_count",
+            "member_order_rule": "raw_member_file_records_follow_sequence_index_order",
+            "registry_member_projection_fields": (
+                "reference_observation_kind",
+                "reference_observation_member_sequence_index",
+                "generation_input_identity_digest",
+                "tensor_content_sha256",
+            ),
+            "cross_field_invariants": (
+                "same_sequence_index_has_same_generation_input_identity_digest_across_populations",
+                "raw_path_file_sha_shape_and_dtype_are_manifest_only_not_registry_member_fields",
+            ),
+        },
+        "candidate_registry_file_record_contract": {
+            "field_rules": {
+                "path": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "content_routing_reference_registry.json",
+                },
+                "content_routing_reference_registry_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "content_routing_reference_registry_file_sha256": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+            },
+            "semantic_digest_rule": "registry_semantic_digest_rule",
+            "file_sha256_rule": "sha256(exact_candidate_registry_file_bytes)",
+            "cross_field_invariants": (
+                "registry_partition_sample_model_dependency_formal_and_runtime_identities_equal_manifest",
+                "candidate_registry_bytes_equal_payload_assembler_canonical_bytes",
+            ),
+        },
+        "materialization_manifest_contract": {
+            "schema_token": "content_routing_reference_materialization_manifest_v1",
+            "filename": "materialization_manifest.json",
+            "field_rules": {
+                "schema_version": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "content_routing_reference_materialization_manifest_v1",
+                },
+                "content_routing_reference_materialization_manifest_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "supports_paper_claim": {
+                    "predicate": "exact_bool",
+                    "exact_value": False,
+                },
+                "code_commit": {
+                    "predicate": "git_commit_lower_hex_str",
+                },
+                "method_parameter_partition_id": {
+                    "predicate": "nonempty_exact_str",
+                },
+                "method_parameter_prompt_list_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "method_parameter_seed_list_digest_random": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "method_parameter_sample_count": {
+                    "predicate": "strict_positive_int",
+                },
+                "formal_method_config_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "formal_execution_lock_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "dependency_profile_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "model_id": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "stabilityai/stable-diffusion-3.5-medium",
+                },
+                "model_revision": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
+                },
+                "runtime_component_identity_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "generation_input_records": {
+                    "predicate": "exact_list",
+                },
+                "raw_member_populations": {
+                    "predicate": "exact_list",
+                    "exact_length": 3,
+                },
+                "candidate_registry": {
+                    "predicate": "exact_object",
+                },
+                "qualification_report_path": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "qualification_report.json",
+                },
+            },
+            "nested_contracts": {
+                "generation_input_records": "ordered_generation_input_record_contract",
+                "raw_member_populations": "raw_member_population_contract",
+                "candidate_registry": "candidate_registry_file_record_contract",
+            },
+            "semantic_digest_rule": "build_stable_digest(top_level_object_with_only_content_routing_reference_materialization_manifest_digest_removed)",
+            "canonical_file_bytes_rule": "stable_json_dumps(payload).encode('utf-8') plus one LF byte",
+            "file_sha256_location": "qualification_report_and_external_promotion_input_only",
+            "candidate_root_rule": "outputs/content_routing_reference_materialization/<content_routing_reference_materialization_manifest_digest>/",
+            "candidate_directory_identity_rule": "candidate_root_final_component_equals_manifest_semantic_digest",
+            "forbidden_fields": (
+                "content_routing_reference_qualification_report_digest",
+                "content_routing_reference_qualification_report_file_sha256",
+                "content_routing_reference_qualification_ready",
+                "qualification_checks",
+                "qualification_errors",
+            ),
+        },
+        "qualification_report_contract": {
+            "schema_token": "content_routing_reference_qualification_report_v1",
+            "filename": "qualification_report.json",
+            "execution_mode_token": "real_sd35_cuda_reference_materialization_qualification_v1",
+            "field_rules": {
+                "schema_version": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "content_routing_reference_qualification_report_v1",
+                },
+                "content_routing_reference_qualification_report_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "supports_paper_claim": {
+                    "predicate": "exact_bool",
+                    "exact_value": False,
+                },
+                "code_commit": {
+                    "predicate": "git_commit_lower_hex_str",
+                },
+                "qualification_execution_mode": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "real_sd35_cuda_reference_materialization_qualification_v1",
+                },
+                "qualification_fixture_or_proxy_used": {
+                    "predicate": "exact_bool",
+                    "exact_value": False,
+                },
+                "qualification_skip_count": {
+                    "predicate": "nonnegative_int",
+                    "exact_value": 0,
+                },
+                "content_routing_reference_materialization_manifest_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "content_routing_reference_materialization_manifest_file_sha256": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "content_routing_reference_registry_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "content_routing_reference_registry_file_sha256": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "formal_execution_lock_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "dependency_profile_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "model_id": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "stabilityai/stable-diffusion-3.5-medium",
+                },
+                "model_revision": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
+                },
+                "runtime_component_identity_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "qualification_check_count": {
+                    "predicate": "strict_positive_int",
+                    "exact_value": 15,
+                },
+                "qualification_error_count": {
+                    "predicate": "nonnegative_int",
+                },
+                "qualification_checks": {
+                    "predicate": "exact_list",
+                    "exact_length": 15,
+                },
+                "qualification_errors": {
+                    "predicate": "exact_list",
+                },
+                "content_routing_reference_qualification_ready": {
+                    "predicate": "exact_bool",
+                },
+            },
+            "nested_contracts": {
+                "qualification_checks": "check_entry_field_rules",
+                "qualification_errors": "error_entry_field_rules",
+            },
+            "check_order": (
+                "machine_contract",
+                "formal_execution_lock",
+                "dependency_profile",
+                "cuda_execution_environment",
+                "model_snapshot",
+                "runtime_component_identity",
+                "generation_input_identities",
+                "raw_member_file_sha256",
+                "raw_tensor_identity",
+                "population_reconstruction",
+                "nearest_rank_recomputation",
+                "candidate_registry_semantic_digest",
+                "candidate_registry_file_sha256",
+                "materialization_manifest_semantic_digest",
+                "materialization_manifest_file_sha256",
+            ),
+            "check_entry_field_rules": {
+                "check_id": {
+                    "predicate": "exact_token_str",
+                    "exact_value_source": "check_order_entry",
+                },
+                "check_status": {
+                    "predicate": "exact_status_token",
+                    "allowed_tokens": ("pass", "blocked"),
+                },
+                "failure_code": {
+                    "predicate": "exact_null_or_nonempty_exact_str",
+                },
+            },
+            "error_entry_field_rules": {
+                "check_id": {
+                    "predicate": "exact_token_str",
+                    "exact_value_source": "blocked_check_id",
+                },
+                "failure_code": {
+                    "predicate": "nonempty_exact_str",
+                },
+                "failure_detail_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+            },
+            "cuda_execution_environment_contract": {
+                "torch_cuda_available": True,
+                "actual_pipeline_execution_device_type": "cuda",
+                "missing_cuda_failure_code": "cuda_execution_environment_unavailable",
+                "dependent_check_failure_code": "prerequisite_blocked",
+                "forbidden_devices": ("cpu", "meta", "mps"),
+                "caller_declared_ready_is_forbidden": True,
+                "fake_or_monkeypatched_cuda_is_forbidden": True,
+                "device_ordinal_is_excluded_from_scientific_identity": True,
+            },
+            "check_status_rule": "pass_requires_null_failure_code_and_blocked_requires_nonempty_failure_code",
+            "error_order_rule": "qualification_errors_follow_blocked_check_order",
+            "ready_rule": "all_fifteen_checks_pass_and_errors_empty_and_skip_count_zero_and_fixture_or_proxy_false",
+            "semantic_digest_rule": "build_stable_digest(top_level_object_with_only_content_routing_reference_qualification_report_digest_removed)",
+            "canonical_file_bytes_rule": "stable_json_dumps(payload).encode('utf-8') plus one LF byte",
+            "file_sha256_location": "external_promotion_input_only",
+            "cross_field_invariants": (
+                "qualification_check_count_equals_fifteen",
+                "qualification_error_count_equals_blocked_check_count_and_error_list_length",
+                "manifest_semantic_and_file_identity_are_recomputed_from_actual_file",
+                "registry_semantic_and_file_identity_are_recomputed_from_actual_file",
+                "missing_resource_checks_are_blocked_not_skipped",
+                "resource_dependent_unexecuted_checks_use_prerequisite_blocked",
+                "qualification_command_exits_with_error_after_writing_not_ready_report",
+                "fixture_proxy_synthetic_and_precomputed_features_cannot_make_ready_true",
+            ),
+        },
+        "writer_file_dag_contract": {
+            "ordered_steps": (
+                "build_generation_raw_registry_and_manifest_identities_in_memory",
+                "write_raw_member_files_with_same_directory_temp_fsync_replace_and_directory_fsync",
+                "write_candidate_registry_with_same_directory_temp_fsync_replace_and_directory_fsync",
+                "write_materialization_manifest_with_same_directory_temp_fsync_replace_and_directory_fsync",
+                "run_independent_real_cuda_qualification_from_persisted_candidate",
+                "write_qualification_report_last_with_same_directory_temp_fsync_replace_and_directory_fsync",
+            ),
+            "persistent_root": "outputs/content_routing_reference_materialization",
+            "manifest_binds_only_qualification_report_path": True,
+            "qualification_report_is_last_candidate_file": True,
+            "partial_candidate_supports_paper_claim": False,
+            "configs_write_is_forbidden": True,
+        },
+        "promotion_contract": {
+            "input_field_rules": {
+                "candidate_root": {
+                    "predicate": "safe_relative_posix_path_str",
+                },
+                "content_routing_reference_materialization_manifest_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "content_routing_reference_materialization_manifest_file_sha256": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "content_routing_reference_qualification_report_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "content_routing_reference_qualification_report_file_sha256": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "content_routing_reference_registry_digest": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+                "content_routing_reference_registry_file_sha256": {
+                    "predicate": "sha256_lower_hex_str",
+                },
+            },
+            "comparison_order": (
+                "validate_fixed_paths_and_identity_formats",
+                "single_safe_read_manifest_report_and_registry_actual_bytes",
+                "validate_manifest_file_canonical_semantic_and_candidate_directory_identity",
+                "validate_report_file_canonical_and_semantic_identity",
+                "compare_report_manifest_identity_to_expected_and_actual_manifest",
+                "compare_report_registry_identity_to_expected_and_actual_registry",
+                "require_real_execution_proxy_false_skip_zero_all_checks_pass_errors_empty_and_ready_true",
+                "validate_registry_schema_semantic_and_file_identity",
+                "copy_exact_already_read_candidate_registry_bytes_to_fixed_config_path",
+            ),
+            "destination_path": "configs/content_routing_reference_registry.json",
+            "copy_rule": "byte_identical_copy_without_recomputation_or_reserialization",
+            "manifest_and_report_mutation_is_forbidden": True,
+        },
+    },
     "schema_freeze_exception_fields": (
         "method_parameter_partition_id",
         "method_parameter_prompt_list_digest",
@@ -1353,6 +1896,11 @@ CONTENT_ROUTING_REFERENCE_REGISTRY_MACHINE_CONTRACT = {
         "reference_response_binary32_hex",
         "reference_sensitivity_binary32_hex",
         "content_routing_reference_registry_file_sha256",
+        "content_routing_reference_materialization_manifest_digest",
+        "content_routing_reference_materialization_manifest_file_sha256",
+        "content_routing_reference_qualification_report_digest",
+        "content_routing_reference_qualification_report_file_sha256",
+        "content_routing_reference_qualification_ready",
     ),
     "field_registry_row_contract": {
         "method_parameter_partition_id": {
@@ -1523,6 +2071,46 @@ CONTENT_ROUTING_REFERENCE_REGISTRY_MACHINE_CONTRACT = {
             "replacement_required": False,
             "description_semantics_token": "content_reference_registry_exact_file_bytes_v1",
         },
+        "content_routing_reference_materialization_manifest_digest": {
+            "category": "provenance",
+            "required_suffix": "none",
+            "allowed_in_records": True,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "content_reference_materialization_manifest_semantic_identity_v1",
+        },
+        "content_routing_reference_materialization_manifest_file_sha256": {
+            "category": "provenance",
+            "required_suffix": "none",
+            "allowed_in_records": True,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "content_reference_materialization_manifest_exact_file_bytes_v1",
+        },
+        "content_routing_reference_qualification_report_digest": {
+            "category": "provenance",
+            "required_suffix": "none",
+            "allowed_in_records": True,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "content_reference_qualification_report_semantic_identity_v1",
+        },
+        "content_routing_reference_qualification_report_file_sha256": {
+            "category": "provenance",
+            "required_suffix": "none",
+            "allowed_in_records": True,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "content_reference_qualification_report_exact_file_bytes_v1",
+        },
+        "content_routing_reference_qualification_ready": {
+            "category": "governance",
+            "required_suffix": "none",
+            "allowed_in_records": True,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "content_reference_qualification_all_checks_ready_v1",
+        },
     },
 }
 ```
@@ -1535,7 +2123,11 @@ CONTENT_ROUTING_REFERENCE_REGISTRY_MACHINE_CONTRACT = {
 
 `content_routing_reference_registry_digest` 是顶层对象删除且仅删除自身字段后的规范语义摘要。精确文件字节 SHA-256 由外层 `content_routing_reference_registry_file_sha256` 承担，不得写入 registry 形成循环；`method_definition_digest` 和 `runtime_config_digest` 也不得反向进入 registry。candidate registry 字节固定为 `stable_json_dumps(payload).encode("utf-8") + b"\n"`。
 
-真实 materializer 以后只能将 raw member tensors、member manifest、candidate registry 和 qualification report 原子写入 `outputs/content_routing_reference_materialization/<candidate_identity>/`：同目录临时文件写入、flush、fsync、`os.replace`，最后 fsync 父目录。candidate 始终 `supports_paper_claim=false`。qualification 必须独立重哈希 raw tensors、重建 member/population、调用唯一 nearest-rank 聚合核并逐位复验 scalar/hex、semantic digest 和 file SHA；缺精确模型 snapshot、CUDA、依赖 profile 或 formal lock 时必须 error 且不得 skip。
+真实 materializer 以后只能将 raw member tensors、candidate registry、materialization manifest 和 qualification report 按 `writer_file_dag_contract` 写入 `outputs/content_routing_reference_materialization/<content_routing_reference_materialization_manifest_digest>/`。每个文件都必须使用同目录临时文件、write、flush、fsync、`os.replace` 和父目录 fsync；qualification report 最后写。candidate 始终 `supports_paper_claim=false`，部分 candidate、失败 report 或缺 report 的 candidate 均不得晋升。
+
+身份依赖只能单向为 generation payload -> raw member identities -> candidate registry semantic/file identity -> materialization manifest semantic/file identity -> qualification report semantic/file identity -> promotion input。manifest 只保存固定 qualification report 相对路径，不得保存 report digest、file SHA、ready、checks 或 errors；report 必须反向绑定实际 manifest 与 registry 的 semantic/file identity，manifest 不得反向绑定 report。qualification 的15项 `check_status` 只复用 field registry 的 `pass`/`blocked` 语义，缺 CUDA、精确模型 snapshot、依赖 profile 或 formal lock 时必须形成 `blocked`、`content_routing_reference_qualification_ready=false` 和错误退出，不得使用 skip、fixture、proxy 或 fallback 冒充通过。
+
+raw member 文件只允许使用 contract 冻结的 flat-NCHW 大端 IEEE-754 binary32 字节；qualification 必须独立重哈希文件、重建 CPU float32 Tensor 与 base latent identity、重建 member/population、调用唯一 nearest-rank 聚合核并逐位复验 scalar/hex、registry/manifest semantic digest 和 file SHA。规范 base latent identity 只能调用现有 `experiments.protocol.formal_randomization.build_canonical_sd35_base_latent`，固定 shape `(1,16,64,64)` 与 `torch.float16`；qualification 在 CPU 重建，producer 只允许搬到通过门禁的真实 CUDA execution device，并复验内容摘要不变。
 
 显式治理晋升只能把通过 qualification 的 candidate 完全相同字节复制到固定路径 `configs/content_routing_reference_registry.json`，禁止重算、重序列化、fixture 或本机临时值晋升。本原子不生成该文件。
 
