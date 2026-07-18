@@ -44,7 +44,9 @@ Notebook 与 repository module 的跨边界数据
 
 ## 冻结目标方法新增字段
 
-下表补充登记三份核心文档新增、且在通用字段登记表中尚无语义行的目标 schema 字段。目标接口复用的既有通用字段不在此重复登记，其目标生命周期仍由 `target_required_exact_fields` 明确列出。所有字段名在本文件中只能出现一次。目标字段必须在核心 runtime、writer、consumer 和聚合器的同一次原子迁移中落地；仅在本表或机器登记中出现不能支持任何完成状态或论文主张，实际生产状态只由 `builds/project_construction_state.md` 登记。
+下表补充登记三份核心文档新增、且在通用字段登记表中尚无语义行的目标 schema 字段。目标接口复用的既有通用字段不在此重复登记，其目标生命周期仍由 `target_required_exact_fields` 明确列出。所有字段名在本文件中只能出现一次。除下述唯一窄例外外，目标字段必须在核心 runtime、writer、consumer 和聚合器的同一次原子迁移中落地；仅在本表或机器登记中出现不能支持任何完成状态或论文主张，实际生产状态只由 `builds/project_construction_state.md` 登记。
+
+唯一窄例外精确来自方法机制文档 `CONTENT_ROUTING_REFERENCE_REGISTRY_MACHINE_CONTRACT["schema_freeze_exception_fields"]` 的21项集合，只允许在 content-routing reference registry 机器协议冻结时预登记。该集合必须由专用 constraint 从同一个权威 AST literal 解析，逐项具有 `target_required` 生命周期和 `allowed_in_claims=false`；登记不表示 validator、loader、producer、writer、consumer、runtime 或正式 artifact 已实现，也不得提升 `not_materialized`、`document_ecosystem_synchronized`、`cpu_conformant` 或后续状态。`configs/content_routing_reference_registry.json` 不存在且正式实现尚未闭合期间，candidate 固定 `supports_paper_claim=false`。不得从 `governance`、`schema`、字段类别、命名或自然语言推导其他预登记例外，不得在字段生命周期 JSON 中维护第二个 exception list。除该精确21项外，runtime/record 字段与 writer、consumer、aggregator 同一原子迁移的门禁原样有效；未来首次实现该 artifact 时，exact validator 与唯一 loader 必须在同一实现原子闭合。
 
 | field_name | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -58,7 +60,28 @@ Notebook 与 repository module 的跨边界数据
 | prg_version | protocol | none | true | false | false | 当前记录使用的确定性 PRG 版本。 |
 | prg_identity_digest | provenance | none | true | false | false | PRG 版本、domain 和非敏感身份输入摘要。 |
 | runtime_config_digest | provenance | none | true | false | false | 目标方法完整运行配置摘要。 |
-| content_routing_reference_registry_digest | provenance | none | true | false | false | `g_ref/r_ref/q_ref` 唯一登记文件内容摘要。 |
+| content_routing_reference_registry_digest | provenance | none | true | false | false | `g_ref/r_ref/q_ref` 唯一登记对象删除且仅删除自身字段后的规范语义摘要；不承担精确文件字节 SHA-256。 |
+| method_parameter_partition_id | protocol | none | false | false | false | `content_reference_partition_identity_v1`：与 calibration/test 均隔离的有序方法参数 generation-member 列表身份。 |
+| method_parameter_prompt_list_digest | provenance | none | false | false | false | `ordered_partition_prompt_projection_digest_v1`：按方法参数成员顺序排列的 `{prompt_id,prompt_text_digest}` 投影列表稳定摘要。 |
+| method_parameter_seed_list_digest_random | random | _digest_random | false | false | false | `ordered_partition_seed_projection_digest_v1`：按同一成员顺序排列的生成 seed 投影列表稳定随机身份摘要。 |
+| method_parameter_sample_count | metric | none | false | false | false | `partition_generation_member_count_v1`：隔离方法参数划分中真实 `B=1` generation member 数量。 |
+| content_routing_reference_populations | protocol | none | false | false | false | `ordered_three_reference_populations_v1`：按 G、d_R、d_Q 固定职责顺序保存的三个 reference population 嵌套协议对象。 |
+| content_routing_reference_quantile_algorithm | protocol | none | false | false | false | `content_reference_quantile_algorithm_v1`：完整排序和精确有理数 nearest-rank 的冻结算法 token。 |
+| content_routing_reference_quantile_numerator | protocol | none | false | false | false | `content_reference_quantile_numerator_v1`：nearest-rank 分位数精确有理数分子，固定为19。 |
+| content_routing_reference_quantile_denominator | protocol | none | false | false | false | `content_reference_quantile_denominator_v1`：nearest-rank 分位数精确有理数分母，固定为20。 |
+| content_routing_reference_quantile_rank_rule | protocol | none | false | false | false | `content_reference_quantile_rank_rule_v1`：正值总体使用精确整数 ceil-rank 的固定规则 token。 |
+| content_routing_reference_quantile_index_rule | protocol | none | false | false | false | `content_reference_quantile_index_rule_v1`：将一基 rank 转换为零基索引的固定规则 token。 |
+| reference_observation_kind | protocol | none | false | false | false | `reference_population_kind_v1`：G、d_R 或 d_Q population 及其 raw member manifest entry 的冻结职责 token。 |
+| reference_observation_member_sequence_index | protocol | none | false | false | false | `reference_member_sequence_index_v1`：raw member manifest 中按方法参数成员顺序连续递增的零基索引。 |
+| reference_observation_member_count | metric | none | false | false | false | `reference_population_member_count_v1`：当前 population 绑定的真实 raw member 数量。 |
+| reference_observation_positive_value_count | metric | none | false | false | false | `reference_population_positive_value_count_v1`：当前 population 过滤严格正值后的一维 float32 标量总数。 |
+| reference_observation_member_records_digest | provenance | none | false | false | false | `ordered_reference_member_records_digest_v1`：保留成员边界、顺序、生成身份和 raw Tensor 内容身份的有序 manifest entry 列表摘要。 |
+| reference_observation_selected_rank | metric | none | false | false | false | `nearest_rank_selected_rank_v1`：按精确19/20整数规则得到的一基 selected rank。 |
+| reference_observation_selected_index | metric | none | false | false | false | `nearest_rank_selected_zero_based_index_v1`：由 selected rank 减一得到的完整排序零基索引。 |
+| reference_gradient_binary32_hex | provenance | none | false | false | false | `reference_gradient_binary32_identity_v1`：`reference_gradient` 的8位小写大端 IEEE-754 binary32 位身份。 |
+| reference_response_binary32_hex | provenance | none | false | false | false | `reference_response_binary32_identity_v1`：`reference_response` 的8位小写大端 IEEE-754 binary32 位身份。 |
+| reference_sensitivity_binary32_hex | provenance | none | false | false | false | `reference_sensitivity_binary32_identity_v1`：`reference_sensitivity` 的8位小写大端 IEEE-754 binary32 位身份。 |
+| content_routing_reference_registry_file_sha256 | provenance | none | true | false | false | `content_reference_registry_exact_file_bytes_v1`：qualification 或 runtime config 记录的已晋升 registry 精确 UTF-8 文件字节 SHA-256；不得写回 registry 自身。 |
 | scoring_key_identity_digest | provenance | none | true | false | false | 不泄露密钥材料的实际评分密钥身份摘要。 |
 | decision_identity_digest | provenance | none | true | false | false | 方法角色、阈值、救回窗口和决策规则的联合摘要。 |
 | selected_layer_name | method | none | true | true | false | 跨层几何候选选择后提供唯一 transform 的冻结 Q/K 层名。 |

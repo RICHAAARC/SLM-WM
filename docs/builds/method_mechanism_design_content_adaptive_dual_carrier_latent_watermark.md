@@ -960,6 +960,598 @@ full_paper = 0.001
 - `lf_routing_rule=A*(1-T)`。
 - `hf_tail_routing_rule=A*T`。
 
+内容路由 reference 的机器协议只有以下一个可解析权威常量。后续 validator、loader、producer、writer 和 qualification 必须逐字段消费该常量，不得维护第二套 key、类型、身份 payload 或字段属性映射。
+
+```python
+CONTENT_ROUTING_REFERENCE_REGISTRY_MACHINE_CONTRACT = {
+    "contract_schema": "content_routing_reference_registry_machine_contract_v1",
+    "registry_schema_token": "content_routing_reference_registry_v1",
+    "quantile_algorithm_token": "nearest_rank_full_sort_exact_rational_v1",
+    "quantile_rank_rule_token": "exact_rational_ceil_positive_count_v1",
+    "quantile_index_rule_token": "zero_based_rank_minus_one_v1",
+    "type_predicates": {
+        "exact_object": "type(value) is dict and keys equal the governed exact key set",
+        "exact_list": "type(value) is list",
+        "exact_token_str": "type(value) is str and value equals the governed token",
+        "nonempty_exact_str": "type(value) is str and value is nonempty, stripped, and contains no NUL, CR, LF, or TAB",
+        "sha256_lower_hex_str": "type(value) is str and fullmatch('[0-9a-f]{64}', value)",
+        "binary32_lower_hex_str": "type(value) is str and fullmatch('[0-9a-f]{8}', value)",
+        "strict_positive_int": "type(value) is int and value > 0",
+        "nonnegative_int": "type(value) is int and value >= 0",
+        "strict_positive_finite_json_float": "type(value) is float and isfinite(value) and value > 0 and float32(value) remains finite and positive",
+    },
+    "registry_top_level_field_rules": {
+        "registry_schema": {
+            "predicate": "exact_token_str",
+            "exact_value": "content_routing_reference_registry_v1",
+        },
+        "method_parameter_partition_id": {
+            "predicate": "nonempty_exact_str",
+        },
+        "method_parameter_prompt_list_digest": {
+            "predicate": "sha256_lower_hex_str",
+            "digest_contract": "prompt_projection_contract",
+        },
+        "method_parameter_seed_list_digest_random": {
+            "predicate": "sha256_lower_hex_str",
+            "digest_contract": "seed_projection_contract",
+        },
+        "method_parameter_sample_count": {
+            "predicate": "strict_positive_int",
+        },
+        "formal_execution_lock_digest": {
+            "predicate": "sha256_lower_hex_str",
+        },
+        "dependency_profile_digest": {
+            "predicate": "sha256_lower_hex_str",
+        },
+        "model_id": {
+            "predicate": "exact_token_str",
+            "exact_value": "stabilityai/stable-diffusion-3.5-medium",
+        },
+        "model_revision": {
+            "predicate": "exact_token_str",
+            "exact_value": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
+        },
+        "runtime_component_identity_digest": {
+            "predicate": "sha256_lower_hex_str",
+            "digest_contract": "runtime_component_identity_payload_contract",
+        },
+        "content_routing_reference_quantile_algorithm": {
+            "predicate": "exact_token_str",
+            "exact_value": "nearest_rank_full_sort_exact_rational_v1",
+        },
+        "content_routing_reference_quantile_numerator": {
+            "predicate": "strict_positive_int",
+            "exact_value": 19,
+        },
+        "content_routing_reference_quantile_denominator": {
+            "predicate": "strict_positive_int",
+            "exact_value": 20,
+        },
+        "content_routing_reference_quantile_rank_rule": {
+            "predicate": "exact_token_str",
+            "exact_value": "exact_rational_ceil_positive_count_v1",
+        },
+        "content_routing_reference_quantile_index_rule": {
+            "predicate": "exact_token_str",
+            "exact_value": "zero_based_rank_minus_one_v1",
+        },
+        "content_routing_reference_populations": {
+            "predicate": "exact_list",
+            "exact_length": 3,
+        },
+        "reference_gradient": {
+            "predicate": "strict_positive_finite_json_float",
+        },
+        "reference_gradient_binary32_hex": {
+            "predicate": "binary32_lower_hex_str",
+        },
+        "reference_response": {
+            "predicate": "strict_positive_finite_json_float",
+        },
+        "reference_response_binary32_hex": {
+            "predicate": "binary32_lower_hex_str",
+        },
+        "reference_sensitivity": {
+            "predicate": "strict_positive_finite_json_float",
+        },
+        "reference_sensitivity_binary32_hex": {
+            "predicate": "binary32_lower_hex_str",
+        },
+        "content_routing_reference_registry_digest": {
+            "predicate": "sha256_lower_hex_str",
+        },
+    },
+    "population_order": (
+        "gradient_magnitude_rgb_pre_interpolation",
+        "latent_response",
+        "local_sensitivity_rgb_pre_interpolation",
+    ),
+    "population_field_rules": {
+        "reference_observation_kind": {
+            "predicate": "exact_token_str",
+            "exact_value_source": "population_order_entry",
+        },
+        "reference_observation_member_count": {
+            "predicate": "strict_positive_int",
+        },
+        "reference_observation_positive_value_count": {
+            "predicate": "strict_positive_int",
+        },
+        "reference_observation_member_records_digest": {
+            "predicate": "sha256_lower_hex_str",
+            "digest_rule": "build_stable_digest(exact_ordered_member_record_list)",
+        },
+        "tensor_content_sha256": {
+            "predicate": "sha256_lower_hex_str",
+        },
+        "reference_observation_selected_rank": {
+            "predicate": "strict_positive_int",
+        },
+        "reference_observation_selected_index": {
+            "predicate": "nonnegative_int",
+        },
+    },
+    "member_record_field_rules": {
+        "reference_observation_kind": {
+            "predicate": "exact_token_str",
+            "exact_value_source": "parent_population_kind",
+        },
+        "reference_observation_member_sequence_index": {
+            "predicate": "nonnegative_int",
+        },
+        "generation_input_identity_digest": {
+            "predicate": "sha256_lower_hex_str",
+        },
+        "tensor_content_sha256": {
+            "predicate": "sha256_lower_hex_str",
+        },
+    },
+    "prompt_projection_contract": {
+        "container_predicate": "exact_list",
+        "entry_predicate": "exact_object",
+        "entry_field_rules": {
+            "prompt_id": {
+                "predicate": "nonempty_exact_str",
+            },
+            "prompt_text_digest": {
+                "predicate": "sha256_lower_hex_str",
+            },
+        },
+        "order_source": "method_parameter_partition_generation_member_order",
+        "order_rule": "prompt_projection_order_equals_method_parameter_member_order",
+        "length_rule": "prompt_projection_length_equals_method_parameter_sample_count",
+        "digest_rule": "build_stable_digest(exact_ordered_prompt_projection_list)",
+    },
+    "seed_projection_contract": {
+        "container_predicate": "exact_list",
+        "element_predicate": "nonnegative_int",
+        "order_source": "method_parameter_partition_generation_member_order",
+        "order_rule": "seed_projection_order_equals_method_parameter_member_order",
+        "length_rule": "seed_projection_length_equals_method_parameter_sample_count",
+        "digest_rule": "build_stable_digest(exact_ordered_seed_projection_list)",
+    },
+    "population_scalar_binding": {
+        "gradient_magnitude_rgb_pre_interpolation": {
+            "scalar_field": "reference_gradient",
+            "binary32_hex_field": "reference_gradient_binary32_hex",
+        },
+        "latent_response": {
+            "scalar_field": "reference_response",
+            "binary32_hex_field": "reference_response_binary32_hex",
+        },
+        "local_sensitivity_rgb_pre_interpolation": {
+            "scalar_field": "reference_sensitivity",
+            "binary32_hex_field": "reference_sensitivity_binary32_hex",
+        },
+    },
+    "cross_field_invariants": (
+        "prompt_projection_order_equals_method_parameter_member_order",
+        "prompt_projection_length_equals_method_parameter_sample_count",
+        "seed_projection_order_equals_method_parameter_member_order",
+        "seed_projection_length_equals_method_parameter_sample_count",
+        "population_list_order_equals_population_order",
+        "population_member_count_equals_method_parameter_sample_count",
+        "member_record_list_length_equals_method_parameter_sample_count",
+        "member_sequence_indices_are_exactly_zero_through_sample_count_minus_one",
+        "member_kind_equals_parent_population_kind",
+        "same_sequence_index_has_same_generation_input_identity_digest_across_populations",
+        "raw_member_tensor_is_finite_nonnegative_cpu_float32_b1c1nchw",
+        "negative_values_fail_before_strict_positive_filter",
+        "population_tensor_is_member_order_flat_nchw_strict_positive_presort_cpu_float32_1d",
+        "positive_value_count_equals_population_tensor_numel",
+        "selected_rank_equals_integer_division_of_19n_plus_19_by_20",
+        "selected_index_equals_selected_rank_minus_one",
+        "bound_scalar_equals_full_sort_value_at_selected_index",
+        "bound_binary32_hex_equals_struct_pack_big_endian_float_hex_of_scalar",
+        "reference_json_lexeme_must_decode_to_float_not_int_or_bool",
+    ),
+    "binary32_hex_rule": "struct.pack('>f', scalar).hex()",
+    "semantic_digest_rule": "build_stable_digest(top_level_object_with_only_content_routing_reference_registry_digest_removed)",
+    "file_sha256_rule": "sha256(exact_utf8_stable_json_dumps_payload_plus_one_lf_byte)",
+    "runtime_component_identity_payload_contract": {
+        "schema_token": "content_routing_reference_runtime_component_identity_v1",
+        "component_config_digest_rule": "build_stable_digest(dict(actual_component.config))",
+        "digest_rule": "build_stable_digest(exact_runtime_component_identity_payload)",
+        "field_rules": {
+            "schema_version": {
+                "predicate": "exact_token_str",
+                "exact_value": "content_routing_reference_runtime_component_identity_v1",
+            },
+            "model_id": {
+                "predicate": "exact_token_str",
+                "exact_value": "stabilityai/stable-diffusion-3.5-medium",
+            },
+            "model_revision": {
+                "predicate": "exact_token_str",
+                "exact_value": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
+            },
+            "pipeline_class_name": {
+                "predicate": "exact_token_str",
+                "exact_value": "diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3.StableDiffusion3Pipeline",
+            },
+            "vae_class_name": {
+                "predicate": "exact_token_str",
+                "exact_value": "diffusers.models.autoencoders.autoencoder_kl.AutoencoderKL",
+            },
+            "transformer_class_name": {
+                "predicate": "exact_token_str",
+                "exact_value": "diffusers.models.transformers.transformer_sd3.SD3Transformer2DModel",
+            },
+            "scheduler_class_name": {
+                "predicate": "exact_token_str",
+                "exact_value": "diffusers.schedulers.scheduling_flow_match_euler_discrete.FlowMatchEulerDiscreteScheduler",
+            },
+            "pipeline_config_digest": {
+                "predicate": "sha256_lower_hex_str",
+            },
+            "vae_config_digest": {
+                "predicate": "sha256_lower_hex_str",
+            },
+            "transformer_config_digest": {
+                "predicate": "sha256_lower_hex_str",
+            },
+            "scheduler_config_digest": {
+                "predicate": "sha256_lower_hex_str",
+            },
+            "vae_scaling_factor": {
+                "predicate": "strict_positive_finite_json_float",
+                "exact_value": 1.5305,
+            },
+            "vae_shift_factor": {
+                "predicate": "strict_positive_finite_json_float",
+                "exact_value": 0.0609,
+            },
+            "vae_decode_protocol": {
+                "predicate": "exact_token_str",
+                "exact_value": "latent_divide_scaling_add_shift_vae_decode_float32_rgb_unit_v1",
+            },
+            "scheduler_inference_step_count": {
+                "predicate": "strict_positive_int",
+                "exact_value": 20,
+            },
+            "callback_api": {
+                "predicate": "exact_token_str",
+                "exact_value": "callback_on_step_end",
+            },
+            "previous_latent_callback_index": {
+                "predicate": "nonnegative_int",
+                "exact_value": 9,
+            },
+            "current_latent_callback_index": {
+                "predicate": "nonnegative_int",
+                "exact_value": 10,
+            },
+            "callback_latent_semantics": {
+                "predicate": "exact_token_str",
+                "exact_value": "post_scheduler_step_before_next_step_v1",
+            },
+            "decoded_rgb_protocol": {
+                "predicate": "exact_token_str",
+                "exact_value": "finite_b1_rgb_float32_unit_interval_v1",
+            },
+            "latent_torch_dtype": {
+                "predicate": "exact_token_str",
+                "exact_value": "float16",
+            },
+            "reference_observation_dtype": {
+                "predicate": "exact_token_str",
+                "exact_value": "float32",
+            },
+            "texture_formula_protocol_version": {
+                "predicate": "exact_token_str",
+                "exact_value": "frozen_rgb_sobel_texture_complexity_v1",
+            },
+            "latent_response_formula_protocol_version": {
+                "predicate": "exact_token_str",
+                "exact_value": "frozen_adjacent_latent_channel_rms_response_v1",
+            },
+            "local_sensitivity_formula_protocol_version": {
+                "predicate": "exact_token_str",
+                "exact_value": "frozen_public_probe_local_sensitivity_v1",
+            },
+            "public_probe_identity": {
+                "predicate": "exact_object",
+            },
+            "dependency_profile_digest": {
+                "predicate": "sha256_lower_hex_str",
+            },
+            "formal_execution_lock_digest": {
+                "predicate": "sha256_lower_hex_str",
+            },
+        },
+        "public_probe_identity_contract": {
+            "field_rules": {
+                "prg_version": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "sha256_counter_normal_icdf_table20_float32",
+                },
+                "key_material": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "semantic_saliency_dual_chain_public_probe_v1",
+                },
+                "domain_fields": {
+                    "predicate": "exact_object",
+                },
+            },
+            "domain_field_rules": {
+                "purpose": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "local_sensitivity_public_probe",
+                },
+                "model_revision": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
+                },
+                "probe_version": {
+                    "predicate": "exact_token_str",
+                    "exact_value": "v1",
+                },
+            },
+        },
+        "cross_field_invariants": (
+            "model_id_and_revision_equal_registry_top_level",
+            "dependency_profile_digest_equals_registry_top_level",
+            "formal_execution_lock_digest_equals_registry_top_level",
+            "actual_component_classes_and_configs_are_recomputed_by_qualification",
+            "vae_config_scaling_and_shift_equal_frozen_values",
+            "clip_identity_processor_tokenizer_and_feature_layers_are_forbidden",
+            "device_name_cuda_ordinal_and_device_index_are_forbidden",
+        ),
+        "forbidden_fields": (
+            "model_identity_digest",
+            "vision_model_id",
+            "vision_model_revision",
+            "processor_identity",
+            "tokenizer_identity",
+            "clip_feature_layer",
+            "device_name",
+            "cuda_ordinal",
+            "device_index",
+        ),
+    },
+    "schema_freeze_exception_fields": (
+        "method_parameter_partition_id",
+        "method_parameter_prompt_list_digest",
+        "method_parameter_seed_list_digest_random",
+        "method_parameter_sample_count",
+        "content_routing_reference_populations",
+        "content_routing_reference_quantile_algorithm",
+        "content_routing_reference_quantile_numerator",
+        "content_routing_reference_quantile_denominator",
+        "content_routing_reference_quantile_rank_rule",
+        "content_routing_reference_quantile_index_rule",
+        "reference_observation_kind",
+        "reference_observation_member_sequence_index",
+        "reference_observation_member_count",
+        "reference_observation_positive_value_count",
+        "reference_observation_member_records_digest",
+        "reference_observation_selected_rank",
+        "reference_observation_selected_index",
+        "reference_gradient_binary32_hex",
+        "reference_response_binary32_hex",
+        "reference_sensitivity_binary32_hex",
+        "content_routing_reference_registry_file_sha256",
+    ),
+    "field_registry_row_contract": {
+        "method_parameter_partition_id": {
+            "category": "protocol",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "content_reference_partition_identity_v1",
+        },
+        "method_parameter_prompt_list_digest": {
+            "category": "provenance",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "ordered_partition_prompt_projection_digest_v1",
+        },
+        "method_parameter_seed_list_digest_random": {
+            "category": "random",
+            "required_suffix": "_digest_random",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "ordered_partition_seed_projection_digest_v1",
+        },
+        "method_parameter_sample_count": {
+            "category": "metric",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "partition_generation_member_count_v1",
+        },
+        "content_routing_reference_populations": {
+            "category": "protocol",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "ordered_three_reference_populations_v1",
+        },
+        "content_routing_reference_quantile_algorithm": {
+            "category": "protocol",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "content_reference_quantile_algorithm_v1",
+        },
+        "content_routing_reference_quantile_numerator": {
+            "category": "protocol",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "content_reference_quantile_numerator_v1",
+        },
+        "content_routing_reference_quantile_denominator": {
+            "category": "protocol",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "content_reference_quantile_denominator_v1",
+        },
+        "content_routing_reference_quantile_rank_rule": {
+            "category": "protocol",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "content_reference_quantile_rank_rule_v1",
+        },
+        "content_routing_reference_quantile_index_rule": {
+            "category": "protocol",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "content_reference_quantile_index_rule_v1",
+        },
+        "reference_observation_kind": {
+            "category": "protocol",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "reference_population_kind_v1",
+        },
+        "reference_observation_member_sequence_index": {
+            "category": "protocol",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "reference_member_sequence_index_v1",
+        },
+        "reference_observation_member_count": {
+            "category": "metric",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "reference_population_member_count_v1",
+        },
+        "reference_observation_positive_value_count": {
+            "category": "metric",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "reference_population_positive_value_count_v1",
+        },
+        "reference_observation_member_records_digest": {
+            "category": "provenance",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "ordered_reference_member_records_digest_v1",
+        },
+        "reference_observation_selected_rank": {
+            "category": "metric",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "nearest_rank_selected_rank_v1",
+        },
+        "reference_observation_selected_index": {
+            "category": "metric",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "nearest_rank_selected_zero_based_index_v1",
+        },
+        "reference_gradient_binary32_hex": {
+            "category": "provenance",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "reference_gradient_binary32_identity_v1",
+        },
+        "reference_response_binary32_hex": {
+            "category": "provenance",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "reference_response_binary32_identity_v1",
+        },
+        "reference_sensitivity_binary32_hex": {
+            "category": "provenance",
+            "required_suffix": "none",
+            "allowed_in_records": False,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "reference_sensitivity_binary32_identity_v1",
+        },
+        "content_routing_reference_registry_file_sha256": {
+            "category": "provenance",
+            "required_suffix": "none",
+            "allowed_in_records": True,
+            "allowed_in_claims": False,
+            "replacement_required": False,
+            "description_semantics_token": "content_reference_registry_exact_file_bytes_v1",
+        },
+    },
+}
+```
+
+顶层对象、三个 population 对象和 raw member manifest entry 都必须使用上述 field rule 的精确 key 集，禁止额外或缺失字段。方法参数划分是一个与 calibration/test 均不相交的有序 `B=1` generation-member 列表；Prompt 投影摘要消费按成员顺序排列的精确 `{prompt_id, prompt_text_digest}` 列表，seed 投影摘要消费同一顺序的 `generation_seed_random` 整数列表，两个列表长度都等于 `method_parameter_sample_count`。
+
+三个 population 的 raw member manifest 分别保存于非主张 candidate artifact；同一 sequence index 必须共享同一个 `generation_input_identity_digest`。`reference_observation_member_records_digest` 绑定各自的有序 member entry 列表，population 的 `tensor_content_sha256` 绑定按 member 顺序、member 内 flat-NCHW 顺序过滤严格正值后、排序前形成的 CPU float32 一维 Tensor。完整排序后按 `rank=(19*n+19)//20`、`index=rank-1` 取值，并通过 `population_scalar_binding` 与顶层 float/hex 逐位绑定。JSON 整数 lexeme、bool、NaN、Infinity、0、负数或 float32 cast 后非有限值均失败关闭。
+
+`runtime_component_identity_digest` 只允许由上述 SD3.5 runtime component payload 计算；实际组件类、完整 component config、VAE 标量、scheduler/callback、内容观测公式和公开探针身份均由 qualification 从真实对象重建。它不得绑定 CLIP、processor、tokenizer、设备名称、CUDA ordinal 或设备 index。CLIP 专属 `model_identity_digest` 不属于该 registry，也不得塞入 `generation_input_identity_digest`。
+
+`content_routing_reference_registry_digest` 是顶层对象删除且仅删除自身字段后的规范语义摘要。精确文件字节 SHA-256 由外层 `content_routing_reference_registry_file_sha256` 承担，不得写入 registry 形成循环；`method_definition_digest` 和 `runtime_config_digest` 也不得反向进入 registry。candidate registry 字节固定为 `stable_json_dumps(payload).encode("utf-8") + b"\n"`。
+
+真实 materializer 以后只能将 raw member tensors、member manifest、candidate registry 和 qualification report 原子写入 `outputs/content_routing_reference_materialization/<candidate_identity>/`：同目录临时文件写入、flush、fsync、`os.replace`，最后 fsync 父目录。candidate 始终 `supports_paper_claim=false`。qualification 必须独立重哈希 raw tensors、重建 member/population、调用唯一 nearest-rank 聚合核并逐位复验 scalar/hex、semantic digest 和 file SHA；缺精确模型 snapshot、CUDA、依赖 profile 或 formal lock 时必须 error 且不得 skip。
+
+显式治理晋升只能把通过 qualification 的 candidate 完全相同字节复制到固定路径 `configs/content_routing_reference_registry.json`，禁止重算、重序列化、fixture 或本机临时值晋升。本原子不生成该文件。
+
+未来首次实现 artifact 时，exact validator 与唯一只读 loader 必须在同一实现原子闭合。loader 接口固定为：
+
+```python
+def load_content_routing_reference_registry(
+    *,
+    expected_registry_digest: str,
+    expected_file_sha256: str,
+) -> ContentRoutingReferenceScalars:
+    """从唯一固定配置路径加载已晋升 reference 标量。"""
+```
+
+loader 不接受路径、默认值或 fallback。门禁顺序固定为：先校验两个 expected digest 格式；以不跟随符号链接的单一文件描述符打开固定普通文件并读取一次；先比较 exact file SHA；严格 UTF-8 与 JSON（拒绝 duplicate key、NaN 和 Infinity）；复验 exact key、类型、token 和列表顺序；复算 semantic digest 并先对 embedded、再对 expected；最后检查 population/member/rank/index/scalar binding 和 binary32 hex。所有步骤必须在任何模型前向前失败关闭。本治理原子只冻结该接口，不实现 validator、loader、producer、writer、qualification、promotion 或真实 registry。
+
 ### 10.3 内容载体
 
 - LF 二维低通固定为5×5、stride 1、zero padding 2、`ceil_mode=false`、`count_include_pad=true`、`divisor_override=null`。
