@@ -54,6 +54,17 @@ class LocalSensitivityResult:
     local_sensitivity_map_digest: str
 
 
+@dataclass(frozen=True)
+class _LocalSensitivityObservation:
+    """保存一次公开探针测得的未归一化局部敏感性与测量身份。"""
+
+    local_difference_sensitivity: Any
+    public_probe_digest: str
+    probe_step: float
+    reference_image_digest: str
+    perturbed_image_digest: str
+
+
 def _validate_real_tensor(name: str, value: Any) -> torch.Tensor:
     if not isinstance(value, torch.Tensor):
         raise TypeError(f"{name} must be a Tensor")
@@ -295,27 +306,13 @@ def _canonical_public_probe(
     return probe_on_device, public_probe_digest
 
 
-def build_public_probe_local_sensitivity_map(
-    current_scheduler_latent: Any,
-    decoded_current_image: Any,
+def _measure_public_probe_local_sensitivity(
+    latent: torch.Tensor,
+    reference_image: torch.Tensor,
     vae_decoder: Callable[[Any], Any],
-    public_probe_identity: Any,
-    reference_sensitivity: float,
-) -> LocalSensitivityResult:
-    """按冻结公开方向的一次 VAE 有限差分构造原始 RGB 分辨率 ``Q``。"""
-
-    latent = _validate_latent_metadata(current_scheduler_latent)
-    reference_image = _validate_image_metadata(
-        "decoded_current_image", decoded_current_image
-    )
-    if latent.device != reference_image.device:
-        raise ValueError("latent and decoded_current_image must use the same device")
-    if not callable(vae_decoder):
-        raise TypeError("vae_decoder must be callable")
-    identity = _validate_public_probe_identity(public_probe_identity)
-    reference, reference_float_cpu = _validate_reference_sensitivity(
-        reference_sensitivity
-    )
+    identity: Mapping[str, Any],
+) -> _LocalSensitivityObservation:
+    """使用冻结公开方向的一次 VAE 有限差分测量未归一化 ``d_Q``。"""
 
     _validate_finite_tensor("current_scheduler_latent", latent)
     _validate_unit_interval("decoded_current_image", reference_image)
@@ -367,8 +364,46 @@ def build_public_probe_local_sensitivity_map(
     _validate_finite_tensor(
         "local_difference_sensitivity", local_difference_sensitivity
     )
+    return _LocalSensitivityObservation(
+        local_difference_sensitivity=local_difference_sensitivity,
+        public_probe_digest=public_probe_digest,
+        probe_step=probe_step,
+        reference_image_digest=reference_image_digest,
+        perturbed_image_digest=perturbed_image_digest,
+    )
+
+
+def build_public_probe_local_sensitivity_map(
+    current_scheduler_latent: Any,
+    decoded_current_image: Any,
+    vae_decoder: Callable[[Any], Any],
+    public_probe_identity: Any,
+    reference_sensitivity: float,
+) -> LocalSensitivityResult:
+    """按冻结公开方向的一次 VAE 有限差分构造原始 RGB 分辨率 ``Q``。"""
+
+    latent = _validate_latent_metadata(current_scheduler_latent)
+    reference_image = _validate_image_metadata(
+        "decoded_current_image", decoded_current_image
+    )
+    if latent.device != reference_image.device:
+        raise ValueError("latent and decoded_current_image must use the same device")
+    if not callable(vae_decoder):
+        raise TypeError("vae_decoder must be callable")
+    identity = _validate_public_probe_identity(public_probe_identity)
+    reference, reference_float_cpu = _validate_reference_sensitivity(
+        reference_sensitivity
+    )
+    observation = _measure_public_probe_local_sensitivity(
+        latent,
+        reference_image,
+        vae_decoder,
+        identity,
+    )
     reference_float = reference_float_cpu.to(device=latent.device)
-    reference_normalized = local_difference_sensitivity / reference_float
+    reference_normalized = (
+        observation.local_difference_sensitivity / reference_float
+    )
     _validate_finite_tensor("reference_normalized_sensitivity", reference_normalized)
     local_sensitivity_map = torch.clamp(reference_normalized, min=0.0, max=1.0)
     _validate_unit_interval("local_sensitivity_map", local_sensitivity_map)
@@ -380,11 +415,11 @@ def build_public_probe_local_sensitivity_map(
                 _LOCAL_SENSITIVITY_FORMULA_PROTOCOL_VERSION
             ),
             "formula_protocol": _LOCAL_SENSITIVITY_FORMULA_PROTOCOL,
-            "public_probe_digest": public_probe_digest,
-            "probe_step": probe_step,
+            "public_probe_digest": observation.public_probe_digest,
+            "probe_step": observation.probe_step,
             "reference_sensitivity": reference,
-            "reference_image_digest": reference_image_digest,
-            "perturbed_image_digest": perturbed_image_digest,
+            "reference_image_digest": observation.reference_image_digest,
+            "perturbed_image_digest": observation.perturbed_image_digest,
             "local_sensitivity_map_content_sha256": tensor_content_sha256(
                 local_sensitivity_map
             ),
@@ -393,9 +428,9 @@ def build_public_probe_local_sensitivity_map(
     return LocalSensitivityResult(
         local_sensitivity_map=local_sensitivity_map,
         reference_sensitivity=reference,
-        public_probe_digest=public_probe_digest,
-        probe_step=probe_step,
-        reference_image_digest=reference_image_digest,
-        perturbed_image_digest=perturbed_image_digest,
+        public_probe_digest=observation.public_probe_digest,
+        probe_step=observation.probe_step,
+        reference_image_digest=observation.reference_image_digest,
+        perturbed_image_digest=observation.perturbed_image_digest,
         local_sensitivity_map_digest=local_sensitivity_map_digest,
     )

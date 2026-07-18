@@ -59,6 +59,24 @@ def _validate_reference_response(value: Any) -> float:
     return resolved
 
 
+def _measure_adjacent_latent_relative_response(
+    previous_float: torch.Tensor,
+    current_float: torch.Tensor,
+) -> torch.Tensor:
+    """测量未按共享 reference 归一化的相邻 latent 相对响应。"""
+
+    latent_difference = current_float - previous_float
+    _validate_finite_tensor("latent_difference", latent_difference)
+    difference_rms = _stable_channel_rms("difference_rms", latent_difference)
+    current_rms = _stable_channel_rms("current_rms", current_float)
+    previous_rms = _stable_channel_rms("previous_rms", previous_float)
+    response_denominator = current_rms + previous_rms + 1.0e-12
+    _validate_finite_tensor("response_denominator", response_denominator)
+    relative_response = difference_rms / response_denominator
+    _validate_finite_tensor("relative_response", relative_response)
+    return relative_response
+
+
 def build_adjacent_latent_response_map(
     previous_scheduler_latent: Any,
     current_scheduler_latent: Any,
@@ -85,15 +103,10 @@ def build_adjacent_latent_response_map(
     _validate_finite_tensor("previous_scheduler_latent after float32 cast", previous_float)
     _validate_finite_tensor("current_scheduler_latent after float32 cast", current_float)
 
-    latent_difference = current_float - previous_float
-    _validate_finite_tensor("latent_difference", latent_difference)
-    difference_rms = _stable_channel_rms("difference_rms", latent_difference)
-    current_rms = _stable_channel_rms("current_rms", current_float)
-    previous_rms = _stable_channel_rms("previous_rms", previous_float)
-    response_denominator = current_rms + previous_rms + 1.0e-12
-    _validate_finite_tensor("response_denominator", response_denominator)
-    relative_response = difference_rms / response_denominator
-    _validate_finite_tensor("relative_response", relative_response)
+    relative_response = _measure_adjacent_latent_relative_response(
+        previous_float,
+        current_float,
+    )
     reference_normalized_response = relative_response / reference
     _validate_finite_tensor(
         "reference_normalized_response", reference_normalized_response

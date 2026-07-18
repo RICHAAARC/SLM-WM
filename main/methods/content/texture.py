@@ -79,6 +79,34 @@ def _validate_reference_gradient(value: Any) -> float:
     return resolved
 
 
+def _measure_gradient_magnitude(image_float: torch.Tensor) -> torch.Tensor:
+    """按冻结亮度与 Sobel 协议测量未归一化梯度幅值。"""
+
+    luminance_weights = image_float.new_tensor(
+        _TEXTURE_FORMULA_PROTOCOL["luminance_weights"]
+    ).view(1, 3, 1, 1)
+    luminance = torch.sum(image_float * luminance_weights, dim=1, keepdim=True)
+    _validate_finite_tensor("luminance", luminance)
+
+    kernel_x = image_float.new_tensor(
+        _TEXTURE_FORMULA_PROTOCOL["sobel_kernel_x"]
+    ).view(1, 1, 3, 3)
+    kernel_y = image_float.new_tensor(
+        _TEXTURE_FORMULA_PROTOCOL["sobel_kernel_y"]
+    ).view(1, 1, 3, 3)
+    padded = functional.pad(luminance, (1, 1, 1, 1), mode="replicate")
+    gradient_x = functional.conv2d(padded, kernel_x, stride=1)
+    gradient_y = functional.conv2d(padded, kernel_y, stride=1)
+    _validate_finite_tensor("gradient_x", gradient_x)
+    _validate_finite_tensor("gradient_y", gradient_y)
+
+    gradient_squared = torch.square(gradient_x) + torch.square(gradient_y)
+    _validate_finite_tensor("gradient_squared", gradient_squared)
+    gradient_magnitude = torch.sqrt(gradient_squared)
+    _validate_finite_tensor("gradient_magnitude", gradient_magnitude)
+    return gradient_magnitude
+
+
 def build_texture_complexity_map(
     image: Any,
     reference_gradient: float,
@@ -104,28 +132,7 @@ def build_texture_complexity_map(
             "reference_gradient must remain finite and strictly positive in float32"
         )
 
-    luminance_weights = image_float.new_tensor(
-        _TEXTURE_FORMULA_PROTOCOL["luminance_weights"]
-    ).view(1, 3, 1, 1)
-    luminance = torch.sum(image_float * luminance_weights, dim=1, keepdim=True)
-    _validate_finite_tensor("luminance", luminance)
-
-    kernel_x = image_float.new_tensor(
-        _TEXTURE_FORMULA_PROTOCOL["sobel_kernel_x"]
-    ).view(1, 1, 3, 3)
-    kernel_y = image_float.new_tensor(
-        _TEXTURE_FORMULA_PROTOCOL["sobel_kernel_y"]
-    ).view(1, 1, 3, 3)
-    padded = functional.pad(luminance, (1, 1, 1, 1), mode="replicate")
-    gradient_x = functional.conv2d(padded, kernel_x, stride=1)
-    gradient_y = functional.conv2d(padded, kernel_y, stride=1)
-    _validate_finite_tensor("gradient_x", gradient_x)
-    _validate_finite_tensor("gradient_y", gradient_y)
-
-    gradient_squared = torch.square(gradient_x) + torch.square(gradient_y)
-    _validate_finite_tensor("gradient_squared", gradient_squared)
-    gradient_magnitude = torch.sqrt(gradient_squared)
-    _validate_finite_tensor("gradient_magnitude", gradient_magnitude)
+    gradient_magnitude = _measure_gradient_magnitude(image_float)
     reference_normalized_gradient = gradient_magnitude / reference_tensor
     _validate_finite_tensor(
         "reference_normalized_gradient", reference_normalized_gradient
