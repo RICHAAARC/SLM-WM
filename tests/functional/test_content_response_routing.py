@@ -11,8 +11,10 @@ from main.methods.content import (
     ContentRoutingResult,
     LatentResponseResult,
     LocalSensitivityResult,
+    SemanticSaliencyResult,
     TextureResult,
     build_adjacent_latent_response_map,
+    build_prompt_conditioned_semantic_saliency,
     build_public_probe_local_sensitivity_map,
     build_texture_complexity_map,
     route_content_carriers,
@@ -32,6 +34,8 @@ def test_content_subpackage_exports_exact_public_interface() -> None:
         "build_texture_complexity_map",
         "LocalSensitivityResult",
         "build_public_probe_local_sensitivity_map",
+        "SemanticSaliencyResult",
+        "build_prompt_conditioned_semantic_saliency",
     )
     assert content.LatentResponseResult is LatentResponseResult
     assert content.ContentRoutingResult is ContentRoutingResult
@@ -43,6 +47,11 @@ def test_content_subpackage_exports_exact_public_interface() -> None:
     assert (
         content.build_public_probe_local_sensitivity_map
         is build_public_probe_local_sensitivity_map
+    )
+    assert content.SemanticSaliencyResult is SemanticSaliencyResult
+    assert (
+        content.build_prompt_conditioned_semantic_saliency
+        is build_prompt_conditioned_semantic_saliency
     )
     assert tuple(field.name for field in fields(LatentResponseResult)) == (
         "response_map",
@@ -56,6 +65,14 @@ def test_content_subpackage_exports_exact_public_interface() -> None:
         "lf_mask",
         "hf_tail_mask",
         "routing_identity_digest",
+    )
+    assert tuple(field.name for field in fields(SemanticSaliencyResult)) == (
+        "saliency_map",
+        "patch_relevance",
+        "image_feature_digest",
+        "prompt_feature_digest",
+        "saliency_map_digest",
+        "model_identity_digest",
     )
 
 

@@ -9,6 +9,10 @@ from main.methods.content.local_sensitivity import (
     build_public_probe_local_sensitivity_map,
 )
 from main.methods.content.routing import ContentRoutingResult, route_content_carriers
+from main.methods.content.saliency import (
+    SemanticSaliencyResult,
+    build_prompt_conditioned_semantic_saliency,
+)
 from main.methods.content.texture import TextureResult, build_texture_complexity_map
 
 __all__ = (
@@ -20,4 +24,6 @@ __all__ = (
     "build_texture_complexity_map",
     "LocalSensitivityResult",
     "build_public_probe_local_sensitivity_map",
+    "SemanticSaliencyResult",
+    "build_prompt_conditioned_semantic_saliency",
 )

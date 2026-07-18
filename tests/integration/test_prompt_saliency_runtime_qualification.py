@@ -11,6 +11,8 @@ from experiments.runtime import repository_environment
 from experiments.runtime.diffusion.prompt_saliency_model_loader import (
     load_prompt_saliency_clip_runtime,
 )
+from main.core.digest import tensor_content_sha256
+from main.methods.content import build_prompt_conditioned_semantic_saliency
 
 
 pytestmark = pytest.mark.integration
@@ -57,6 +59,33 @@ def _independently_normalize_features(value: torch.Tensor) -> torch.Tensor:
     normalized = resolved / norms
     assert torch.isfinite(normalized).all()
     return normalized
+
+
+class _RecordingRuntimeProxy:
+    """只转发真实runtime并记录正式显著性build实际消费的特征。"""
+
+    def __init__(self, runtime: object) -> None:
+        self._runtime = runtime
+        self.image_features: torch.Tensor | None = None
+        self.prompt_feature: torch.Tensor | None = None
+        self.image_calls = 0
+        self.prompt_calls = 0
+
+    @property
+    def model_identity_digest(self) -> str:
+        return self._runtime.model_identity_digest
+
+    def encode_image_patch_features(self, image: torch.Tensor) -> torch.Tensor:
+        self.image_calls += 1
+        value = self._runtime.encode_image_patch_features(image)
+        self.image_features = value.detach().clone()
+        return value
+
+    def encode_prompt_feature(self, prompt: str) -> torch.Tensor:
+        self.prompt_calls += 1
+        value = self._runtime.encode_prompt_feature(prompt)
+        self.prompt_feature = value.detach().clone()
+        return value
 
 
 def test_real_processor_range_bridge_matches_frozen_default_rescale(
@@ -193,3 +222,74 @@ def test_real_legacy_eos_pooler_matches_standard_argmax_rule(
     torch.testing.assert_close(output.pooler_output, expected, rtol=0.0, atol=0.0)
     assert not torch.equal(output.pooler_output, last_hidden[:, 0, :])
     assert not torch.equal(output.pooler_output, last_hidden.mean(dim=1))
+
+
+def test_real_prompt_conditioned_saliency_formula_and_counterfactuals(
+    qualified_runtime: object,
+) -> None:
+    """真实CLIP特征必须形成非恒定7x7显著图及双反事实变化。"""
+
+    image = _nontrivial_rgb_image()
+    prompt = "a red geometric object on a plain field"
+    proxy = _RecordingRuntimeProxy(qualified_runtime)
+    result = build_prompt_conditioned_semantic_saliency(image, prompt, proxy)
+
+    assert proxy.image_calls == proxy.prompt_calls == 1
+    assert proxy.image_features is not None
+    assert proxy.prompt_feature is not None
+    expected_relevance = torch.sum(
+        proxy.image_features * proxy.prompt_feature.unsqueeze(1),
+        dim=-1,
+    )
+    expected_map = torch.clamp(
+        (expected_relevance.reshape(1, 1, 7, 7) + 1.0) / 2.0,
+        min=0.0,
+        max=1.0,
+    )
+    torch.testing.assert_close(
+        result.patch_relevance,
+        expected_relevance,
+        rtol=1.0e-6,
+        atol=1.0e-6,
+    )
+    torch.testing.assert_close(
+        result.saliency_map,
+        expected_map,
+        rtol=1.0e-6,
+        atol=1.0e-6,
+    )
+    assert result.patch_relevance.shape == (1, 49)
+    assert result.saliency_map.shape == (1, 1, 7, 7)
+    assert result.patch_relevance.dtype == torch.float32
+    assert result.saliency_map.dtype == torch.float32
+    assert torch.isfinite(result.patch_relevance).all()
+    assert torch.isfinite(result.saliency_map).all()
+    assert torch.all((result.saliency_map >= 0.0) & (result.saliency_map <= 1.0))
+    assert torch.max(result.saliency_map) > torch.min(result.saliency_map)
+    assert result.image_feature_digest == tensor_content_sha256(
+        proxy.image_features
+    )
+    assert result.prompt_feature_digest == tensor_content_sha256(
+        proxy.prompt_feature
+    )
+    assert result.saliency_map_digest == tensor_content_sha256(result.saliency_map)
+    assert result.model_identity_digest == qualified_runtime.model_identity_digest
+
+    prompt_proxy = _RecordingRuntimeProxy(qualified_runtime)
+    prompt_changed = build_prompt_conditioned_semantic_saliency(
+        image,
+        "a blue animal beside a green tree",
+        prompt_proxy,
+    )
+    image_proxy = _RecordingRuntimeProxy(qualified_runtime)
+    image_changed = build_prompt_conditioned_semantic_saliency(
+        torch.flip(image, dims=(-1,)),
+        prompt,
+        image_proxy,
+    )
+    assert prompt_proxy.image_calls == prompt_proxy.prompt_calls == 1
+    assert image_proxy.image_calls == image_proxy.prompt_calls == 1
+    assert not torch.equal(result.patch_relevance, prompt_changed.patch_relevance)
+    assert not torch.equal(result.saliency_map, prompt_changed.saliency_map)
+    assert not torch.equal(result.patch_relevance, image_changed.patch_relevance)
+    assert not torch.equal(result.saliency_map, image_changed.saliency_map)
