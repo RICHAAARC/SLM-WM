@@ -345,18 +345,30 @@ class GeometrySyncUpdate:
 
 
 def build_attention_geometry_sync_update(
-    content_only_latent_float32: Tensor,
-    transformer_forward: Callable[[Any], Any],
-    recorder: Any,
-    key_material: str,
-    writable_capacity_map: Any,
     *,
+    current_scheduler_latent: Tensor,
+    content_update: ContentCarrierUpdateResult,
+    transformer_forward: Callable[[Tensor], Any],
+    recorder: DifferentiableAttentionRecorder,
+    key_material: str,
     prg_version: str,
 ) -> GeometrySyncUpdate:
     """在冻结 z_content 基底按0.0010强度和回溯构造真实 Q/K 更新。"""
 ```
 
-`content_only_latent_float32` 必须精确等于 `float32(z10)+Delta_LF+Delta_HF-tail`，其中两个项先按 `method_role` 解析，被关闭内容分支精确为零，活动内容分支使用尚未经过共同 `gamma` 缩放的名义更新；不得遗漏活动分支或接受其他 latent 基底。`content_chain_only` 与 `geometry_recovery_without_embedded_sync` 不调用该接口，并令几何更新为零。该接口不得接收 `JacobianNullSpaceResult`，也不得依赖 JVP/VJP 或 Null Space 投影。几何更新必须直接由冻结层真实 Q/K 原子、带密钥关系模板、单调回溯和证据摘要构成。
+该接口只接受 `ContentCarrierUpdateResult` 的进程内正式结果。`current_scheduler_latent` 是权威 `z10` 内容、actual dtype/device 和几何范数来源：实现必须先在原 device 构造 `z10_float32=float32(z10)` 与 `n_z=||z10_float32||_2`，要求 `n_z` 为正有限且其 Python float 逐字等于 `content_update.latent_l2`；随后按固定 `LF -> HF-tail` 顺序逐值复验 `content_only_latent_float32 == z10_float32+lf_update+hf_tail_update`。`lf_update`、`hf_tail_update` 与 content-only latent 精确为 `[1,C,H,W]`，`geometry_capacity_map` 精确为同 device、同 `B/H/W` 的 `[1,1,H,W]` 并只通过 channel 广播作用于梯度。几何名义预算唯一为同 device float32 标量 `b_geo=0.0010*n_z`，不得改用 content-only latent 的范数。
+
+只有 `full_dual_chain`、`uniform_content_routing`、`lf_only_content` 与 `hf_tail_only_content` 调用该接口；`content_chain_only` 与 `geometry_recovery_without_embedded_sync` 必须在任何 recorder clear、Transformer forward 或 autograd 前失败关闭，并由外层令几何更新为零。本核只验证调用方 `prg_version` 属于受支持版本，并把它写入两个返回摘要；`ContentCarrierUpdateResult` 不承载 LF/HF 模板 PRG 身份，因此模板版本与本次几何评分版本的跨阶段一致性必须由正式 runtime/formal execution lock qualification 复验，不得在本接口伪造该证明。
+
+梯度求值必须精确调用一次 `compute_attention_geometry_gradient()`，固定层名及顺序为 `("transformer_blocks.0.attn", "transformer_blocks.23.attn")`、`stable_token_fraction=0.5`、`unstable_pair_weight=0.25`、四个关系分量等权且全部活动。返回的 `AttentionGeometryGradient` 必须绑定当前 content-only float32 latent 摘要、实际 float32 gradient 范数、直接 Q/K 来源、完整 operator/QK atom ready 身份、稳定 token positions/indices、稳定 pair identity/realization 和 keyed projection。正式方向唯一为 `D_geo=A*g/(||g||_2+1e-12)`，不得在容量掩码后重归一化；零或非有限方向失败关闭。
+
+回溯先对 `Cast_actual_dtype(z_content)` 执行一次 baseline Q/K 求值，再按 `k=0..8` 构造 `scale=2^-k`、accepted budget `b_geo*scale`、theoretical float32 update `Delta_geo=(b_geo*scale)*D_geo` 和 actual-dtype candidate。每个 candidate 在 forward 前必须以 `candidate.detach().float()-baseline.detach().float()` 复验实际量化增量有限、非零且 L2 不超过本次 accepted budget；只有通过该门禁的 candidate 才能 clear recorder 并求值，首个满足 `score_after>score_before` 的候选被接受。每次 Q/K forward 前必须 clear，禁止记录跨求值累积。返回字段 `l2_budget` 是 accepted float32 budget，`geometry_update` 是 accepted theoretical float32 branch update，不得把 actual-dtype delta 或 nominal budget冒充其中任一字段。
+
+`qk_atomic_records_digest` 必须按梯度基底、actual-dtype baseline 与 accepted actual-dtype candidate 的求值顺序聚合三次 Q/K 原子证据，并以现有 ready helper、冻结层名和完整求值身份复验。baseline/candidate 每次评分必须显式复用 gradient evidence 产生的同一个 `StableAttentionPairWeights` 对象；pair 身份不得伪写为 `AttentionRelationGraphIdentity` 的字段。
+
+`relation_template_identity_digest` 绑定不随 latent 变化的评分模板身份，包括冻结层与稳定 token 选择、关系分量和权重、operator、稳定 pair、keyed projection 及 PRG 身份。`geometry_update_digest` 绑定权威 `z10` 与 content base、容量、gradient、direction、accepted actual-dtype candidate 与实际量化 delta、回溯预算与前后分数，并纳入前述 Q/K 证据和评分模板身份。exact payload 边界由 owning implementation 及其行为测试唯一维护；两个摘要均不得包含明文 key，也不得 round 分数或 float32 公式完成后取得的标量。
+
+该接口不得接收 `JacobianNullSpaceResult`，不得依赖 JVP/VJP、Null Space 投影、旧 attention optimizer 或多分支写回组合器。CPU ToyAttention 性质测试只证明公式、证据和失败关闭边界；真实 SD3.5 Transformer、actual `z10`、CUDA autograd 与 qualification 必须另获 GPU 授权，禁止以 CPU fixture、proxy、skip 或 fallback 冒充。
 
 ### 3.6 三分支一次写回
 
