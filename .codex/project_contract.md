@@ -10,9 +10,9 @@
 - `target_construction_unit`: `experiment_protocol_validation`
 - `project_unit` 只表示当前允许推进的构建范围；`target_construction_unit` 表示当前单元闭合后的下一构建目标，二者都不表示完成状态。完成状态只由项目构建状态规范登记。
 - 当前唯一算法原语权威来源是 `docs/builds/algorithm_primitives_content_adaptive_dual_carrier_latent_watermark.md`。
-- 当前唯一方法机制与接口设计来源是 `docs/builds/method_mechanism_design_content_adaptive_dual_carrier_latent_watermark.md`。
+- 当前唯一方法机制语义与公开接口职责来源是 `docs/builds/method_mechanism_design_content_adaptive_dual_carrier_latent_watermark.md`。运行时实际消费的 exact machine schema 必须由其 owning implementation module 唯一拥有；人类可读文档不得复制第二套 exact key 或 validator 映射。
 - 当前唯一项目状态、保留/修改/移除清单和实施顺序来源是 `docs/builds/project_construction_state.md`。
-- 三份核心文档是当前权威设计来源，且已完成职责排他、公式唯一、接口/schema 闭合与独立复审。外围契约、README、构建清单和发布文档只能单向消费三份核心文档，不得复制第二套公式、接口或迁移状态。
+- 三份核心文档是当前算法、方法语义、公开接口职责与项目状态的权威设计来源。外围契约、README、构建清单和发布文档只能单向消费三份核心文档，不得复制第二套公式、接口或迁移状态。由正式代码消费的 exact machine schema 只允许在 owning implementation module 中出现一次；例如 content-routing reference registry 的唯一 exact schema 与 validator 归属 `experiments/protocol/content_routing_reference_registry.py`，方法文档只保留最小科学语义和 promotion 不变量。
 - 正式方法固定为“语义显著性自适应内容-几何双链潜空间水印”。具体数学语义、禁止主张和参数边界只以算法原语文档为准，本契约不重复定义。
 - 当前实现与目标方法的差距只以 `docs/builds/project_construction_state.md` 为准。迁移前代码和兼容记录不得覆盖三份核心文档，也不得支持目标方法主张。
 - 在核心实现、配置、登记表、CPU 性质测试和 GPU 资格化全部迁移前，正式论文结果生产处于阻断状态。历史 `c6139ced` 结果及其他旧提交结果只能作为历史工程证据。
@@ -113,6 +113,14 @@
 3. 业务函数内部只保留关键边界校验, 例如外部输入边界、不可恢复状态边界、跨模块协议边界或会导致静默错误的核心算法前置条件。
 4. 相同字段、相同配置项、相同数据结构的错误信息不应在多个业务函数中分散维护; 应由统一解析器、schema 或测试断言提供稳定诊断。
 5. 核心算法实现应优先呈现方法逻辑、数据流和统计边界, 不应被重复的防御式样板代码淹没。
+
+## Method Progress Admission
+
+1. 新增治理模块前必须已经存在当前真实 producer 与 consumer；不得仅为未来可能的 writer、artifact 或 qualification 预建基础设施。
+2. 新增 schema、digest 或 manifest 必须绑定现有记录无法表达的独立科学事实；重复序列化、重摘要或路径包装不构成新事实。
+3. 新增治理测试必须直接验证算法真实性、数据隔离、可重建性或正式证据边界；只验证多份治理文件措辞一致的测试不具备准入资格。
+4. 治理增长不得连续超过一个构建原子；下一原子必须推进算法公式、runtime 执行、真实 GPU 观测、旧正式依赖退出或 qualification 之一。
+5. 真实运行暴露的问题优先使用最小修复；项目目标是形成合理可行且可证伪的方法实现，不默认建设通用持久化或顶会级治理基础设施。
 
 ## Test Governance
 
