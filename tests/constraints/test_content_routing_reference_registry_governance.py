@@ -4,6 +4,7 @@ import ast
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 from typing import Any
@@ -22,7 +23,7 @@ FIELD_LIFECYCLE_REGISTRY = ROOT / "configs/field_lifecycle_registry.json"
 REFERENCE_REGISTRY = ROOT / "configs/content_routing_reference_registry.json"
 CONTRACT_NAME = "CONTENT_ROUTING_REFERENCE_REGISTRY_MACHINE_CONTRACT"
 EXPECTED_CONTRACT_SHA256 = (
-    "bf2ab201bc85b4d72912ce1c7c167e3c01cc0d9514c7b214c18990757997d961"
+    "8b301ae238146fecb27903a2d9bb88e6a6cd48492bcc84b9d7fd2350a3de621b"
 )
 
 
@@ -127,6 +128,260 @@ def _assert_materialization_nested_contracts_are_closed(
                 assert target_name in nested_contract, (contract_name, field_name)
                 target = nested_contract[target_name]
                 assert type(target) is dict and target
+
+
+def _assert_exact_flag_tokens(
+    tokens: Any,
+    expected_names: tuple[str, ...],
+) -> None:
+    assert type(tokens) is tuple
+    assert len(tokens) == len(set(tokens))
+    assert set(tokens) == set(expected_names)
+    allowed_flags = {
+        name: getattr(os, name)
+        for name in (
+            "O_RDONLY",
+            "O_WRONLY",
+            "O_CREAT",
+            "O_EXCL",
+            "O_DIRECTORY",
+            "O_CLOEXEC",
+            "O_NOFOLLOW",
+            "O_NONBLOCK",
+        )
+    }
+    assert set(tokens) <= set(allowed_flags)
+    captured_flags = 0
+    expected_flags = 0
+    for name in tokens:
+        captured_flags |= allowed_flags[name]
+    for name in expected_names:
+        expected_flags |= allowed_flags[name]
+    assert captured_flags == expected_flags
+    if "O_RDONLY" in expected_names:
+        assert captured_flags & os.O_ACCMODE == os.O_RDONLY
+
+
+def _assert_ordered_fragments(values: Any, fragments: tuple[str, ...]) -> None:
+    assert type(values) is tuple
+    assert len(values) == len(fragments)
+    assert len(values) == len(set(values))
+    positions: list[int] = []
+    for fragment in fragments:
+        matches = [index for index, value in enumerate(values) if fragment in value]
+        assert len(matches) == 1, fragment
+        positions.append(matches[0])
+    assert positions == list(range(len(values)))
+
+
+def _assert_writer_contract_is_closed(materialization: dict[str, Any]) -> None:
+    writer = materialization["writer_file_dag_contract"]
+    api = writer["public_api_contract"]
+    assert tuple(api["keyword_only_parameters"]) == tuple(api["input_contracts"])
+    assert set(api["keyword_only_parameters"]).isdisjoint(
+        api["forbidden_parameters"]
+    )
+    assert "qualification_report" not in " ".join(api["keyword_only_parameters"])
+    assert "only_writer_symbol" in api["public_export_rule"]
+
+    pre_mutation = writer["pre_filesystem_mutation_contract"]
+    _assert_ordered_fragments(
+        pre_mutation["ordered_steps"],
+        (
+            "machine_contract",
+            "input_containers",
+            "manifest_bytes",
+            "candidate_directory_identity",
+            "raw_member_dict",
+            "raw_member_bytes",
+            "candidate_registry",
+            "manifest_registry",
+        ),
+    )
+    assert "before_repository_root_open_or_mutation" in pre_mutation[
+        "first_filesystem_mutation_rule"
+    ]
+    assert "zero_candidate_filesystem_mutation" in pre_mutation["failure_rule"]
+
+    root = writer["repository_root_contract"]
+    future_writer_path = root["future_writer_module_path"]
+    assert future_writer_path.endswith(".py")
+    assert api["module"] == future_writer_path.removesuffix(".py").replace("/", ".")
+    assert api["symbol"] == (
+        "write_content_routing_reference_materialization_candidate"
+    )
+    assert root["future_writer_module_path"] == (
+        "experiments/protocol/content_routing_reference_candidate_writer.py"
+    )
+    assert root["derivation_expression"] == "Path(__file__).resolve().parents[2]"
+    assert root["resolve_allowed_scope"] == "trusted_loaded_module_file_only"
+    assert root["resolve_for_candidate_paths_is_forbidden"] is True
+    assert root["candidate_path_operations_are_single_component_dirfd_relative"] is True
+    assert root["path_precheck_and_follow_are_forbidden"] is True
+    _assert_exact_flag_tokens(
+        root["root_open_flags"],
+        ("O_RDONLY", "O_DIRECTORY", "O_CLOEXEC", "O_NOFOLLOW"),
+    )
+    _assert_ordered_fragments(root["root_open_sequence"], ("open", "fstat", "require"))
+
+    directories = writer["directory_contract"]
+    assert tuple(directories["shared_parent_components"]) == tuple(
+        writer["persistent_root"].split("/")
+    )
+    assert directories["shared_parent_missing_policy"].startswith("create")
+    assert directories["created_directory_mode"] == 0o700
+    _assert_ordered_fragments(
+        directories["created_directory_sequence"],
+        ("mkdir", "open", "fchmod", "fstat", "fsync_new", "fsync_parent"),
+    )
+    _assert_ordered_fragments(
+        directories["existing_shared_parent_sequence"],
+        ("open", "fstat", "do_not_chmod"),
+    )
+    assert "without_ownership_or_chmod" in directories["mkdir_eexist_rule"]
+    assert directories["process_umask_read_or_mutation_is_forbidden"] is True
+    assert directories["raw_directory_component"] == "raw"
+    assert directories["candidate_subdirectory_sources"][0] == (
+        "directory_contract.raw_directory_component"
+    )
+    _assert_exact_flag_tokens(
+        directories["open_flags"],
+        ("O_RDONLY", "O_DIRECTORY", "O_CLOEXEC", "O_NOFOLLOW"),
+    )
+
+    existing = writer["existing_candidate_read_contract"]
+    _assert_exact_flag_tokens(
+        existing["file_open_flags"],
+        ("O_RDONLY", "O_CLOEXEC", "O_NOFOLLOW", "O_NONBLOCK"),
+    )
+    _assert_ordered_fragments(
+        existing["file_open_sequence"],
+        ("openat", "fstat", "require_regular", "read_all", "close"),
+    )
+    assert existing["directory_enumeration_rule"] == (
+        "os.listdir(opened_directory_fd)_only"
+    )
+    assert existing[
+        "path_stat_exists_is_file_resolve_second_open_glob_and_path_walk_are_forbidden"
+    ] is True
+    assert type(existing["read_chunk_bytes"]) is int
+    assert existing["read_chunk_bytes"] > 0
+    read_contract = existing["read_all_contract"]
+    read_rules = tuple(read_contract.values())
+    assert len(read_rules) == len(set(read_rules))
+    read_contract_tokens = tuple(
+        f"{key} {value}" for key, value in read_contract.items()
+    )
+    for fragment in (
+        "retry_os_read",
+        "short",
+        "eof",
+        "fail_closed",
+        "zero_reads",
+        "single_close_no_retry",
+        "exception_group_primary_then_close",
+    ):
+        assert any(fragment in token for token in read_contract_tokens)
+    assert existing["writer_owned_file_mode"] == 0o600
+
+    registry_filename = materialization["candidate_registry_file_record_contract"][
+        "field_rules"
+    ]["path"]["exact_value"]
+    manifest_filename = materialization["materialization_manifest_contract"][
+        "filename"
+    ]
+    report_filename = materialization["qualification_report_contract"]["filename"]
+    assert tuple(existing["candidate_root_exact_required_entry_sources"]) == (
+        "directory_contract.raw_directory_component",
+        "candidate_registry_file_record_contract.field_rules.path.exact_value",
+        "materialization_manifest_contract.filename",
+    )
+    assert existing["candidate_root_optional_entry_source"] == (
+        "qualification_report_contract.filename"
+    )
+
+    temp = writer["temp_file_contract"]
+    assert temp["name_template"] == ".{final_component}.tmp"
+    for final_component in (
+        registry_filename,
+        manifest_filename,
+        report_filename,
+    ):
+        assert temp["name_template"].format(
+            final_component=final_component
+        ) == f".{final_component}.tmp"
+    assert temp["created_file_mode"] == 0o600
+    _assert_ordered_fragments(
+        temp["open_sequence"],
+        ("openat", "fchmod", "fstat", "allow_first_write"),
+    )
+    assert set(temp["random_name_sources_are_forbidden"]) >= {
+        "nonce",
+        "pid",
+        "time",
+        "random",
+        "caller_supplied_temp_name",
+    }
+    assert temp["glob_or_prefix_cleanup_is_forbidden"] is True
+    _assert_exact_flag_tokens(
+        temp["open_flags"],
+        ("O_WRONLY", "O_CREAT", "O_EXCL", "O_CLOEXEC", "O_NOFOLLOW"),
+    )
+
+    write_rules = tuple(writer["write_all_contract"].values())
+    for fragment in ("retry_os_write", "positive_written_count", "fail_closed"):
+        assert any(fragment in rule for rule in write_rules)
+    publish = writer["durable_publish_contract"]
+    _assert_ordered_fragments(
+        publish["per_file_sequence"],
+        ("write_all", "fsync_temp", "close", "os_replace", "fsync_containing"),
+    )
+    assert tuple(publish["publication_order"]) == (
+        "ordered_raw_member_files",
+        "candidate_registry",
+        "materialization_manifest",
+    )
+    assert publish["qualification_report_writer_is_excluded"] is True
+    assert "not_single_atomic_directory_replace" in publish["atomicity_claim"]
+
+    states = writer["candidate_state_contract"]
+    _assert_ordered_fragments(
+        states["exclusive_states"],
+        (
+            "new_candidate",
+            "complete_byte_identical",
+            "partial_candidate",
+            "collision",
+            "nonregular_or_unknown",
+        ),
+    )
+    assert states["mkdir_winner_is_only_writer"] is True
+    assert states["existing_candidate_branch_is_read_only"] is True
+    assert "bytes_equal_inputs" in states["idempotent_success_rule"]
+    assert "without_overwrite" in states["collision_rule"]
+    assert "without_wait_resume_takeover_or_cleanup" in states["partial_rule"]
+    assert "partial_candidate" in existing["unknown_or_temp_entry_rule"]
+    assert states["overwrite_and_fallback_are_forbidden"] is True
+
+    cleanup = writer["owned_cleanup_contract"]
+    assert len(cleanup["owned_entry_sources"]) == len(
+        set(cleanup["owned_entry_sources"])
+    )
+    assert "reverse_exact_creation_order" in cleanup["cleanup_order"]
+    assert "only_exact_owned_names" in cleanup["file_cleanup_rule"]
+    assert "only_owned_and_current_empty_directories" in cleanup[
+        "directory_cleanup_rule"
+    ]
+    assert cleanup["preexisting_unknown_and_other_candidate_deletion_is_forbidden"] is True
+    assert cleanup["recursive_glob_prefix_and_age_based_cleanup_are_forbidden"] is True
+    assert cleanup["operator_reclamation_requires_separate_governed_protocol"] is True
+
+    ordered_steps = tuple(writer["ordered_steps"])
+    assert "qualification_report_last" in ordered_steps[-1]
+    assert writer["manifest_binds_only_qualification_report_path"] is True
+    assert writer["qualification_report_is_last_candidate_file"] is True
+    assert writer["partial_candidate_supports_paper_claim"] is False
+    assert writer["configs_write_is_forbidden"] is True
 
 
 def test_content_routing_reference_registry_machine_contract() -> None:
@@ -310,9 +565,8 @@ def test_content_routing_reference_registry_machine_contract() -> None:
     assert qualification["ready_rule"]
 
     writer = materialization["writer_file_dag_contract"]
-    assert "qualification_report_last" in tuple(writer["ordered_steps"])[-1]
-    assert writer["manifest_binds_only_qualification_report_path"] is True
-    assert writer["configs_write_is_forbidden"] is True
+    assert writer
+    _assert_writer_contract_is_closed(materialization)
 
     promotion = materialization["promotion_contract"]
     assert promotion["destination_path"] == (
@@ -356,6 +610,134 @@ def test_materialization_nested_contract_mutations_fail_closed() -> None:
             )
             with pytest.raises(AssertionError):
                 _assert_materialization_nested_contracts_are_closed(unknown_target)
+
+
+def test_candidate_writer_contract_mutations_fail_closed() -> None:
+    materialization = _machine_contract()["materialization_contract"]
+    _assert_writer_contract_is_closed(materialization)
+
+    mutations: tuple[tuple[tuple[str, ...], Any], ...] = (
+        (
+            ("repository_root_contract", "root_open_sequence"),
+            (
+                "open_and_fstat_same_fd",
+                "irrelevant_filler",
+                "require_directory_before_child_operation",
+            ),
+        ),
+        (
+            ("public_api_contract", "module"),
+            "experiments.protocol.other_writer",
+        ),
+        (
+            ("public_api_contract", "symbol"),
+            "unsafe_writer",
+        ),
+        (
+            ("candidate_state_contract", "exclusive_states"),
+            (
+                "new_candidate_directory_mkdir_winner",
+                "existing_complete_byte_identical_candidate",
+                "existing_partial_candidate",
+                "existing_same_digest_different_bytes_collision",
+                "unclassified_junk_state",
+            ),
+        ),
+        (
+            ("existing_candidate_read_contract", "file_open_flags"),
+            ("O_RDONLY", "O_CLOEXEC", "O_NOFOLLOW"),
+        ),
+        (
+            ("existing_candidate_read_contract", "file_open_sequence"),
+            (
+                "path_exists_precheck",
+                "openat_exact_final_component_once",
+                "fstat_same_fd",
+                "require_regular_and_exact_mode_0600_before_first_read",
+                "read_all_from_same_fd",
+                "second_open",
+                "close_same_fd_exactly_once",
+            ),
+        ),
+        (
+            ("existing_candidate_read_contract", "directory_enumeration_rule"),
+            "pathlib_path_rglob",
+        ),
+        (
+            ("temp_file_contract", "name_template"),
+            ".{final_component}.{pid}.tmp",
+        ),
+        (
+            ("temp_file_contract", "open_sequence"),
+            (
+                "openat_deterministic_temp_component_with_exact_flags_and_mode_0600",
+                "fstat_same_fd_require_regular",
+                "allow_first_write",
+            ),
+        ),
+        (
+            ("directory_contract", "created_directory_sequence"),
+            (
+                "mkdirat_with_mode_0700",
+                "open_same_component_with_exact_directory_flags",
+                "fstat_same_fd_require_directory",
+                "fsync_parent_directory_fd",
+            ),
+        ),
+        (
+            ("directory_contract", "process_umask_read_or_mutation_is_forbidden"),
+            False,
+        ),
+        (
+            ("repository_root_contract", "derivation_expression"),
+            "Path.cwd()",
+        ),
+        (
+            (
+                "repository_root_contract",
+                "resolve_for_candidate_paths_is_forbidden",
+            ),
+            False,
+        ),
+        (
+            ("directory_contract", "shared_parent_components"),
+            ("outputs", "alternate_materialization_root"),
+        ),
+        (
+            ("candidate_state_contract", "existing_candidate_branch_is_read_only"),
+            False,
+        ),
+        (
+            (
+                "owned_cleanup_contract",
+                "recursive_glob_prefix_and_age_based_cleanup_are_forbidden",
+            ),
+            False,
+        ),
+        (
+            (
+                "owned_cleanup_contract",
+                "preexisting_unknown_and_other_candidate_deletion_is_forbidden",
+            ),
+            False,
+        ),
+        (
+            ("durable_publish_contract", "publication_order"),
+            (
+                "materialization_manifest",
+                "ordered_raw_member_files",
+                "candidate_registry",
+            ),
+        ),
+    )
+    for path, replacement in mutations:
+        changed = copy.deepcopy(materialization)
+        target = changed["writer_file_dag_contract"]
+        for component in path[:-1]:
+            target = target[component]
+        target[path[-1]] = replacement
+        with pytest.raises(AssertionError):
+            _assert_writer_contract_is_closed(changed)
 
 
 def test_content_routing_reference_registry_identity_matches_governed_sd35() -> None:

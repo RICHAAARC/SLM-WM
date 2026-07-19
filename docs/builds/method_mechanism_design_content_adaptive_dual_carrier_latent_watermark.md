@@ -1820,6 +1820,230 @@ CONTENT_ROUTING_REFERENCE_REGISTRY_MACHINE_CONTRACT = {
             ),
         },
         "writer_file_dag_contract": {
+            "public_api_contract": {
+                "module": "experiments.protocol.content_routing_reference_candidate_writer",
+                "symbol": "write_content_routing_reference_materialization_candidate",
+                "keyword_only_parameters": (
+                    "raw_member_bytes_by_path",
+                    "candidate_registry_bytes",
+                    "materialization_manifest_bytes",
+                ),
+                "input_contracts": {
+                    "raw_member_bytes_by_path": "exact_dict_with_manifest_raw_paths_as_exact_key_set_and_exact_bytes_values",
+                    "candidate_registry_bytes": "exact_bytes",
+                    "materialization_manifest_bytes": "exact_bytes",
+                },
+                "return_contract": "path_to_durable_prequalification_candidate_directory",
+                "public_export_rule": "module___all___contains_only_writer_symbol",
+                "forbidden_parameters": (
+                    "path",
+                    "root",
+                    "overwrite",
+                    "resume",
+                    "cleanup",
+                    "dry_run",
+                    "default",
+                    "fallback",
+                    "qualification_report_bytes",
+                ),
+            },
+            "pre_filesystem_mutation_contract": {
+                "ordered_steps": (
+                    "load_and_preflight_single_machine_contract",
+                    "validate_exact_input_containers_and_types",
+                    "strictly_parse_and_validate_canonical_manifest_bytes",
+                    "recompute_manifest_semantic_digest_and_candidate_directory_identity",
+                    "require_raw_member_dict_exact_key_set_equal_manifest_ordered_raw_paths",
+                    "decode_and_validate_every_raw_member_bytes_against_manifest_record",
+                    "validate_candidate_registry_canonical_semantic_and_file_identity",
+                    "require_manifest_registry_semantic_and_file_identity_match",
+                ),
+                "raw_write_order_source": "manifest_population_then_member_sequence_order_not_dict_insertion_order",
+                "first_filesystem_mutation_rule": "all_pre_filesystem_mutation_steps_complete_before_repository_root_open_or_mutation",
+                "failure_rule": "any_pre_filesystem_mutation_failure_has_zero_candidate_filesystem_mutation",
+            },
+            "repository_root_contract": {
+                "future_writer_module_path": "experiments/protocol/content_routing_reference_candidate_writer.py",
+                "derivation_expression": "Path(__file__).resolve().parents[2]",
+                "resolve_allowed_scope": "trusted_loaded_module_file_only",
+                "resolve_for_candidate_paths_is_forbidden": True,
+                "root_open_function": "os.open",
+                "root_open_flags": (
+                    "O_RDONLY",
+                    "O_DIRECTORY",
+                    "O_CLOEXEC",
+                    "O_NOFOLLOW",
+                ),
+                "root_open_sequence": (
+                    "open_exact_derived_repository_root_once",
+                    "fstat_same_fd",
+                    "require_directory_before_child_operation",
+                ),
+                "candidate_path_operations_are_single_component_dirfd_relative": True,
+                "path_precheck_and_follow_are_forbidden": True,
+            },
+            "directory_contract": {
+                "open_flags": (
+                    "O_RDONLY",
+                    "O_DIRECTORY",
+                    "O_CLOEXEC",
+                    "O_NOFOLLOW",
+                ),
+                "shared_parent_components": (
+                    "outputs",
+                    "content_routing_reference_materialization",
+                ),
+                "shared_parent_missing_policy": "create_each_missing_component_safely",
+                "created_directory_mode": 0o700,
+                "created_directory_sequence": (
+                    "mkdirat_with_mode_0700",
+                    "open_same_component_with_exact_directory_flags",
+                    "fchmod_same_fd_to_0700",
+                    "fstat_same_fd_require_directory_and_exact_mode_0700",
+                    "fsync_new_directory_fd",
+                    "fsync_parent_directory_fd",
+                ),
+                "existing_shared_parent_sequence": (
+                    "open_same_component_with_exact_directory_flags",
+                    "fstat_same_fd_require_directory",
+                    "do_not_chmod_or_claim_ownership",
+                ),
+                "mkdir_eexist_rule": "reopen_nofollow_and_fstat_without_ownership_or_chmod",
+                "candidate_directory_component_source": "content_routing_reference_materialization_manifest_digest",
+                "candidate_directory_identity_rule": "final_component_is_exact_64_lower_hex_manifest_semantic_digest",
+                "candidate_and_owned_subdirectory_mode_rule": "existing_or_created_writer_owned_directories_have_exact_mode_0700",
+                "raw_directory_component": "raw",
+                "candidate_subdirectory_sources": (
+                    "directory_contract.raw_directory_component",
+                    "registry_population_order_kind_components",
+                ),
+                "process_umask_read_or_mutation_is_forbidden": True,
+            },
+            "existing_candidate_read_contract": {
+                "file_open_flags": (
+                    "O_RDONLY",
+                    "O_CLOEXEC",
+                    "O_NOFOLLOW",
+                    "O_NONBLOCK",
+                ),
+                "file_open_sequence": (
+                    "openat_exact_final_component_once",
+                    "fstat_same_fd",
+                    "require_regular_and_exact_mode_0600_before_first_read",
+                    "read_all_from_same_fd",
+                    "close_same_fd_exactly_once",
+                ),
+                "directory_enumeration_rule": "os.listdir(opened_directory_fd)_only",
+                "path_stat_exists_is_file_resolve_second_open_glob_and_path_walk_are_forbidden": True,
+                "read_chunk_bytes": 1048576,
+                "read_all_contract": {
+                    "interrupted_read_rule": "retry_os_read_on_same_fd",
+                    "short_read_rule": "append_every_nonempty_chunk_without_assuming_full_chunk",
+                    "eof_rule": "first_empty_bytes_result_is_only_eof",
+                    "other_read_error_rule": "fail_closed",
+                    "nonregular_rule": "zero_reads_and_close_fd",
+                    "close_rule": "single_close_no_retry",
+                    "close_error_rule": "single_close_no_retry_exception_group_primary_then_close_v1",
+                },
+                "candidate_root_exact_required_entry_sources": (
+                    "directory_contract.raw_directory_component",
+                    "candidate_registry_file_record_contract.field_rules.path.exact_value",
+                    "materialization_manifest_contract.filename",
+                ),
+                "candidate_root_optional_entry_source": "qualification_report_contract.filename",
+                "raw_kind_order_source": "registry_population_order",
+                "raw_member_entry_source": "materialization_manifest_raw_member_records_in_member_sequence_order",
+                "unknown_or_temp_entry_rule": "partial_candidate_fail_closed_without_mutation",
+                "qualification_report_content_rule": "optional_opaque_bytes_read_safely_without_qualification_claim",
+                "writer_owned_file_mode": 0o600,
+            },
+            "temp_file_contract": {
+                "name_template": ".{final_component}.tmp",
+                "name_derivation_rule": "dot_plus_exact_final_component_plus_dot_tmp",
+                "open_flags": (
+                    "O_WRONLY",
+                    "O_CREAT",
+                    "O_EXCL",
+                    "O_CLOEXEC",
+                    "O_NOFOLLOW",
+                ),
+                "created_file_mode": 0o600,
+                "open_sequence": (
+                    "openat_deterministic_temp_component_with_exact_flags_and_mode_0600",
+                    "fchmod_same_fd_to_0600",
+                    "fstat_same_fd_require_regular_and_exact_mode_0600",
+                    "allow_first_write",
+                ),
+                "random_name_sources_are_forbidden": (
+                    "nonce",
+                    "uuid",
+                    "pid",
+                    "thread_id",
+                    "time",
+                    "random",
+                    "caller_supplied_temp_name",
+                ),
+                "glob_or_prefix_cleanup_is_forbidden": True,
+                "existing_temp_name_rule": "partial_candidate_fail_closed_without_resume_or_takeover",
+            },
+            "write_all_contract": {
+                "interrupted_write_rule": "retry_os_write_on_same_fd_with_same_remaining_bytes",
+                "short_write_rule": "advance_by_exact_positive_written_count",
+                "zero_progress_rule": "fail_closed",
+                "other_write_error_rule": "fail_closed",
+            },
+            "durable_publish_contract": {
+                "per_file_sequence": (
+                    "write_all",
+                    "fsync_temp_file_fd",
+                    "close_temp_file_fd_exactly_once",
+                    "os_replace_with_same_source_and_destination_directory_fd",
+                    "fsync_containing_directory_fd",
+                ),
+                "publication_order": (
+                    "ordered_raw_member_files",
+                    "candidate_registry",
+                    "materialization_manifest",
+                ),
+                "materialization_manifest_role": "durable_prequalification_completion_marker",
+                "qualification_report_writer_is_excluded": True,
+                "atomicity_claim": "per_file_durable_publication_with_manifest_last_not_single_atomic_directory_replace",
+            },
+            "candidate_state_contract": {
+                "exclusive_states": (
+                    "new_candidate_directory_mkdir_winner",
+                    "existing_complete_byte_identical_candidate",
+                    "existing_partial_candidate",
+                    "existing_same_digest_different_bytes_collision",
+                    "existing_nonregular_or_unknown_entry_candidate",
+                ),
+                "mkdir_winner_is_only_writer": True,
+                "existing_candidate_branch_is_read_only": True,
+                "idempotent_success_rule": "exact_tree_and_all_raw_registry_manifest_bytes_equal_inputs_with_no_unknown_entries",
+                "optional_qualification_report_rule": "fixed_regular_mode_0600_file_may_exist_and_remains_opaque_and_untouched",
+                "collision_rule": "same_digest_different_bytes_fails_without_overwrite",
+                "partial_rule": "partial_candidate_fails_without_wait_resume_takeover_or_cleanup",
+                "concurrent_loser_rule": "succeeds_only_after_observing_complete_byte_identical_durable_candidate_otherwise_fails",
+                "overwrite_and_fallback_are_forbidden": True,
+            },
+            "owned_cleanup_contract": {
+                "owned_entry_sources": (
+                    "temp_files_created_by_this_call",
+                    "final_files_published_by_this_call",
+                    "directories_created_by_this_call",
+                ),
+                "cleanup_order": "reverse_exact_creation_order_bottom_up",
+                "file_cleanup_rule": "unlink_only_exact_owned_names_relative_to_opened_parent_dirfd_then_fsync_parent",
+                "directory_cleanup_rule": "rmdir_only_owned_and_current_empty_directories_relative_to_opened_parent_dirfd_then_fsync_parent",
+                "shared_parent_cleanup_rule": "rmdir_call_owned_shared_parent_only_if_still_empty",
+                "concurrent_nonempty_rule": "leave_other_entries_untouched_and_raise_cleanup_failure",
+                "preexisting_unknown_and_other_candidate_deletion_is_forbidden": True,
+                "recursive_glob_prefix_and_age_based_cleanup_are_forbidden": True,
+                "cleanup_error_rule": "surface_cleanup_error_and_preserve_primary_error_v1",
+                "fd_close_error_rule": "single_close_no_retry_exception_group_primary_then_close_v1",
+                "crash_partial_rule": "leave_nonclaim_partial_candidate_and_fail_future_writer_without_resume_or_automatic_reclamation",
+                "operator_reclamation_requires_separate_governed_protocol": True,
+            },
             "ordered_steps": (
                 "build_generation_raw_registry_and_manifest_identities_in_memory",
                 "write_raw_member_files_with_same_directory_temp_fsync_replace_and_directory_fsync",
@@ -2123,7 +2347,13 @@ CONTENT_ROUTING_REFERENCE_REGISTRY_MACHINE_CONTRACT = {
 
 `content_routing_reference_registry_digest` 是顶层对象删除且仅删除自身字段后的规范语义摘要。精确文件字节 SHA-256 由外层 `content_routing_reference_registry_file_sha256` 承担，不得写入 registry 形成循环；`method_definition_digest` 和 `runtime_config_digest` 也不得反向进入 registry。candidate registry 字节固定为 `stable_json_dumps(payload).encode("utf-8") + b"\n"`。
 
-真实 materializer 以后只能将 raw member tensors、candidate registry、materialization manifest 和 qualification report 按 `writer_file_dag_contract` 写入 `outputs/content_routing_reference_materialization/<content_routing_reference_materialization_manifest_digest>/`。每个文件都必须使用同目录临时文件、write、flush、fsync、`os.replace` 和父目录 fsync；qualification report 最后写。candidate 始终 `supports_paper_claim=false`，部分 candidate、失败 report 或缺 report 的 candidate 均不得晋升。
+真实 materializer 以后只能将 raw member tensors、candidate registry、materialization manifest 和 qualification report 按 `writer_file_dag_contract` 写入 `outputs/content_routing_reference_materialization/<content_routing_reference_materialization_manifest_digest>/`。未来 candidate writer 的唯一公开入口、三项 keyword-only bytes 输入、固定 repository root 推导、全部内存身份门禁、dirfd-relative 逐级创建和单文件耐久发布顺序均由该 contract 冻结；不得接受 path、root、overwrite、resume、cleanup、dry-run、default、fallback 或 qualification report 输入。`Path(__file__).resolve().parents[2]` 只用于可信已加载 writer 模块的仓库根推导；`outputs` 以下全部组件只能从 nofollow directory fd 逐级打开或创建，禁止 path 预检、第二次 open、follow、glob 或 path walk。
+
+新目录必须在同 fd 上 `fchmod(0o700)` 并以 `fstat` 复核类型和权限，新临时文件必须在同 fd 上 `fchmod(0o600)` 并在首次 write 前复核为 regular；禁止修改进程 umask。临时名唯一为同目录 `.<final_component>.tmp`，禁止 nonce、UUID、PID、时间、随机数或调用方命名。每个文件严格执行处理 EINTR/short-write/zero-progress 的 write-all、temp fd fsync、single close、同目录 dirfd `os.replace` 和 containing-dir fsync；raw 按 manifest population/member 顺序先写，registry 次之，manifest 最后写并仅作为 durable prequalification completion marker。该原子性只表示逐文件耐久发布，不是整个 candidate 目录的单次原子替换；qualification report 仍由后续真实 CUDA qualification 最后写。
+
+mkdir winner 是新 candidate 的唯一 writer。既有 candidate 分支完全只读：目录枚举只能使用已打开 dirfd，raw、registry、manifest 和可选 report 文件只能以 `O_RDONLY|O_CLOEXEC|O_NOFOLLOW|O_NONBLOCK` 单次 openat，同 fd 在首次 read 前 `fstat` 且仅 regular、exact mode `0o600` 可读取；read-all 必须处理 EINTR、short read、唯一空 bytes EOF 和 single-close 异常。精确树与 raw/registry/manifest bytes 全同才允许幂等成功；固定 report 可保持 opaque 且不支持资格化主张。temp、未知 entry、partial、nonregular 或同 digest 不同 bytes 均失败，禁止等待、接管、resume、overwrite 或 fallback。
+
+异常清理只能按反向创建顺序处理本调用明确拥有的 temp、published final 和 created directory，且只允许 dirfd-relative exact-name unlink/rmdir 与 parent fsync。共享父目录只有本调用创建且仍为空时才可 rmdir；并发新增或非空必须保留他人内容并显式报告 cleanup failure。禁止递归、glob、prefix、age-based 或 pre-existing 内容清理；进程崩溃留下的 partial candidate 不支持主张，后续 writer 必须失败关闭，任何 operator reclamation 另立治理协议。candidate 始终 `supports_paper_claim=false`，部分 candidate、失败 report 或缺 report 的 candidate 均不得晋升。本机器协议冻结不实现 writer、不执行 candidate I/O，也不证明 raw、registry 或 qualification 的真实性。
 
 身份依赖只能单向为 generation payload -> raw member identities -> candidate registry semantic/file identity -> materialization manifest semantic/file identity -> qualification report semantic/file identity -> promotion input。manifest 只保存固定 qualification report 相对路径，不得保存 report digest、file SHA、ready、checks 或 errors；report 必须反向绑定实际 manifest 与 registry 的 semantic/file identity，manifest 不得反向绑定 report。qualification 的15项 `check_status` 只复用 field registry 的 `pass`/`blocked` 语义，缺 CUDA、精确模型 snapshot、依赖 profile 或 formal lock 时必须形成 `blocked`、`content_routing_reference_qualification_ready=false` 和错误退出，不得使用 skip、fixture、proxy 或 fallback 冒充通过。
 
