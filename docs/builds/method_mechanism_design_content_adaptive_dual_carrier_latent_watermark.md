@@ -283,6 +283,24 @@ def build_high_frequency_tail_template(
     """按参考 latent 形状先高通，再保留固定20%幅值 tail。"""
 
 
+def build_content_carrier_update(
+    *,
+    current_scheduler_latent: Tensor,
+    routing: ContentRoutingResult,
+    lf_template: LowFrequencyCarrierTemplate,
+    hf_tail_template: HighFrequencyTailCarrierTemplate,
+    method_role: Literal[
+        "full_dual_chain",
+        "uniform_content_routing",
+        "lf_only_content",
+        "hf_tail_only_content",
+        "content_chain_only",
+        "geometry_recovery_without_embedded_sync",
+    ],
+) -> ContentCarrierUpdateResult:
+    """构造几何同步和共同回溯前的正式float32内容更新基底。"""
+
+
 def compute_blind_content_score(
     observed_latent: Tensor,
     lf_template: LowFrequencyCarrierTemplate,
@@ -302,6 +320,12 @@ def compute_blind_content_score(
 两个构造接口都必须验证 `reference_latent` 为有限 `[1,C,H,W]` Tensor，并把精确形状、`model_identity_digest`、评分密钥身份、PRG 版本及内部固定 domain 写入结构化输出；不得通过省略参数、全局变量或调用者约定隐式取得这些身份。LF 内部固定第6节 low-pass 协议；HF-tail 内部固定第7节 high-pass 与 `max(1,ceil(0.20*C*H*W))` 协议，不接受外层可变 kernel 或 tail fraction。
 
 `build_high_frequency_tail_template()` 是 HF-tail 的唯一正式构造接口；任何只执行原始高斯幅值截断而缺少二维高通的接口都不得映射到该职责。LF 与 HF-tail 的命名只描述空间路由掩码作用前的密钥载体频率来源；`lf_mask` 或 `hf_tail_mask` 对载体执行空间调制后，实际写入分别称为 LF-origin 与 HF-tail-origin 更新，不主张其仍严格带限、频谱互不重叠或彼此正交。`compute_blind_content_score()` 必须验证两个模板的形状、模型、密钥和 PRG 身份与 `observed_latent` 一致，并按 `method_role` 解析冻结权重：`lf_only_content=1.0/0.0`、`hf_tail_only_content=0.0/1.0`，其余4个角色为 `0.70/0.30`；调用者不得直接传入任意权重。该函数实现展平、分别去均值后的 `float32` 归一化内积，并以结构化结果同时返回两个分支分数、总分和摘要；非有限输入、元素数不一致或零中心化能量必须失败关闭。
+
+`ContentCarrierUpdateResult` 是 frozen 进程内算法结果，不形成持久化记录字段；其字段精确为 `geometry_capacity_map`、`lf_direction`、`hf_tail_direction`、`lf_update`、`hf_tail_update`、`content_only_latent_float32`、`latent_l2`、`lf_nominal_strength`、`hf_tail_nominal_strength` 和 `method_role`。其中 `latent_l2` 只表示 `||float32(z_10)||_2`，不得改指内容更新后 latent 的范数。
+
+`build_content_carrier_update()` 必须先闭合六角色、`ContentRoutingResult`、两个正式模板的形状、device、模型、评分密钥、domain 与受支持 PRG 版本身份，再读取 Tensor 内容。两个标准模板的完整 CHW `float32` L2 consumer 门禁固定为 `rtol=1e-5`、`atol=1e-6`；该容差只接纳正式构造器的浮点归一化舍入，不允许重新除以范数、重新中心化或在空间掩码作用后重新单位化。因此 masked direction 的可证操作上界为 `1.000011`，不表示后续一次实际 dtype 写回的 `0.0050||z_10||_2` 硬门禁已经通过。
+
+该接口在 `z_10` 所在 device 上先构造 `float32(z_10)`，再以同 device 的 `float32` scalar Tensor 顺序计算 `n_z=||float32(z_10)||_2`、`0.0025*n_z`、`0.0015*n_z` 和两个 update；只有全部 Tensor 公式完成后才把三个标量转为 Python float。`uniform_content_routing` 精确令向后传递的 `geometry_capacity_map`、LF mask 和 HF-tail mask 全为1；`lf_only_content` 与 `hf_tail_only_content` 只把被关闭分支 update 精确置零且不转移预算；其余四角色保持两个内容分支活动。`content_only_latent_float32` 固定按 `LF -> HF-tail` 等于 `float32(z_10)+Delta_LF+Delta_HF-tail`，不得提前转回 actual dtype，也不得执行 geometry、共同 `gamma` 回溯或 latent 写回。
 
 ### 3.5 几何同步嵌入
 
