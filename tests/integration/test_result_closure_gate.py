@@ -105,8 +105,8 @@ from main.methods.method_definition import (
     semantic_conditioned_latent_method_definition_digest,
 )
 from main.core.digest import build_stable_digest
-from main.methods.carrier import (
-    KEYED_PRG_VERSION,
+from main.core.keyed_prg import KEYED_PRG_VERSION
+from main.methods.carrier.keyed_tensor import (
     tail_robust_carrier_protocol_record,
 )
 from paper_experiments.analysis.result_closure_gate import (

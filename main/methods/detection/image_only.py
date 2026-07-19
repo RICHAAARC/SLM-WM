@@ -7,15 +7,19 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from main.core.digest import build_stable_digest, tensor_content_sha256
-from main.methods.carrier.keyed_tensor import (
+from main.methods.carrier.blind_content_score import (
     BlindContentScore,
-    LowFrequencyCarrierConfig,
-    build_low_frequency_template,
-    build_tail_robust_template,
     compute_blind_content_score,
-    tail_robust_carrier_protocol_record,
-    validate_low_frequency_carrier_protocol_record,
-    validate_tail_robust_carrier_protocol_record,
+)
+from main.methods.carrier.high_frequency_tail import (
+    HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST,
+    build_high_frequency_tail_template,
+)
+from main.methods.carrier.low_frequency import (
+    build_low_frequency_template,
+)
+from main.methods.carrier.keyed_tensor import (
+    LowFrequencyCarrierConfig,
 )
 from main.core.keyed_prg import (
     KEYED_PRG_VERSION,
@@ -110,6 +114,7 @@ class ImageOnlyMeasurementConfig:
     max_attention_tokens: int
     attention_coordinate_convention: str
     attention_grid_align_corners: bool
+    method_role: str
 
     def __post_init__(self) -> None:
         """集中校验阈值无关的测量协议。"""
@@ -195,8 +200,8 @@ class ImageOnlyMeasurementConfig:
             or not 0.0 <= self.tail_robust_weight <= 1.0
         ):
             raise ValueError("内容分支权重必须为 [0, 1] 内的精确 float")
-        if type(self.tail_fraction) is not float or not 0.0 < self.tail_fraction <= 1.0:
-            raise ValueError("tail_fraction 必须位于 (0, 1]")
+        if type(self.tail_fraction) is not float or self.tail_fraction != 0.20:
+            raise ValueError("正式 HF-tail fraction 必须精确为 0.20")
         if (
             type(self.attention_residual_threshold) is not float
             or type(self.attention_minimum_inlier_ratio) is not float
@@ -221,6 +226,20 @@ class ImageOnlyMeasurementConfig:
         )
         if abs(self.lf_weight + self.tail_robust_weight - 1.0) > 1e-9:
             raise ValueError("内容分支权重之和必须为 1")
+        expected_weights = {
+            "full_dual_chain": (0.70, 0.30),
+            "uniform_content_routing": (0.70, 0.30),
+            "lf_only_content": (1.0, 0.0),
+            "hf_tail_only_content": (0.0, 1.0),
+            "content_chain_only": (0.70, 0.30),
+            "geometry_recovery_without_embedded_sync": (0.70, 0.30),
+        }
+        if type(self.method_role) is not str or self.method_role not in expected_weights:
+            raise ValueError("method_role 必须为登记的精确方法角色")
+        if (self.lf_weight, self.tail_robust_weight) != expected_weights[
+            self.method_role
+        ]:
+            raise ValueError("内容检测权重必须与 method_role 的冻结职责一致")
         if not 0.0 < self.attention_stable_token_fraction <= 1.0:
             raise ValueError(
                 "attention_stable_token_fraction 必须位于 (0, 1]"
@@ -290,10 +309,6 @@ def image_only_measurement_config_identity_record(
         config.attention_relation_component_weights
     )
     prg_protocol = keyed_prg_protocol_record(config.keyed_prg_version)
-    tail_protocol = tail_robust_carrier_protocol_record(
-        config.tail_fraction,
-        prg_version=config.keyed_prg_version,
-    )
     payload = {
         "image_only_measurement_config_schema": (
             IMAGE_ONLY_MEASUREMENT_CONFIG_SCHEMA
@@ -350,12 +365,11 @@ def image_only_measurement_config_identity_record(
         "lf_carrier_protocol_digest": (
             config.low_frequency_config.protocol_digest
         ),
-        "tail_carrier_protocol_digest": tail_protocol[
-            "tail_carrier_protocol_digest"
-        ],
+        "tail_carrier_protocol_digest": HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST,
         "lf_weight": config.lf_weight,
         "tail_robust_weight": config.tail_robust_weight,
         "tail_fraction": config.tail_fraction,
+        "method_role": config.method_role,
         "keyed_prg_version": config.keyed_prg_version,
         "keyed_prg_protocol_digest": prg_protocol[
             "keyed_prg_protocol_digest"
@@ -423,11 +437,11 @@ class ImageOnlyMeasurementResult:
                 "registration_geometry_reliable": self.alignment.geometry_reliable,
             }
         return {
-            "lf_score": self.content.lf_score,
-            "tail_robust_score": self.content.tail_robust_score,
-            "content_score": self.content.content_score,
+            "lf_score": self.content.blind_lf_score,
+            "tail_robust_score": self.content.blind_hf_tail_score,
+            "content_score": self.content.blind_content_score,
             "lf_weight": self.content.lf_weight,
-            "tail_robust_weight": self.content.tail_robust_weight,
+            "tail_robust_weight": self.content.hf_tail_weight,
             "tail_fraction": self.tail_fraction,
             "lf_carrier_protocol_digest": self.lf_carrier_protocol_digest,
             "lf_template_content_sha256": self.lf_template_content_sha256,
@@ -630,37 +644,24 @@ def _validate_image_only_measurement_digest_record(
     ):
         raise ValueError("检测记录的 LF/tail 加权内容分数不能重建")
     if (
-        (lf_weight > 0.0 and not _sha256_text(record.get("lf_template_content_sha256")))
-        or (lf_weight == 0.0 and record.get("lf_template_content_sha256") != "")
-        or (tail_weight > 0.0 and not _sha256_text(record.get("tail_template_content_sha256")))
-        or (tail_weight == 0.0 and record.get("tail_template_content_sha256") != "")
-        or (lf_weight == 0.0 and float(raw_scores[0]) != 0.0)
-        or (tail_weight == 0.0 and float(raw_scores[1]) != 0.0)
+        not _sha256_text(record.get("lf_template_content_sha256"))
+        or not _sha256_text(record.get("tail_template_content_sha256"))
     ):
-        raise ValueError("已禁用内容分支仍保留模板原子或非零分数")
+        raise ValueError("正式盲检必须始终重建 LF 与 HF-tail 两个原始分数")
 
     shape = record.get("tail_template_shape")
     element_count = record.get("tail_template_element_count")
     selected_count = record.get("tail_selected_element_count")
     retained_fraction = record.get("tail_retained_fraction")
     threshold = record.get("tail_threshold")
-    if tail_weight == 0.0:
-        if not (
-            shape == []
-            and element_count == 0
-            and selected_count == 0
-            and retained_fraction == 0.0
-            and threshold == 0.0
-        ):
-            raise ValueError("已禁用尾部分支不得保留模板 shape 或选择原子")
-    elif (
+    if (
         not isinstance(shape, list)
         or len(shape) != 4
         or any(type(value) is not int or value <= 0 for value in shape)
         or type(element_count) is not int
         or element_count != math.prod(shape)
         or type(selected_count) is not int
-        or selected_count != math.ceil(element_count * tail_fraction)
+        or selected_count != max(1, (element_count + 4) // 5)
         or not _finite_number(retained_fraction)
         or not math.isclose(
             float(retained_fraction),
@@ -690,8 +691,6 @@ def _validate_image_only_measurement_digest_record(
                 _finite_number(value)
                 for value in (aligned_lf, aligned_tail, aligned_score)
             )
-            or (lf_weight == 0.0 and float(aligned_lf) != 0.0)
-            or (tail_weight == 0.0 and float(aligned_tail) != 0.0)
             or not math.isclose(
                 float(aligned_score),
                 lf_weight * float(aligned_lf)
@@ -863,68 +862,47 @@ def measure_image_only_watermark(
     )
     lf_active = config.lf_weight > 0.0
     tail_active = config.tail_robust_weight > 0.0
-    tail_carrier_protocol = tail_robust_carrier_protocol_record(
-        config.tail_fraction,
+    carrier_model_identity_digest = build_stable_digest(
+        {
+            "model_id": config.model_id,
+            "model_revision": config.model_revision,
+        }
+    )
+    lf_template = build_low_frequency_template(
+        observed_latent,
+        key_material,
+        carrier_model_identity_digest,
         prg_version=config.keyed_prg_version,
     )
-    lf_template = (
-        build_low_frequency_template(
-            observed_latent,
-            key_material,
-            config.model_id,
-            config.low_frequency_config,
-            prg_version=config.keyed_prg_version,
-        )
-        if lf_active
-        else None
+    lf_template_content_sha256 = tensor_content_sha256(lf_template.template)
+    tail_template = build_high_frequency_tail_template(
+        observed_latent,
+        key_material,
+        carrier_model_identity_digest,
+        prg_version=config.keyed_prg_version,
     )
-    lf_template_content_sha256 = (
-        tensor_content_sha256(lf_template) if lf_template is not None else ""
-    )
-    tail_template = None
     tail_threshold = 0.0
-    retained_fraction = 0.0
-    tail_template_content_sha256 = ""
-    tail_template_shape: list[int] = []
-    tail_template_element_count = 0
-    tail_selected_element_count = 0
-    if tail_active:
-        (
-            tail_template,
-            tail_threshold,
-            retained_fraction,
-        ) = build_tail_robust_template(
-            observed_latent,
-            key_material,
-            config.model_id,
-            config.tail_fraction,
-            prg_version=config.keyed_prg_version,
-        )
-        tail_template_content_sha256 = tensor_content_sha256(tail_template)
-        tail_template_shape = [int(value) for value in tail_template.shape]
-        tail_template_element_count = int(tail_template.numel())
-        tail_selected_element_count = math.ceil(
-            tail_template_element_count * config.tail_fraction
-        )
-        actual_selected_element_count = int(
-            (tail_template != 0).sum().item()
-        )
-        if (
-            actual_selected_element_count != tail_selected_element_count
-            or not math.isclose(
-                retained_fraction,
-                tail_selected_element_count / tail_template_element_count,
-                rel_tol=0.0,
-                abs_tol=1e-12,
-            )
-        ):
-            raise RuntimeError("高斯幅值尾部模板的保留计数与冻结协议不一致")
+    tail_template_content_sha256 = tensor_content_sha256(tail_template.template)
+    tail_template_shape = [int(value) for value in tail_template.template.shape]
+    tail_template_element_count = int(tail_template.template.numel())
+    tail_selected_element_count = tail_template.selected_element_count
+    retained_fraction = tail_selected_element_count / tail_template_element_count
+    expected_selected_element_count = max(
+        1,
+        (tail_template_element_count + 4) // 5,
+    )
+    if (
+        config.tail_fraction != 0.20
+        or tail_selected_element_count != expected_selected_element_count
+        or int((tail_template.template != 0).sum().item())
+        != tail_selected_element_count
+    ):
+        raise RuntimeError("正式 HF-tail 模板必须先高通并稳定保留20%坐标")
     content = compute_blind_content_score(
         observed_latent,
         lf_template,
         tail_template,
-        config.lf_weight,
-        config.tail_robust_weight,
+        config.method_role,
     )
     geometry_score: float | None = None
     raw_geometry_score: float | None = None
@@ -1130,65 +1108,51 @@ def measure_image_only_watermark(
         aligned_latent = image_latent_encoder(aligned_image)
         if tuple(aligned_latent.shape) != tuple(observed_latent.shape):
             raise RuntimeError("配准前后的编码 latent 形状必须完全一致")
-        aligned_lf_template = (
-            build_low_frequency_template(
-                aligned_latent,
-                key_material,
-                config.model_id,
-                config.low_frequency_config,
-                prg_version=config.keyed_prg_version,
-            )
-            if lf_active
-            else None
+        aligned_lf_template = build_low_frequency_template(
+            aligned_latent,
+            key_material,
+            carrier_model_identity_digest,
+            prg_version=config.keyed_prg_version,
         )
-        aligned_lf_template_content_sha256 = (
-            tensor_content_sha256(aligned_lf_template)
-            if aligned_lf_template is not None
-            else ""
+        aligned_lf_template_content_sha256 = tensor_content_sha256(
+            aligned_lf_template.template
         )
         if (
-            lf_active
-            and aligned_lf_template_content_sha256
-            != lf_template_content_sha256
+            aligned_lf_template.template_digest != lf_template.template_digest
+            or aligned_lf_template_content_sha256 != lf_template_content_sha256
         ):
             raise RuntimeError("配准前后的 LF 固定模板身份必须完全一致")
-        aligned_tail_template = None
-        if tail_active:
-            (
-                aligned_tail_template,
-                aligned_tail_threshold,
-                aligned_tail_retained_fraction,
-            ) = build_tail_robust_template(
-                aligned_latent,
-                key_material,
-                config.model_id,
-                config.tail_fraction,
-                prg_version=config.keyed_prg_version,
-            )
-            aligned_tail_template_content_sha256 = tensor_content_sha256(
-                aligned_tail_template
-            )
-            if (
-                aligned_tail_template_content_sha256
-                != tail_template_content_sha256
-                or aligned_tail_threshold != tail_threshold
-                or aligned_tail_retained_fraction != retained_fraction
-            ):
-                raise RuntimeError("配准前后的高斯幅值尾部模板身份必须完全一致")
-        else:
-            aligned_tail_template_content_sha256 = ""
-            aligned_tail_threshold = 0.0
-            aligned_tail_retained_fraction = 0.0
+        aligned_tail_template = build_high_frequency_tail_template(
+            aligned_latent,
+            key_material,
+            carrier_model_identity_digest,
+            prg_version=config.keyed_prg_version,
+        )
+        aligned_tail_template_content_sha256 = tensor_content_sha256(
+            aligned_tail_template.template
+        )
+        aligned_tail_threshold = 0.0
+        aligned_tail_retained_fraction = (
+            aligned_tail_template.selected_element_count
+            / aligned_tail_template.template.numel()
+        )
+        if (
+            aligned_tail_template.template_digest != tail_template.template_digest
+            or aligned_tail_template_content_sha256 != tail_template_content_sha256
+            or aligned_tail_template.selected_element_count
+            != tail_template.selected_element_count
+            or aligned_tail_retained_fraction != retained_fraction
+        ):
+            raise RuntimeError("配准前后的正式 HF-tail 模板身份必须完全一致")
         aligned_content = compute_blind_content_score(
             aligned_latent,
             aligned_lf_template,
             aligned_tail_template,
-            config.lf_weight,
-            config.tail_robust_weight,
+            config.method_role,
         )
-        aligned_lf_score = aligned_content.lf_score
-        aligned_tail_robust_score = aligned_content.tail_robust_score
-        aligned_content_score = aligned_content.content_score
+        aligned_lf_score = aligned_content.blind_lf_score
+        aligned_tail_robust_score = aligned_content.blind_hf_tail_score
+        aligned_content_score = aligned_content.blind_content_score
     qk_atomic_content_digest = (
         qk_atomic_evaluation_records_digest(
             qk_atomic_content_records,
@@ -1261,12 +1225,10 @@ def measure_image_only_watermark(
     result_kwargs = {
         "content": content,
         "lf_carrier_protocol_digest": (
-            config.low_frequency_config.protocol_digest
+            lf_template.filter_identity_digest
         ),
         "lf_template_content_sha256": lf_template_content_sha256,
-        "tail_carrier_protocol_digest": tail_carrier_protocol[
-            "tail_carrier_protocol_digest"
-        ],
+        "tail_carrier_protocol_digest": tail_template.high_pass_identity_digest,
         "tail_fraction": config.tail_fraction,
         "tail_template_content_sha256": tail_template_content_sha256,
         "tail_template_shape": tail_template_shape,

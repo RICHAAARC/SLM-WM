@@ -53,7 +53,9 @@ from experiments.runners.semantic_watermark_runtime import (
     validate_semantic_watermark_runtime_result_provenance,
 )
 from main.core.digest import build_stable_digest
-from main.methods.carrier import tail_robust_carrier_protocol_record
+from main.methods.carrier.high_frequency_tail import (
+    HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST,
+)
 from paper_experiments.analysis.fixed_fpr_threshold_audit import (
     FIXED_FPR_THRESHOLD_METHOD_IDS,
 )
@@ -229,8 +231,6 @@ def _validate_formal_runtime_method_config(
         "injection_step_indices": list(
             _FROZEN_METHOD_CONFIG.injection_step_indices
         ),
-        "candidate_count": _FROZEN_METHOD_CONFIG.jacobian_candidate_count,
-        "null_rank": _FROZEN_METHOD_CONFIG.null_space_rank,
         "branch_risk_mode": "branch_specific",
         "standard_attack_profiles": (
             ["full_main"] if attacks_enabled else []
@@ -243,12 +243,9 @@ def _validate_formal_runtime_method_config(
         "lf_carrier_protocol_digest": (
             _FROZEN_METHOD_CONFIG.low_frequency_carrier_config.protocol_digest
         ),
-        "tail_carrier_protocol_digest": (
-            tail_robust_carrier_protocol_record(
-                _FROZEN_METHOD_CONFIG.tail_fraction,
-                prg_version=_FROZEN_METHOD_CONFIG.keyed_prg_version,
-            )["tail_carrier_protocol_digest"]
-        ),
+            "tail_carrier_protocol_digest": (
+                HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST
+            ),
         "output_dir": (
             f"outputs/image_only_dataset_runtime/{paper_run_name}/runs"
         ),
@@ -290,7 +287,6 @@ def _validate_formal_runtime_method_config(
         )
     required_true_fields = (
         "semantic_routing_enabled",
-        "null_space_enabled",
         "lf_enabled",
         "tail_robust_enabled",
         "tail_truncation_enabled",

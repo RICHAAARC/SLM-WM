@@ -274,9 +274,6 @@ def test_paper_run_levels_share_method_and_use_registered_working_points(tmp_pat
     assert frozen_settings["attention_geometry_risk_config"][
         "attention_instability_weight"
     ] == 0.30
-    assert frozen_settings["qr_reference_solve_protocol"] == (
-        "right_upper_triangular_solve_without_explicit_inverse"
-    )
     assert frozen_settings["quantized_branch_composition_protocol"] == (
         "float32_ordered_branch_sum_add_float32_latent_single_cast"
     )

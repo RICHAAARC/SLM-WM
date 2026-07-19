@@ -31,7 +31,7 @@ from experiments.protocol.prompts import PROMPT_FILES, read_prompt_file
 from experiments.protocol.prompt_sources import audit_governed_prompt_set
 from experiments.protocol.splits import build_group_split_counts
 from main.core.keyed_prg import require_supported_keyed_prg_version
-from main.methods.carrier import LowFrequencyCarrierConfig
+from main.methods.carrier.keyed_tensor import LowFrequencyCarrierConfig
 from main.methods.geometry import validate_attention_alignment_gate
 
 PILOT_PAPER_RUN_NAME = "pilot_paper"
@@ -104,20 +104,6 @@ DEFAULT_ATTENTION_GEOMETRY_RISK_CONFIG = asdict(
     _FORMAL_METHOD_DEFAULTS.attention_geometry_risk_config
 )
 DEFAULT_ATTENTION_INJECTION_STEPS = _FORMAL_METHOD_DEFAULTS.injection_step_indices
-DEFAULT_JACOBIAN_CANDIDATE_COUNT = _FORMAL_METHOD_DEFAULTS.jacobian_candidate_count
-DEFAULT_NULL_SPACE_RANK = _FORMAL_METHOD_DEFAULTS.null_space_rank
-DEFAULT_NULL_SPACE_NUMERICAL_EPSILON = (
-    _FORMAL_METHOD_DEFAULTS.null_space_numerical_epsilon
-)
-DEFAULT_MAXIMUM_QR_CONDITION_NUMBER = (
-    _FORMAL_METHOD_DEFAULTS.maximum_qr_condition_number
-)
-DEFAULT_MAXIMUM_ORTHOGONALITY_ERROR = (
-    _FORMAL_METHOD_DEFAULTS.maximum_orthogonality_error
-)
-DEFAULT_QR_REFERENCE_SOLVE_PROTOCOL = (
-    _FORMAL_METHOD_DEFAULTS.qr_reference_solve_protocol
-)
 DEFAULT_LF_RELATIVE_STRENGTH = _FORMAL_METHOD_DEFAULTS.lf_relative_strength
 DEFAULT_TAIL_RELATIVE_STRENGTH = _FORMAL_METHOD_DEFAULTS.tail_relative_strength
 DEFAULT_ATTENTION_RELATIVE_STRENGTH = _FORMAL_METHOD_DEFAULTS.attention_relative_strength
@@ -163,11 +149,6 @@ DEFAULT_MINIMUM_FINAL_IMAGE_ATTENTION_SCORE_GAIN = (
 )
 DEFAULT_TAIL_FRACTION = _FORMAL_METHOD_DEFAULTS.tail_fraction
 DEFAULT_KEYED_PRG_VERSION = _FORMAL_METHOD_DEFAULTS.keyed_prg_version
-DEFAULT_MINIMUM_PROJECTION_ENERGY_RETENTION = _FORMAL_METHOD_DEFAULTS.minimum_projection_energy_retention
-DEFAULT_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL = _FORMAL_METHOD_DEFAULTS.maximum_relative_response_residual
-DEFAULT_MAXIMUM_QUANTIZED_WRITE_RELATIVE_JACOBIAN_RESPONSE = (
-    _FORMAL_METHOD_DEFAULTS.maximum_quantized_write_relative_jacobian_response
-)
 DEFAULT_QUANTIZED_BRANCH_COMPOSITION_PROTOCOL = (
     _FORMAL_METHOD_DEFAULTS.quantized_branch_composition_protocol
 )
@@ -185,12 +166,6 @@ DEFAULT_QUANTIZED_BUDGET_ENVELOPE_BACKTRACKING_FACTOR = (
 )
 DEFAULT_QUANTIZED_BUDGET_ENVELOPE_BACKTRACKING_MAXIMUM_STEPS = (
     _FORMAL_METHOD_DEFAULTS.quantized_budget_envelope_backtracking_maximum_steps
-)
-DEFAULT_NULL_SPACE_CG_MAX_ITERATIONS = (
-    _FORMAL_METHOD_DEFAULTS.null_space_cg_max_iterations
-)
-DEFAULT_NULL_SPACE_CG_RELATIVE_TOLERANCE = (
-    _FORMAL_METHOD_DEFAULTS.null_space_cg_relative_tolerance
 )
 DEFAULT_MINIMUM_SEMANTIC_PRESERVATION_COSINE = (
     _FORMAL_METHOD_DEFAULTS.minimum_semantic_preservation_cosine
@@ -352,12 +327,6 @@ class PaperRunConfig:
         default_factory=lambda: dict(DEFAULT_ATTENTION_GEOMETRY_RISK_CONFIG)
     )
     attention_injection_steps: tuple[int, ...] = DEFAULT_ATTENTION_INJECTION_STEPS
-    jacobian_candidate_count: int = DEFAULT_JACOBIAN_CANDIDATE_COUNT
-    null_space_rank: int = DEFAULT_NULL_SPACE_RANK
-    null_space_numerical_epsilon: float = DEFAULT_NULL_SPACE_NUMERICAL_EPSILON
-    maximum_qr_condition_number: float = DEFAULT_MAXIMUM_QR_CONDITION_NUMBER
-    maximum_orthogonality_error: float = DEFAULT_MAXIMUM_ORTHOGONALITY_ERROR
-    qr_reference_solve_protocol: str = DEFAULT_QR_REFERENCE_SOLVE_PROTOCOL
     lf_relative_strength: float = DEFAULT_LF_RELATIVE_STRENGTH
     tail_relative_strength: float = DEFAULT_TAIL_RELATIVE_STRENGTH
     attention_relative_strength: float = DEFAULT_ATTENTION_RELATIVE_STRENGTH
@@ -397,11 +366,6 @@ class PaperRunConfig:
     )
     tail_fraction: float = DEFAULT_TAIL_FRACTION
     keyed_prg_version: str = DEFAULT_KEYED_PRG_VERSION
-    minimum_projection_energy_retention: float = DEFAULT_MINIMUM_PROJECTION_ENERGY_RETENTION
-    maximum_relative_response_residual: float = DEFAULT_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL
-    maximum_quantized_write_relative_jacobian_response: float = (
-        DEFAULT_MAXIMUM_QUANTIZED_WRITE_RELATIVE_JACOBIAN_RESPONSE
-    )
     quantized_branch_composition_protocol: str = (
         DEFAULT_QUANTIZED_BRANCH_COMPOSITION_PROTOCOL
     )
@@ -417,10 +381,6 @@ class PaperRunConfig:
     )
     quantized_budget_envelope_backtracking_maximum_steps: int = (
         DEFAULT_QUANTIZED_BUDGET_ENVELOPE_BACKTRACKING_MAXIMUM_STEPS
-    )
-    null_space_cg_max_iterations: int = DEFAULT_NULL_SPACE_CG_MAX_ITERATIONS
-    null_space_cg_relative_tolerance: float = (
-        DEFAULT_NULL_SPACE_CG_RELATIVE_TOLERANCE
     )
     minimum_semantic_preservation_cosine: float = (
         DEFAULT_MINIMUM_SEMANTIC_PRESERVATION_COSINE
@@ -528,8 +488,6 @@ class PaperRunConfig:
                 "论文运行方法设置必须精确继承 configs/model_sd35.yaml: "
                 + ", ".join(drifted_method_fields)
             )
-        if self.jacobian_candidate_count < self.null_space_rank or self.null_space_rank <= 0:
-            raise ValueError("jacobian_candidate_count 必须不小于正的 null_space_rank")
         if type(self.tail_fraction) is not float or not 0.0 < self.tail_fraction <= 1.0:
             raise ValueError("tail_fraction 必须为 (0, 1] 内的精确 float")
         require_supported_keyed_prg_version(self.keyed_prg_version)
@@ -553,18 +511,6 @@ class PaperRunConfig:
             raise ValueError(
                 "minimum_final_image_attention_score_gain 必须为正有限数"
             )
-        if not 0.0 < self.minimum_projection_energy_retention <= 1.0:
-            raise ValueError("minimum_projection_energy_retention 必须位于 (0, 1]")
-        if not 0.0 < self.maximum_relative_response_residual <= 1.0:
-            raise ValueError("maximum_relative_response_residual 必须位于 (0, 1]")
-        if not 0.0 < self.maximum_quantized_write_relative_jacobian_response <= 1.0:
-            raise ValueError(
-                "maximum_quantized_write_relative_jacobian_response 必须位于 (0, 1]"
-            )
-        if self.null_space_cg_max_iterations <= 0:
-            raise ValueError("null_space_cg_max_iterations 必须为正整数")
-        if not 0.0 < self.null_space_cg_relative_tolerance < 1.0:
-            raise ValueError("null_space_cg_relative_tolerance 必须位于 (0, 1)")
         if not 0.0 < self.minimum_semantic_preservation_cosine <= 1.0:
             raise ValueError(
                 "minimum_semantic_preservation_cosine 必须位于 (0, 1]"

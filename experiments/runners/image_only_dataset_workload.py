@@ -85,8 +85,6 @@ def build_method_config(
         inference_steps=method.inference_steps,
         guidance_scale=method.guidance_scale,
         injection_step_indices=method.injection_step_indices,
-        candidate_count=method.jacobian_candidate_count,
-        null_rank=method.null_space_rank,
         lf_relative_strength=method.lf_relative_strength,
         tail_relative_strength=method.tail_relative_strength,
         attention_relative_strength=method.attention_relative_strength,
@@ -119,18 +117,7 @@ def build_method_config(
             method.minimum_final_image_attention_score_gain
         ),
         tail_fraction=method.tail_fraction,
-        minimum_projection_energy_retention=(
-            method.minimum_projection_energy_retention
-        ),
-        maximum_relative_response_residual=method.maximum_relative_response_residual,
-        maximum_quantized_write_relative_jacobian_response=(
-            method.maximum_quantized_write_relative_jacobian_response
-        ),
         keyed_prg_version=method.keyed_prg_version,
-        null_space_cg_max_iterations=method.null_space_cg_max_iterations,
-        null_space_cg_relative_tolerance=(
-            method.null_space_cg_relative_tolerance
-        ),
         minimum_semantic_preservation_cosine=(
             method.minimum_semantic_preservation_cosine
         ),

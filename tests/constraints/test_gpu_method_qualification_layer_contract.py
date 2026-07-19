@@ -73,8 +73,8 @@ def test_orchestrator_qualification_import_does_not_load_gpu_runtime() -> None:
     assert completed.returncode == 0, completed.stderr
 
 
-def test_content_runtime_smoke_has_real_entry_and_no_registry_precondition() -> None:
-    """The executable smoke must branch before old JVP/VJP and fixed registry work."""
+def test_content_runtime_smoke_has_real_entry_and_no_legacy_precondition() -> None:
+    """正式入口不得在新链前执行旧变换或固定 registry 工作。"""
 
     root = Path.cwd()
     entry_source = (root / "scripts/run_gpu_method_qualification.py").read_text(
@@ -85,8 +85,17 @@ def test_content_runtime_smoke_has_real_entry_and_no_registry_precondition() -> 
     )
     assert 'subparsers.add_parser("content_runtime_smoke")' in host_source
     assert "run_content_runtime_smoke" in entry_source
-    smoke_branch = entry_source.index("if args.content_runtime_smoke:", entry_source.index("torch.cuda"))
-    compatibility = entry_source.index("_evaluate_torch_func_compatibility(", smoke_branch)
-    assert smoke_branch < compatibility
+    smoke_branch = entry_source.index(
+        "if args.content_runtime_smoke:",
+        entry_source.index("torch.cuda"),
+    )
+    formal_writer = entry_source.index(
+        "write_semantic_watermark_runtime_outputs(",
+        smoke_branch,
+    )
+    assert smoke_branch < formal_writer
+    assert "_evaluate_torch_func_compatibility" not in entry_source
+    assert "torch.func.linearize" not in entry_source
+    assert "torch.func.vjp" not in entry_source
     assert "load_content_routing_reference_registry" not in entry_source
     assert "explicit_smoke_only_unqualified" in entry_source

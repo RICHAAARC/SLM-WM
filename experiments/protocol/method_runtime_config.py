@@ -19,7 +19,7 @@ import yaml
 from experiments.runtime.model_sources import require_registered_model_reference
 from main.core.digest import build_stable_digest
 from main.core.keyed_prg import require_supported_keyed_prg_version
-from main.methods.carrier import LowFrequencyCarrierConfig
+from main.methods.carrier.keyed_tensor import LowFrequencyCarrierConfig
 from main.methods.detection import ATTENTION_ALIGNMENT_LAYER_SELECTION_RULE
 from main.methods.geometry import (
     ATTENTION_ALIGNMENT_ANCHOR_COUNT,
@@ -188,12 +188,6 @@ class FormalMethodRuntimeConfig:
     lf_content_risk_config: FormalBranchRiskConfig
     tail_robust_risk_config: FormalBranchRiskConfig
     attention_geometry_risk_config: FormalBranchRiskConfig
-    jacobian_candidate_count: int
-    null_space_rank: int
-    null_space_numerical_epsilon: float
-    maximum_qr_condition_number: float
-    maximum_orthogonality_error: float
-    qr_reference_solve_protocol: str
     lf_relative_strength: float
     tail_relative_strength: float
     attention_relative_strength: float
@@ -217,17 +211,12 @@ class FormalMethodRuntimeConfig:
     minimum_final_image_attention_score_gain: float
     tail_fraction: float
     keyed_prg_version: str
-    minimum_projection_energy_retention: float
-    maximum_relative_response_residual: float
-    maximum_quantized_write_relative_jacobian_response: float
     quantized_branch_composition_protocol: str
     quantized_branch_composition_order: tuple[str, ...]
     combined_budget_envelope_rule: str
     quantized_budget_envelope_absolute_tolerance: float
     quantized_budget_envelope_backtracking_factor: float
     quantized_budget_envelope_backtracking_maximum_steps: int
-    null_space_cg_max_iterations: int
-    null_space_cg_relative_tolerance: float
     minimum_semantic_preservation_cosine: float
     maximum_handcrafted_structure_feature_relative_drift: float
     injection_step_indices: tuple[int, ...]
@@ -332,46 +321,16 @@ class FormalMethodRuntimeConfig:
             raise ValueError("正式三分支风险权重、阈值或预算常量发生漂移")
         if self.width <= 0 or self.height <= 0 or self.inference_steps <= 0:
             raise ValueError("图像尺寸和推理步数必须为正整数")
-        if self.jacobian_candidate_count < self.null_space_rank or self.null_space_rank <= 0:
-            raise ValueError("jacobian_candidate_count 必须不小于正的 null_space_rank")
         if (
-            not math.isfinite(self.null_space_numerical_epsilon)
-            or self.null_space_numerical_epsilon != 1e-12
-        ):
-            raise ValueError("正式 Null Space 数值 epsilon 必须固定为 1e-12")
-        if (
-            not math.isfinite(self.maximum_qr_condition_number)
-            or self.maximum_qr_condition_number != 1e6
-        ):
-            raise ValueError("正式 QR 条件数上界必须固定为 1e6")
-        if (
-            not math.isfinite(self.maximum_orthogonality_error)
-            or self.maximum_orthogonality_error != 1e-5
-        ):
-            raise ValueError("正式 Null Space 正交误差上界必须固定为 1e-5")
-        if self.qr_reference_solve_protocol != (
-            "right_upper_triangular_solve_without_explicit_inverse"
-        ):
-            raise ValueError("正式 QR 列参考必须使用右侧上三角求解")
-        if any(
-            index <= 0 or index >= self.inference_steps
-            for index in self.injection_step_indices
-        ):
-            raise ValueError(
-                "injection_step_indices 必须保留紧邻上一 scheduler 步"
-            )
-        if (
-            not self.injection_step_indices
+            self.injection_step_indices != (10,)
             or self.attention_operator_schedule_index
             != ATTENTION_OPERATOR_SCHEDULE_INDEX
-            or self.public_detection_schedule_index
-            != self.injection_step_indices[0] + 1
             or self.public_detection_schedule_index
             != self.attention_operator_schedule_index
             or self.public_detection_schedule_index >= self.inference_steps
         ):
             raise ValueError(
-                "生成与检测注意力算子必须共享首次注入后的冻结 schedule 索引"
+                "正式生成必须只在索引10写回，公开检测保持冻结索引7"
             )
         if type(self.tail_fraction) is not float or not 0.0 < self.tail_fraction <= 1.0:
             raise ValueError("tail_fraction 必须为 (0, 1] 内的精确 float")
@@ -447,14 +406,6 @@ class FormalMethodRuntimeConfig:
             raise ValueError(
                 "minimum_final_image_attention_score_gain 必须为正有限数"
             )
-        if not 0.0 < self.minimum_projection_energy_retention <= 1.0:
-            raise ValueError("minimum_projection_energy_retention 必须位于 (0, 1]")
-        if not 0.0 < self.maximum_relative_response_residual <= 1.0:
-            raise ValueError("maximum_relative_response_residual 必须位于 (0, 1]")
-        if not 0.0 < self.maximum_quantized_write_relative_jacobian_response <= 1.0:
-            raise ValueError(
-                "maximum_quantized_write_relative_jacobian_response 必须位于 (0, 1]"
-            )
         if self.quantized_branch_composition_protocol != (
             "float32_ordered_branch_sum_add_float32_latent_single_cast"
         ):
@@ -477,10 +428,6 @@ class FormalMethodRuntimeConfig:
             or self.quantized_budget_envelope_backtracking_maximum_steps != 24
         ):
             raise ValueError("正式量化包络回溯必须固定为最多24次二分缩减")
-        if self.null_space_cg_max_iterations <= 0:
-            raise ValueError("null_space_cg_max_iterations 必须为正整数")
-        if not 0.0 < self.null_space_cg_relative_tolerance < 1.0:
-            raise ValueError("null_space_cg_relative_tolerance 必须位于 (0, 1)")
         if not 0.0 < self.minimum_semantic_preservation_cosine <= 1.0:
             raise ValueError(
                 "minimum_semantic_preservation_cosine 必须位于 (0, 1]"
@@ -586,14 +533,6 @@ class FormalMethodRuntimeConfig:
                 self.attention_geometry_risk_config
             ),
             "attention_injection_steps": self.injection_step_indices,
-            "jacobian_candidate_count": self.jacobian_candidate_count,
-            "null_space_rank": self.null_space_rank,
-            "null_space_numerical_epsilon": (
-                self.null_space_numerical_epsilon
-            ),
-            "maximum_qr_condition_number": self.maximum_qr_condition_number,
-            "maximum_orthogonality_error": self.maximum_orthogonality_error,
-            "qr_reference_solve_protocol": self.qr_reference_solve_protocol,
             "lf_relative_strength": self.lf_relative_strength,
             "tail_relative_strength": self.tail_relative_strength,
             "attention_relative_strength": self.attention_relative_strength,
@@ -635,11 +574,6 @@ class FormalMethodRuntimeConfig:
             ),
             "tail_fraction": self.tail_fraction,
             "keyed_prg_version": self.keyed_prg_version,
-            "minimum_projection_energy_retention": self.minimum_projection_energy_retention,
-            "maximum_relative_response_residual": self.maximum_relative_response_residual,
-            "maximum_quantized_write_relative_jacobian_response": (
-                self.maximum_quantized_write_relative_jacobian_response
-            ),
             "quantized_branch_composition_protocol": (
                 self.quantized_branch_composition_protocol
             ),
@@ -657,10 +591,6 @@ class FormalMethodRuntimeConfig:
             ),
             "quantized_budget_envelope_backtracking_maximum_steps": (
                 self.quantized_budget_envelope_backtracking_maximum_steps
-            ),
-            "null_space_cg_max_iterations": self.null_space_cg_max_iterations,
-            "null_space_cg_relative_tolerance": (
-                self.null_space_cg_relative_tolerance
             ),
             "minimum_semantic_preservation_cosine": (
                 self.minimum_semantic_preservation_cosine
@@ -860,20 +790,6 @@ def require_formal_method_environment_consistency(config: FormalMethodRuntimeCon
             separators=(",", ":"),
         ),
         "SLM_WM_ATTENTION_INJECTION_STEPS": ",".join(str(value) for value in config.injection_step_indices),
-        "SLM_WM_JACOBIAN_CANDIDATE_COUNT": str(config.jacobian_candidate_count),
-        "SLM_WM_NULL_SPACE_RANK": str(config.null_space_rank),
-        "SLM_WM_NULL_SPACE_NUMERICAL_EPSILON": str(
-            config.null_space_numerical_epsilon
-        ),
-        "SLM_WM_MAXIMUM_QR_CONDITION_NUMBER": str(
-            config.maximum_qr_condition_number
-        ),
-        "SLM_WM_MAXIMUM_ORTHOGONALITY_ERROR": str(
-            config.maximum_orthogonality_error
-        ),
-        "SLM_WM_QR_REFERENCE_SOLVE_PROTOCOL": (
-            config.qr_reference_solve_protocol
-        ),
         "SLM_WM_LF_RELATIVE_STRENGTH": str(config.lf_relative_strength),
         "SLM_WM_TAIL_RELATIVE_STRENGTH": str(config.tail_relative_strength),
         "SLM_WM_ATTENTION_RELATIVE_STRENGTH": str(config.attention_relative_strength),
@@ -926,11 +842,6 @@ def require_formal_method_environment_consistency(config: FormalMethodRuntimeCon
         ),
         "SLM_WM_TAIL_FRACTION": str(config.tail_fraction),
         "SLM_WM_KEYED_PRG_VERSION": config.keyed_prg_version,
-        "SLM_WM_MINIMUM_PROJECTION_ENERGY_RETENTION": str(config.minimum_projection_energy_retention),
-        "SLM_WM_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL": str(config.maximum_relative_response_residual),
-        "SLM_WM_MAXIMUM_QUANTIZED_WRITE_RELATIVE_JACOBIAN_RESPONSE": str(
-            config.maximum_quantized_write_relative_jacobian_response
-        ),
         "SLM_WM_QUANTIZED_BRANCH_COMPOSITION_PROTOCOL": (
             config.quantized_branch_composition_protocol
         ),
@@ -948,12 +859,6 @@ def require_formal_method_environment_consistency(config: FormalMethodRuntimeCon
         ),
         "SLM_WM_QUANTIZED_BUDGET_ENVELOPE_BACKTRACKING_MAXIMUM_STEPS": str(
             config.quantized_budget_envelope_backtracking_maximum_steps
-        ),
-        "SLM_WM_NULL_SPACE_CG_MAX_ITERATIONS": str(
-            config.null_space_cg_max_iterations
-        ),
-        "SLM_WM_NULL_SPACE_CG_RELATIVE_TOLERANCE": str(
-            config.null_space_cg_relative_tolerance
         ),
         "SLM_WM_MINIMUM_SEMANTIC_PRESERVATION_COSINE": str(
             config.minimum_semantic_preservation_cosine

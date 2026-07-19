@@ -57,6 +57,9 @@ from experiments.protocol.image_only_evidence import (
     apply_frozen_evidence_protocol,
     calibrate_complete_evidence_protocol,
 )
+from experiments.protocol.content_routing_reference_quantile import (
+    ContentRoutingReferenceScalars,
+)
 from experiments.runners.image_only_dataset_runtime import (
     validate_formal_dataset_randomization_identity,
 )
@@ -160,7 +163,6 @@ class RuntimeRerunAblationSpec:
     ablation_id: str
     semantic_routing_enabled: bool = True
     branch_risk_mode: str = "branch_specific"
-    null_space_enabled: bool = True
     lf_enabled: bool = True
     tail_robust_enabled: bool = True
     tail_truncation_enabled: bool = True
@@ -191,7 +193,6 @@ class RuntimeRerunAblationSpec:
             config,
             semantic_routing_enabled=self.semantic_routing_enabled,
             branch_risk_mode=self.branch_risk_mode,
-            null_space_enabled=self.null_space_enabled,
             lf_enabled=self.lf_enabled,
             tail_robust_enabled=self.tail_robust_enabled,
             tail_truncation_enabled=self.tail_truncation_enabled,
@@ -213,10 +214,6 @@ FORMAL_RUNTIME_RERUN_ABLATION_SPECS = (
     RuntimeRerunAblationSpec(
         "without_branch_risk_routing",
         semantic_routing_enabled=False,
-    ),
-    RuntimeRerunAblationSpec(
-        "without_jacobian_null_space",
-        null_space_enabled=False,
     ),
     RuntimeRerunAblationSpec(
         "lf_content_only",
@@ -550,6 +547,8 @@ def run_runtime_rerun_ablations(
     root: str | Path = ".",
     specs: tuple[RuntimeRerunAblationSpec, ...] | None = None,
     max_new_runs_per_session: int = 0,
+    *,
+    content_routing_references: ContentRoutingReferenceScalars | None = None,
 ) -> dict[str, Any]:
     """在完整 Prompt 集上重运行每个机制配置并分别冻结检测阈值。
 
@@ -558,6 +557,10 @@ def run_runtime_rerun_ablations(
     测量的是机制移除后的检测能力, 不是阈值失配造成的差异。
     """
 
+    if type(content_routing_references) is not ContentRoutingReferenceScalars:
+        raise RuntimeError(
+            "旧机制消融入口缺少已资格化content routing references，禁止回退旧链"
+        )
     root_path = Path(root).resolve()
     formal_execution_run_lock = (
         repository_environment.require_published_formal_execution_lock(root_path)
@@ -700,11 +703,15 @@ def run_runtime_rerun_ablations(
             else:
                 if shared_context is None:
                     shared_context = load_semantic_watermark_runtime_context(
-                        shared_context_config
+                        shared_context_config,
+                        verified_formal_execution_lock=formal_execution_run_lock,
+                        repository_root=root_path,
                     )
                 result = write_semantic_watermark_runtime_outputs(
                     run_config,
                     root=root_path,
+                    references=content_routing_references,
+                    verified_formal_execution_lock=formal_execution_run_lock,
                     runtime_context=shared_context,
                 )
                 new_run_count += 1
@@ -1235,7 +1242,6 @@ def package_runtime_rerun_ablations(
         for field_name in (
             "semantic_routing_enabled",
             "branch_risk_mode",
-            "null_space_enabled",
             "lf_enabled",
             "tail_robust_enabled",
             "tail_truncation_enabled",

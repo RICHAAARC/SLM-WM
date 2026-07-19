@@ -20,10 +20,6 @@ ABLATION_NECESSITY_CLAIMS = {
         "claim_necessity_branch_risk_routing",
         "分支风险路由对预注册攻击后检测率主指标具有必要贡献。",
     ),
-    "without_jacobian_null_space": (
-        "claim_necessity_jacobian_null_space",
-        "语义条件 Jacobian Null Space 投影对预注册主指标具有必要贡献。",
-    ),
     "lf_content_only": (
         "claim_complementarity_beyond_lf_only",
         "完整多载体方法相对 LF-only 配置对预注册主指标具有必要增益。",

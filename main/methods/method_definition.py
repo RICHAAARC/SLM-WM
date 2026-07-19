@@ -1,420 +1,91 @@
-"""冻结 SLM-WM 正式方法的可机读语义边界。"""
+"""冻结 SLM-WM 正式内容双链方法的可机读语义边界。"""
 
 from __future__ import annotations
 
 from typing import Any
 
 from main.core.digest import build_stable_digest
-from main.core.keyed_prg import KEYED_PRG_VERSION, keyed_prg_protocol_record
-from main.methods.carrier.keyed_tensor import (
-    LOW_FREQUENCY_BOUNDARY_MODE,
-    LOW_FREQUENCY_CARRIER_PROTOCOL_SCHEMA,
-    LOW_FREQUENCY_CEIL_MODE,
-    LOW_FREQUENCY_COUNT_INCLUDE_PAD,
-    LOW_FREQUENCY_DIVISOR_OVERRIDE,
-    LOW_FREQUENCY_KERNEL_SIZE,
-    LOW_FREQUENCY_PADDING,
-    LOW_FREQUENCY_STRIDE,
-    TAIL_ROBUST_CARRIER_PROTOCOL_SCHEMA,
-)
-from main.methods.detection.image_only import (
-    ATTENTION_ALIGNMENT_LAYER_SELECTION_RULE,
-    IMAGE_ONLY_EXTRACTION_PROFILE_SCHEMA,
-    IMAGE_ONLY_IMAGE_PREPROCESSING_PROTOCOL,
-    IMAGE_ONLY_MEASUREMENT_CONFIG_SCHEMA,
-    IMAGE_ONLY_VAE_ENCODING_PROTOCOL,
-)
-from main.methods.geometry.attention_alignment import (
-    ATTENTION_ALIGNMENT_ANCHOR_COUNT,
-    ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
-    ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
-    ATTENTION_IMAGE_PADDING_MODE,
-    ATTENTION_IMAGE_QUANTIZATION_PROTOCOL,
-    ATTENTION_IMAGE_RESAMPLING_MODE,
-)
+from main.core.keyed_prg import KEYED_PRG_VERSION
 from main.methods.geometry.differentiable_attention import (
-    ATTENTION_COORDINATE_CONVENTION,
-    ATTENTION_GRID_ALIGN_CORNERS,
-    ATTENTION_OPERATOR_SCHEDULE_INDEX,
     FROZEN_SD35_ATTENTION_MODULE_NAMES,
 )
-from main.methods.semantic.feature_protocol import (
-    semantic_feature_protocol_record,
-)
 
 
-METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_definition"
+METHOD_DEFINITION_SCHEMA = "slm_wm_content_dual_chain_definition_v1"
 
 
 def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
-    """返回完整方法的构造协议与“潜流形”术语边界.
-
-    该记录不保存单次运行参数. 它用于把论文方法名称绑定到必须执行的
-    分支构造、局部线性几何和有限写回复验, 避免把构造式实现误写为
-    未执行的联合优化或全局非线性流形求解. 该记录只表示规范身份,
-    不表示当前实现已经通过 CPU、GPU 或论文证据验证.
-    """
+    """返回正式 S/T/R/Q、双载体、Q/K 同步与盲检测方法身份。"""
 
     return {
         "method_definition_schema": METHOD_DEFINITION_SCHEMA,
-        "method_name": "semantic_conditioned_latent_manifold_watermarking",
-        "update_construction": {
-            "semantics": "branchwise_constructive_safe_subspace_updates",
-            "content_branch_rule": (
-                "project_template_then_risk_bounded_scale"
-            ),
-            "attention_branch_rule": (
-                "project_direct_qk_gradient_then_risk_bounded_monotonic_backtracking"
-            ),
-            "composition_rule": (
-                "single_core_ordered_actual_dtype_branch_sum"
-            ),
-            "composition_implementation_layer": "main",
-            "joint_argmax_solved": False,
-        },
-        "branch_risk": {
-            "signal_calibration_rule": (
-                "analytic_bounded_signals_without_per_sample_minmax"
-            ),
-            "neutral_texture_rule": "fixed_constant_risk_term",
-            "neutral_texture_value": 0.5,
-            "eligibility_rule": "strict_risk_less_than_threshold",
-            "budget_broadcast_protocol": (
-                "per_sample_hw_repeat_channels_nchw"
-            ),
-            "zero_support_rule": "exact_zero_direction_or_fail_closed",
-            "effective_budget_rule": (
-                "configured_budget_times_eligibility_indicator"
-            ),
-            "risk_bounded_scale_protocol": (
-                "direction_peak_frozen_budget_ceiling_box"
-            ),
-            "amplitude_envelope_rule": (
-                "nominal_l2_times_unit_direction_linf_times_"
-                "effective_budget_over_frozen_ceiling"
-            ),
-            "direction_scaling_rule": (
-                "maximum_feasible_global_scalar_without_coordinate_clipping"
-            ),
-            "direction_ratio_epsilon": 1e-12,
-            "direction_ratio_epsilon_role": (
-                "zero_budget_leakage_and_active_coordinate_selection"
-            ),
-            "numerical_epsilon_role": (
-                "nonzero_step_and_response_denominator_stability"
-            ),
-            "epsilon_roles_interchangeable": False,
-        },
-        "local_geometry": {
-            "latent_manifold_term_scope": (
-                "local_implicit_feature_level_set_tangent_interpretation"
-            ),
-            "numerical_object": "kernel_of_local_feature_jacobian",
-            "feature_width": 716,
-            "branch_risk_conditioned": True,
-            "local_tangent_residual_gated": True,
-            "global_nonlinear_manifold_constructed": False,
-            "constant_rank_condition_verified": False,
-            "chart_geodesic_or_retraction_used": False,
-            "qr_column_reference_rule": (
-                "routed_candidate_right_solve_upper_triangular_qr_factor"
-            ),
-            "qr_reference_solve_protocol": (
-                "right_upper_triangular_solve_without_explicit_inverse"
-            ),
-            "null_space_numerical_epsilon": 1e-12,
-            "maximum_qr_condition_number": 1e6,
-            "maximum_orthogonality_error": 1e-5,
-            "shared_rms_column_reference_used": False,
-            "explicit_qr_factor_inverse_used": False,
-            "projection_energy_rule": "squared_l2_ratio",
-            "cg_convergence_residual_rule": (
-                "recompute_right_hand_side_minus_operator_returned_solution"
-            ),
-            "cg_convergence_scale_rule": (
-                "true_residual_l2_divided_by_right_hand_side_l2"
-            ),
-            "cg_zero_iteration_rule": "exact_zero_right_hand_side_only",
-            "absolute_residual_convergence_allowed": False,
-            "post_risk_direction_jvp_rule": (
-                "required_independently_for_each_active_branch"
-            ),
-            "post_risk_reference_direction_rule": (
-                "unprojected_carrier_template_or_direct_qk_gradient"
-            ),
-        },
-        "semantic_feature_operator": semantic_feature_protocol_record(),
-        "carrier_normalization": {
-            "lf_carrier_protocol_schema": (
-                LOW_FREQUENCY_CARRIER_PROTOCOL_SCHEMA
-            ),
-            "lf_kernel_size": LOW_FREQUENCY_KERNEL_SIZE,
-            "lf_stride": LOW_FREQUENCY_STRIDE,
-            "lf_padding": LOW_FREQUENCY_PADDING,
-            "lf_boundary_mode": LOW_FREQUENCY_BOUNDARY_MODE,
-            "lf_ceil_mode": LOW_FREQUENCY_CEIL_MODE,
-            "lf_count_include_pad": LOW_FREQUENCY_COUNT_INCLUDE_PAD,
-            "lf_divisor_override": LOW_FREQUENCY_DIVISOR_OVERRIDE,
-            "lf_pooling_axes": "height_width_only",
-            "lf_batch_channel_isolation": True,
-            "lf_content_rule": "subtract_global_mean_then_l2_normalize",
-            "lf_normalization_scope": "global_tensor",
-            "lf_detection_score_weight": 0.70,
-            "tail_robust_detection_score_weight": 0.30,
-            "tail_robust_rule": (
-                "amplitude_truncate_then_l2_normalize_without_mean_centering"
-            ),
-            "tail_carrier_protocol_schema": (
-                TAIL_ROBUST_CARRIER_PROTOCOL_SCHEMA
-            ),
-            "tail_selection_rule": (
-                "descending_absolute_value_then_ascending_flat_index"
-            ),
-            "tail_nonselected_coordinate_rule": "exact_zero_after_normalization",
-            "raw_aligned_template_identity_rule": (
-                "same_shape_same_key_same_protocol_exact_content_digest"
-            ),
-            "content_correlation_rule": (
-                "dot_of_independently_centered_l2_normalized_vectors"
-            ),
-            "content_correlation_domain_rule": (
-                "finite_inputs_and_nonzero_centered_energy"
-            ),
-            "undefined_content_correlation_score_allowed": False,
-            "fixed_fpr_carrier_identity_rule": (
-                "lf_and_tail_protocol_digests_frozen_from_calibration"
-            ),
-        },
-        "attention_geometry": {
-            "attention_operator_schedule_index": (
-                ATTENTION_OPERATOR_SCHEDULE_INDEX
-            ),
-            "generation_and_detection_schedule_rule": (
-                "shared_fixed_attention_operator_schedule_index"
-            ),
-            "post_step_schedule_selects_attention_operator": False,
-            "relation_source": "direct_to_q_to_k_sampled_image_token_subgraph",
-            "probability_inverse_relation_allowed": False,
-            "relation_numerical_epsilon": 1e-12,
-            "valid_row_energy_rule": (
-                "both_centered_weighted_energies_strictly_above_epsilon_squared"
-            ),
-            "operator_metadata_evidence_rule": (
-                "shared_full_record_validation_and_digest_recomputation"
-            ),
-            "active_relation_numerical_domain_rule": (
-                "all_qk_projection_normalization_logits_probability_relation_"
-                "projection_pair_weight_and_component_scores_finite"
-            ),
-            "nonfinite_attention_score_substitution_allowed": False,
-            "risk_bounded_scale_is_backtracking_start": True,
-            "acceptance_rule": (
-                "actual_candidate_score_strictly_above_original_and_content_base"
-            ),
-            "full_joint_attention_all_tokens_optimized": False,
-        },
-        "image_only_alignment": {
-            "alignment_requires_attention_geometry": True,
-            "alignment_and_aligned_content_bidirectional": True,
-            "attention_module_names": list(
-                FROZEN_SD35_ATTENTION_MODULE_NAMES
-            ),
-            "cross_layer_selection_rule": (
-                ATTENTION_ALIGNMENT_LAYER_SELECTION_RULE
-            ),
-            "cross_layer_tie_break_rule": (
-                "earlier_frozen_attention_module_name"
-            ),
-            "anchor_selection_rule": (
-                "evenly_spaced_over_sampled_token_index_range"
-            ),
-            "attention_anchor_count": ATTENTION_ALIGNMENT_ANCHOR_COUNT,
-            "inlier_ratio_denominator": "valid_covered_anchor_count",
-            "attention_residual_threshold": (
-                ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD
-            ),
-            "attention_residual_coordinate_unit": (
-                "normalized_xy_euclidean_distance"
-            ),
-            "attention_minimum_inlier_ratio": (
-                ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO
-            ),
-            "attention_coordinate_convention": (
-                ATTENTION_COORDINATE_CONVENTION
-            ),
-            "attention_grid_align_corners": (
-                ATTENTION_GRID_ALIGN_CORNERS
-            ),
-            "image_resampling_mode": ATTENTION_IMAGE_RESAMPLING_MODE,
-            "image_padding_mode": ATTENTION_IMAGE_PADDING_MODE,
-            "image_quantization_protocol": (
-                ATTENTION_IMAGE_QUANTIZATION_PROTOCOL
-            ),
-            "gate_parameter_source": (
-                "preregistered_formal_method_configuration"
-            ),
-            "calibration_data_used_for_gate_parameters": False,
-            "alignment_digest_binds_gate_parameters": True,
-            "registration_objective_margin_rule": (
-                "best_registration_objective_minus_identity_registration_objective"
-            ),
-            "registration_objective_margin_required_positive": True,
-        },
-        "image_only_measurement": {
-            "measurement_config_schema": (
-                IMAGE_ONLY_MEASUREMENT_CONFIG_SCHEMA
-            ),
-            "extraction_profile_schema": (
-                IMAGE_ONLY_EXTRACTION_PROFILE_SCHEMA
-            ),
-            "image_preprocessing_protocol": (
-                IMAGE_ONLY_IMAGE_PREPROCESSING_PROTOCOL
-            ),
-            "vae_encoding_protocol": IMAGE_ONLY_VAE_ENCODING_PROTOCOL,
-            "measurement_identity_scope": (
-                "complete_image_to_latent_qk_and_carrier_configuration"
-            ),
-            "threshold_or_decision_fields_allowed": False,
-        },
-        "image_only_evidence_calibration": {
-            "measurement_scope": (
-                "threshold_independent_continuous_evidence_only"
-            ),
-            "measurement_forbidden_content": (
-                "calibration_parameters_thresholds_and_decisions"
-            ),
-            "calibration_source_role": (
-                "registered_key_unattacked_clean_negative_only"
-            ),
-            "partition_sort_key": (
-                "sha256_partition_protocol_nul_prompt_id"
-            ),
-            "window_fit_count_rule": "floor_calibration_count_divided_by_3",
-            "threshold_freeze_count_rule": (
-                "calibration_count_minus_window_fit_count"
-            ),
-            "partition_subsets_disjoint": True,
-            "allowed_false_positive_count_rule": (
-                "max_0_floor_target_fpr_times_negative_count_plus_1_minus_1"
-            ),
-            "window_fit_parameter_scope": [
-                "three_attention_geometry_thresholds",
-                "provisional_raw_content_threshold",
-                "rescue_margin_low",
+        "method_name": "content_adaptive_dual_carrier_latent_watermark",
+        "content_observations": {
+            "ordered_observations": [
+                "semantic_saliency",
+                "texture_complexity",
+                "adjacent_latent_response",
+                "public_probe_local_sensitivity",
             ],
-            "rescue_candidate_rule": (
-                "negative_raw_margins_exact_and_nextafter_toward_zero_"
-                "plus_nextafter_zero_toward_negative_infinity"
-            ),
-            "rescue_selection_rule": (
-                "numerically_smallest_widest_candidate_within_"
-                "window_fit_false_positive_budget"
-            ),
-            "geometry_ready_rule": (
-                "structural_alignment_and_stable_pair_and_three_frozen_gates"
-            ),
-            "geometry_measurement_numerical_domain_rule": (
-                "raw_and_aligned_content_attention_registration_and_sync_finite"
-            ),
-            "malformed_geometry_raw_content_fallback_allowed": False,
-            "decision_equivalent_score_rule": (
-                "geometry_ready_max_raw_min_aligned_raw_minus_rescue_"
-                "otherwise_raw"
-            ),
-            "final_threshold_source": (
-                "threshold_freeze_decision_equivalent_scores_only"
-            ),
-            "shared_baseline_threshold_freeze_prompt_ids": True,
-            "raw_aligned_use_single_content_threshold": True,
-            "geometry_rescue_enablement_rule": (
-                "attention_geometry_enabled_and_image_alignment_enabled"
-            ),
-            "geometry_rescue_disabled_score_rule": (
-                "raw_content_score_only"
-            ),
-            "geometry_rescue_disabled_parameter_rule": (
-                "rescue_and_geometry_thresholds_none_counts_zero_ready_false"
-            ),
-            "applied_record_recalibration_rule": (
-                "explicit_threshold_free_measurement_projection_required"
-            ),
-            "test_positive_attacked_tuning_allowed": False,
+            "routing_rule": "formal_s_t_r_q_content_capacity_and_lf_hf_masks",
+            "reference_source": "explicit_or_fixed_registry_fail_closed",
+            "single_image_reference_recomputation_allowed": False,
         },
-        "write_validation": {
-            "branch_amplitude_envelope_validation_rule": (
-                "required_on_each_materialized_active_branch_update"
+        "carrier_templates": {
+            "low_frequency": "paired_2d_low_pass_center_per_sample_l2",
+            "high_frequency_tail": (
+                "paired_2d_high_pass_stable_topabs_one_fifth_then_l2"
             ),
-            "actual_dtype_composition_protocol": (
-                "float32_ordered_branch_sum_add_float32_latent_single_cast"
-            ),
-            "actual_dtype_composition_order": [
-                "lf_content",
-                "tail_robust",
+            "independent_prg_domains": ["lf_content", "hf_tail_robust"],
+            "keyed_prg_version": KEYED_PRG_VERSION,
+            "relative_strengths": {
+                "low_frequency": 0.0025,
+                "high_frequency_tail": 0.0015,
+                "attention_geometry": 0.0010,
+            },
+        },
+        "generation_update": {
+            "capture_index": 9,
+            "write_index": 10,
+            "write_count": 1,
+            "composition_order": [
+                "low_frequency",
+                "high_frequency_tail",
                 "attention_geometry",
             ],
-            "combined_budget_envelope_rule": (
-                "sum_active_branch_envelopes"
-            ),
-            "quantized_budget_envelope_absolute_tolerance": 0.0,
-            "quantized_budget_envelope_backtracking_factor": 0.5,
-            "quantized_budget_envelope_backtracking_maximum_steps": 24,
-            "quantized_envelope_recovery_rule": (
-                "common_positive_scalar_backtracking_then_full_revalidation"
-            ),
-            "attention_post_composition_validation_rule": (
-                "required_after_any_common_scalar_backtracking"
-            ),
-            "actual_dtype_budget_envelope_validation_rule": "required",
-            "actual_dtype_update_jvp_validation_rule": "required",
-            "finite_feature_change_validation_rule": "required",
+            "common_backtracking": "gamma_j_equals_two_power_minus_j_j_0_to_24",
+            "combined_relative_l2_limit": 0.0050,
+            "actual_dtype_single_write": True,
+            "legacy_multi_injection_allowed": False,
         },
-        "ablation_isolation": {
-            "without_branch_risk_routing": (
-                "unit_effective_budget_without_eligibility_filter"
-            ),
-            "without_jacobian_null_space": (
-                "retain_risk_support_and_amplitude_envelope"
-            ),
-            "inactive_branch_envelope_rule": (
-                "exclude_from_combined_envelope_sum"
-            ),
+        "attention_geometry": {
+            "relation_source": "direct_qk",
+            "attention_module_names": list(FROZEN_SD35_ATTENTION_MODULE_NAMES),
+            "stable_token_fraction": 0.5,
+            "unstable_pair_weight": 0.25,
+            "post_write_score_rule": "strictly_improve_same_scoring_template",
+            "jacobian_null_space_allowed": False,
+            "jvp_vjp_allowed": False,
+            "psd_cg_allowed": False,
         },
-        "keyed_prg": {
-            "keyed_prg_version": KEYED_PRG_VERSION,
-            "keyed_prg_protocol_digest": keyed_prg_protocol_record(
-                KEYED_PRG_VERSION
-            )[
-                "keyed_prg_protocol_digest"
-            ],
-            "canonical_device": "cpu",
-            "canonical_dtype": "float32",
-            "uniform_output_rule": "direct_open_unit_interval_float32",
-            "uniform_output_role": "attention_relation_signs",
-            "uniform_uses_normal_transform": False,
-            "gaussian_output_rule": (
-                "20bit_msb_stream_index_to_frozen_midpoint_inverse_normal_cdf_float32"
-            ),
-            "gaussian_output_roles": [
-                "content_carrier_templates",
-                "jacobian_candidate_directions",
-                "public_image_only_detection_noise",
-            ],
-            "public_detection_noise_key_role": (
-                "deterministic_public_protocol_identity_not_secret_key"
-            ),
-            "gaussian_uses_frozen_normal_quantile_table": True,
-            "uniform_and_gaussian_roles_interchangeable": False,
+        "blind_detection": {
+            "input_access": "image_key_public_model_only",
+            "content_score": "0.70_lf_plus_0.30_hf_tail_by_method_role",
+            "templates": "unmasked_formal_lf_and_hf_tail",
+            "geometry_rescue": "near_threshold_alignment_then_same_threshold_retest",
+            "geometry_score_can_directly_decide_positive": False,
         },
-        "branch_names": [
-            "lf_content",
-            "tail_robust",
-            "attention_geometry",
-        ],
+        "qualification_boundary": {
+            "real_sd35_cuda_required": True,
+            "registered_and_wrong_key_required": True,
+            "reference_qualification_separate": True,
+            "supports_paper_claim_without_formal_records": False,
+        },
     }
 
 
 def semantic_conditioned_latent_method_definition_digest() -> str:
-    """返回正式方法语义记录的稳定 SHA-256 摘要."""
+    """返回正式方法定义的稳定摘要。"""
 
     return build_stable_digest(semantic_conditioned_latent_method_definition())
 

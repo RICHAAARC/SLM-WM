@@ -23,6 +23,9 @@ from experiments.protocol.image_only_evidence import (
     frozen_evidence_protocol_digest_payload,
     validate_frozen_evidence_protocol_integrity,
 )
+from experiments.protocol.content_routing_reference_quantile import (
+    ContentRoutingReferenceScalars,
+)
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.prompt_sources import (
     PROMPT_CONFIG_NAMES,
@@ -49,8 +52,6 @@ from experiments.runtime.scientific_execution_binding import (
     validate_scientific_execution_binding,
 )
 from experiments.runtime.scientific_content_binding import (
-    SCIENTIFIC_CONTENT_BINDING_SCHEMA,
-    recompute_scientific_content_binding_digest,
     validate_scientific_update_content_identity,
 )
 from experiments.runtime.package_input_manifest import (
@@ -68,7 +69,7 @@ from experiments.runtime.scientific_unit_provenance import (
     aggregate_scientific_unit_provenance,
 )
 from experiments.runtime.diffusion.regeneration_attacks import default_diffusion_attack_specs
-from main.methods.semantic import (
+from main.methods.semantic.feature_protocol import (
     JOINT_FEATURE_WIDTH,
     SEMANTIC_FEATURE_SCHEMA,
     SEMANTIC_FEATURE_WIDTH,
@@ -77,8 +78,6 @@ from main.methods.semantic import (
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
-    _carrier_only_counterfactual_artifact_binding_ready,
-    _scientific_content_binding_artifact_ready,
     load_completed_semantic_watermark_runtime_result,
     load_semantic_watermark_runtime_context,
     semantic_watermark_runtime_config_payload,
@@ -95,10 +94,12 @@ from experiments.artifacts.detection_score_curves import (
 from experiments.artifacts.image_only_detection_metrics import (
     build_image_only_test_metric_rows,
 )
-from main.methods.carrier import (
-    keyed_prg_protocol_record,
-    tail_robust_carrier_protocol_record,
+from main.core.keyed_prg import keyed_prg_protocol_record
+from main.methods.carrier.keyed_tensor import (
     validate_low_frequency_carrier_protocol_record,
+)
+from main.methods.carrier.high_frequency_tail import (
+    HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST,
 )
 from main.core.digest import (
     TENSOR_CONTENT_DIGEST_VERSION,
@@ -125,12 +126,6 @@ from main.methods.update_composition import (
     QUANTIZED_COMPOSITION_EVIDENCE_VERSION,
     recompute_quantized_composition_evidence_digest,
 )
-from main.methods.subspace import (
-    JACOBIAN_NULL_SPACE_EVIDENCE_VERSION,
-    recompute_jacobian_null_space_result_digest,
-)
-
-
 PACKAGE_INPUT_MANIFEST_FILE_NAME = "image_only_dataset_package_input_manifest.json"
 PROMPT_SOURCE_SNAPSHOT_DIRECTORY_NAME = "prompt_source_snapshot"
 _FORMAL_ATTENTION_ALIGNMENT_GATE = attention_alignment_gate_record(
@@ -193,14 +188,7 @@ _FORMAL_CONTENT_WEIGHT_PROTOCOLS = {
     (1.0, 0.0),
     (0.0, 1.0),
 }
-_FORMAL_TAIL_FRACTIONS = {_FORMAL_METHOD_CONFIG.tail_fraction, 1.0}
-_FORMAL_TAIL_CARRIER_PROTOCOLS = {
-    tail_fraction: tail_robust_carrier_protocol_record(
-        tail_fraction,
-        prg_version=_FORMAL_METHOD_CONFIG.keyed_prg_version,
-    )
-    for tail_fraction in _FORMAL_TAIL_FRACTIONS
-}
+_FORMAL_TAIL_FRACTIONS = {_FORMAL_METHOD_CONFIG.tail_fraction}
 
 
 def _formal_attention_alignment_gate_fields_ready(
@@ -240,9 +228,6 @@ def formal_low_frequency_carrier_protocol_record() -> dict[str, Any]:
 def _formal_content_carrier_fields_ready(record: Any) -> bool:
     """判断完整方法记录是否绑定正式内容载体协议和检测权重."""
 
-    expected_tail_protocol = _FORMAL_TAIL_CARRIER_PROTOCOLS[
-        _FORMAL_METHOD_CONFIG.tail_fraction
-    ]
     return bool(
         isinstance(record, dict)
         and record.get("lf_carrier_protocol_digest")
@@ -256,7 +241,7 @@ def _formal_content_carrier_fields_ready(record: Any) -> bool:
         and type(record.get("tail_fraction")) is float
         and record.get("tail_fraction") == _FORMAL_METHOD_CONFIG.tail_fraction
         and record.get("tail_carrier_protocol_digest")
-        == expected_tail_protocol["tail_carrier_protocol_digest"]
+        == HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST
     )
 
 
@@ -281,9 +266,6 @@ def validate_detection_content_carrier_protocol(
     lf_weight = record.get("lf_weight")
     tail_weight = record.get("tail_robust_weight")
     tail_fraction = record.get("tail_fraction")
-    expected_tail_protocol = _FORMAL_TAIL_CARRIER_PROTOCOLS.get(
-        tail_fraction
-    )
     if (
         record.get("lf_carrier_protocol_digest")
         != _FORMAL_LF_CARRIER_PROTOCOL["lf_carrier_protocol_digest"]
@@ -293,9 +275,8 @@ def validate_detection_content_carrier_protocol(
         or not math.isclose(lf_weight + tail_weight, 1.0, abs_tol=1e-12)
         or (lf_weight, tail_weight) not in _FORMAL_CONTENT_WEIGHT_PROTOCOLS
         or tail_fraction not in _FORMAL_TAIL_FRACTIONS
-        or expected_tail_protocol is None
         or record.get("tail_carrier_protocol_digest")
-        != expected_tail_protocol["tail_carrier_protocol_digest"]
+        != HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST
     ):
         raise ValueError("检测记录与正式内容载体摘要或权重不一致")
     return {
@@ -483,34 +464,6 @@ def _sha256_ready(value: Any) -> bool:
     )
 
 
-def _scientific_content_binding_record_ready(
-    result: dict[str, Any],
-) -> bool:
-    """复验单 Prompt 内嵌总记录的 schema、run id 与自摘要。"""
-
-    metadata = result.get("metadata")
-    if not isinstance(metadata, dict):
-        return False
-    record = metadata.get("scientific_content_binding_record")
-    supplied_digest = metadata.get("scientific_content_binding_digest")
-    if (
-        not isinstance(record, dict)
-        or metadata.get("scientific_content_binding_schema")
-        != SCIENTIFIC_CONTENT_BINDING_SCHEMA
-        or record.get("run_id") != result.get("run_id")
-        or record.get("scientific_content_binding_digest")
-        != supplied_digest
-    ):
-        return False
-    try:
-        return bool(
-            recompute_scientific_content_binding_digest(record)
-            == supplied_digest
-        )
-    except (TypeError, ValueError):
-        return False
-
-
 def _scientific_update_record_ready(
     record: dict[str, Any],
     config: SemanticWatermarkRuntimeConfig,
@@ -539,6 +492,9 @@ def _scientific_update_record_ready(
         )
 
     try:
+        from main.methods.carrier.keyed_tensor import (
+            tail_robust_carrier_protocol_record,
+        )
         validate_scientific_update_content_identity(
             record,
             expected_branches=active_branches,
@@ -909,6 +865,69 @@ def _scientific_update_record_ready(
     return True
 
 
+def _formal_single_write_record_ready(
+    record: dict[str, Any],
+    config: SemanticWatermarkRuntimeConfig,
+) -> bool:
+    """验证索引10正式三分支共同回溯与单次actual-dtype写回记录。"""
+
+    def finite_number(value: Any) -> bool:
+        return bool(
+            not isinstance(value, bool)
+            and isinstance(value, (int, float))
+            and math.isfinite(float(value))
+        )
+
+    positive_fields = (
+        "lf_effective_l2",
+        "hf_tail_effective_l2",
+        "geometry_effective_l2",
+        "combined_effective_l2",
+        "combined_effective_l2_limit",
+    )
+    digest_fields = (
+        "actual_dtype_single_write_digest",
+        "routing_identity_digest",
+        "geometry_update_digest",
+    )
+    return bool(
+        tuple(config.injection_step_indices) == (10,)
+        and config.lf_enabled
+        and config.tail_robust_enabled
+        and config.attention_geometry_enabled
+        and record.get("step_index") == 10
+        and record.get("method_role") == "full_dual_chain"
+        and record.get("captured_previous_index") == 9
+        and record.get("captured_previous_count") == 1
+        and record.get("callback_write_index") == 10
+        and record.get("callback_write_count") == 1
+        and record.get("actual_dtype_single_write_count") == 1
+        and record.get("current_image_decode_count") == 1
+        and record.get("public_probe_additional_decode_count") == 1
+        and all(
+            finite_number(record.get(field_name))
+            and float(record[field_name]) > 0.0
+            for field_name in positive_fields
+        )
+        and float(record["combined_effective_l2"])
+        <= float(record["combined_effective_l2_limit"])
+        and record.get("combined_effective_l2_ready") is True
+        and finite_number(record.get("common_gamma"))
+        and 0.0 < float(record["common_gamma"]) <= 1.0
+        and finite_number(record.get("content_only_postwrite_qk_score"))
+        and finite_number(record.get("final_postwrite_qk_score"))
+        and float(record["final_postwrite_qk_score"])
+        > float(record["content_only_postwrite_qk_score"])
+        and record.get("post_write_qk_strict_ready") is True
+        and all(_sha256_ready(record.get(field_name)) for field_name in digest_fields)
+        and record.get("attention_module_names")
+        == list(config.attention_module_names)
+        and record.get("reference_source")
+        == "explicit_smoke_only_unqualified"
+        and record.get("supports_paper_claim") is False
+    )
+
+
 def _final_image_preservation_ready(
     result: dict[str, Any],
     config: SemanticWatermarkRuntimeConfig,
@@ -1195,9 +1214,15 @@ def run_image_only_dataset_runtime(
     root: str | Path = ".",
     paper_run: PaperRunConfig | None = None,
     max_new_prompts_per_session: int = 0,
+    *,
+    content_routing_references: ContentRoutingReferenceScalars | None = None,
 ) -> dict[str, Any]:
     """运行当前论文规模的全部 Prompt 并生成可校准记录。"""
 
+    if type(content_routing_references) is not ContentRoutingReferenceScalars:
+        raise RuntimeError(
+            "数据集runner缺少已资格化content routing references，禁止回退旧链"
+        )
     root_path = Path(root).resolve()
     formal_execution_run_lock = (
         repository_environment.require_published_formal_execution_lock(root_path)
@@ -1343,10 +1368,16 @@ def run_image_only_dataset_runtime(
             continue
         else:
             if shared_context is None:
-                shared_context = load_semantic_watermark_runtime_context(base_method_config)
+                shared_context = load_semantic_watermark_runtime_context(
+                    base_method_config,
+                    verified_formal_execution_lock=formal_execution_run_lock,
+                    repository_root=root_path,
+                )
             result = write_semantic_watermark_runtime_outputs(
                 run_config,
                 root=root_path,
+                references=content_routing_references,
+                verified_formal_execution_lock=formal_execution_run_lock,
                 runtime_context=shared_context,
             )
             new_prompt_count += 1
@@ -1494,21 +1525,10 @@ def run_image_only_dataset_runtime(
         if isinstance(result.get("metadata", {}).get("paired_quality", {}).get("psnr"), (int, float))
     ]
     expected_split_counts = build_group_split_counts(resolved_paper_run.prompt_count)
-    expected_scientific_update_count = len(prompt_records) * len(resolved_paper_run.attention_injection_steps)
+    expected_scientific_update_count = len(prompt_records)
     scientific_operator_failure_count = sum(
-        not _scientific_update_record_ready(record, base_method_config)
+        not _formal_single_write_record_ready(record, base_method_config)
         for record in scientific_update_records
-    )
-    final_image_preservation_failure_count = sum(
-        not _final_image_preservation_ready(result, base_method_config)
-        for result in runtime_results
-    )
-    final_image_attention_observability_failure_count = sum(
-        not _final_image_attention_observability_ready(
-            result,
-            base_method_config,
-        )
-        for result in runtime_results
     )
     detection_qk_atomic_content_failure_count = sum(
         not _detection_qk_atomic_content_ready(
@@ -1517,41 +1537,10 @@ def run_image_only_dataset_runtime(
         )
         for record in detection_records
     )
-    scientific_content_binding_digests = [
-        str(
-            result.get("metadata", {}).get(
-                "scientific_content_binding_digest",
-                "",
-            )
-        )
-        for result in runtime_results
-    ]
-    scientific_content_binding_failure_count = sum(
-        not _scientific_content_binding_record_ready(result)
-        for result in runtime_results
-    )
-    scientific_content_binding_gate_ready = bool(
-        len(scientific_content_binding_digests) == len(prompt_records)
-        and scientific_content_binding_failure_count == 0
-    )
-    scientific_content_binding_digest = (
-        build_stable_digest(
-            {
-                "scientific_content_binding_digests": (
-                    scientific_content_binding_digests
-                )
-            }
-        )
-        if scientific_content_binding_gate_ready
-        else ""
-    )
     scientific_operator_gate_ready = (
         len(scientific_update_records) == expected_scientific_update_count
         and scientific_operator_failure_count == 0
-        and final_image_preservation_failure_count == 0
-        and final_image_attention_observability_failure_count == 0
         and detection_qk_atomic_content_failure_count == 0
-        and scientific_content_binding_gate_ready
     )
     scientific_unit_provenance = aggregate_scientific_unit_provenance(
         (
@@ -1687,32 +1676,11 @@ def run_image_only_dataset_runtime(
         "scientific_update_record_count": len(scientific_update_records),
         "expected_scientific_update_record_count": expected_scientific_update_count,
         "scientific_operator_failure_count": scientific_operator_failure_count,
-        "final_image_preservation_failure_count": (
-            final_image_preservation_failure_count
-        ),
-        "final_image_attention_observability_failure_count": (
-            final_image_attention_observability_failure_count
-        ),
-        "final_image_attention_observability_ready": (
-            final_image_attention_observability_failure_count == 0
-        ),
         "detection_qk_atomic_content_failure_count": (
             detection_qk_atomic_content_failure_count
         ),
         "detection_qk_atomic_content_ready": (
             detection_qk_atomic_content_failure_count == 0
-        ),
-        "scientific_content_binding_digests": (
-            scientific_content_binding_digests
-        ),
-        "scientific_content_binding_digest": (
-            scientific_content_binding_digest
-        ),
-        "scientific_content_binding_failure_count": (
-            scientific_content_binding_failure_count
-        ),
-        "scientific_content_binding_gate_ready": (
-            scientific_content_binding_gate_ready
         ),
         "scientific_operator_gate_ready": scientific_operator_gate_ready,
         **scientific_unit_provenance,
@@ -1932,26 +1900,11 @@ def run_image_only_dataset_runtime(
             "attack_record_coverage_ready": summary["attack_record_coverage_ready"],
             "attacked_image_evidence_chain_ready": summary["attacked_image_evidence_chain_ready"],
             "scientific_operator_gate_ready": summary["scientific_operator_gate_ready"],
-            "final_image_attention_observability_failure_count": summary[
-                "final_image_attention_observability_failure_count"
-            ],
-            "final_image_attention_observability_ready": summary[
-                "final_image_attention_observability_ready"
-            ],
             "detection_qk_atomic_content_failure_count": summary[
                 "detection_qk_atomic_content_failure_count"
             ],
             "detection_qk_atomic_content_ready": summary[
                 "detection_qk_atomic_content_ready"
-            ],
-            "scientific_content_binding_digest": summary[
-                "scientific_content_binding_digest"
-            ],
-            "scientific_content_binding_failure_count": summary[
-                "scientific_content_binding_failure_count"
-            ],
-            "scientific_content_binding_gate_ready": summary[
-                "scientific_content_binding_gate_ready"
             ],
             "scientific_unit_provenance_ready": summary[
                 "scientific_unit_provenance_ready"
@@ -2107,22 +2060,8 @@ def package_image_only_dataset_runtime(
             or unit_manifest.get("config") != expected_unit_manifest_config
             or unit_manifest.get("config_digest")
             != build_stable_digest(expected_unit_manifest_config)
-            or not (
-            _carrier_only_counterfactual_artifact_binding_ready(
-                result,
-                unit_manifest,
-                root_path,
-                unit_config,
-            )
-            and _scientific_content_binding_artifact_ready(
-                result,
-                unit_manifest,
-                root_path,
-                unit_config,
-            )
-            )
         ):
-            raise RuntimeError("单 Prompt 科学内容无法从完成包叶子重建")
+            raise RuntimeError("单 Prompt 配置或随机身份无法从完成包叶子重建")
     if (
         len(scientific_unit_output_paths)
         != len(set(scientific_unit_output_paths))
@@ -2178,7 +2117,6 @@ def package_image_only_dataset_runtime(
                 config.get(field_name) is True
                 for field_name in (
                     "semantic_routing_enabled",
-                    "null_space_enabled",
                     "lf_enabled",
                     "tail_robust_enabled",
                     "tail_truncation_enabled",
@@ -2203,34 +2141,6 @@ def package_image_only_dataset_runtime(
         summary.get(field_name)
         == packaged_scientific_unit_provenance[field_name]
         for field_name in SCIENTIFIC_UNIT_PROVENANCE_AGGREGATE_FIELDS
-    )
-    packaged_scientific_content_binding_digests = [
-        str(
-            result.get("metadata", {}).get(
-                "scientific_content_binding_digest",
-                "",
-            )
-        )
-        for result in packaged_runtime_results
-    ]
-    packaged_scientific_content_binding_digest = build_stable_digest(
-        {
-            "scientific_content_binding_digests": (
-                packaged_scientific_content_binding_digests
-            )
-        }
-    )
-    scientific_content_binding_summary_bound = bool(
-        len(packaged_scientific_content_binding_digests)
-        == paper_run.prompt_count
-        and all(
-            _sha256_ready(digest)
-            for digest in packaged_scientific_content_binding_digests
-        )
-        and summary.get("scientific_content_binding_digests")
-        == packaged_scientific_content_binding_digests
-        and summary.get("scientific_content_binding_digest")
-        == packaged_scientific_content_binding_digest
     )
     formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
         manifest.get("formal_execution_run_lock"),
@@ -2276,12 +2186,6 @@ def package_image_only_dataset_runtime(
             summary.get("scientific_unit_provenance_record_count")
             == paper_run.prompt_count,
             bool(summary.get("scientific_unit_provenance_records_digest")),
-            summary.get("scientific_content_binding_gate_ready") is True,
-            summary.get("scientific_content_binding_failure_count") == 0,
-            _sha256_ready(
-                summary.get("scientific_content_binding_digest")
-            ),
-            scientific_content_binding_summary_bound,
             scientific_unit_provenance_summary_bound,
             packaged_unit_config_contract_ready,
             summary.get("detection_curve_data_ready") is True,
@@ -2323,14 +2227,6 @@ def package_image_only_dataset_runtime(
                 "geometry_protocol_calibration_ready"
             )
             is True,
-            manifest.get("metadata", {}).get(
-                "scientific_content_binding_gate_ready"
-            )
-            is True,
-            manifest.get("metadata", {}).get(
-                "scientific_content_binding_digest"
-            )
-            == summary.get("scientific_content_binding_digest"),
         )
     ):
         raise RuntimeError("仅图像数据集运行身份或 ready 门禁未通过")

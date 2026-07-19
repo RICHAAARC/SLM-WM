@@ -7,12 +7,46 @@ from pathlib import Path
 import pytest
 
 from experiments.protocol import gpu_method_qualification as qualification
+from experiments.protocol.image_only_evidence import (
+    apply_frozen_evidence_protocol,
+)
+from experiments.runners.image_only_dataset_runtime import (
+    calibrate_complete_evidence_protocol,
+)
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
 )
+from tests.helpers.formal_detection_record import bind_formal_detection_record
 
 
 pytestmark = pytest.mark.quick
+
+
+def _protocol_and_formal_record():
+    raw_records = tuple(
+        bind_formal_detection_record(
+            {
+                "prompt_id": f"calibration-{index}",
+                "split": "calibration",
+                "sample_role": "clean_negative",
+                "detection_key_role": "registered_watermark_key",
+                "attack_id": "",
+                "content_score": score,
+                "aligned_content_score": score,
+                "attention_geometry_score": 0.0,
+                "registration_confidence": 0.0,
+                "attention_sync_score": 0.0,
+                "geometry_reliable": False,
+                "alignment": {"registration_geometry_reliable": False},
+            }
+        )
+        for index, score in enumerate((0.1, 0.2, 0.3))
+    )
+    protocol = calibrate_complete_evidence_protocol(
+        raw_records,
+        target_fpr=0.25,
+    )
+    return protocol, apply_frozen_evidence_protocol(raw_records, protocol)[0]
 
 
 def test_keyed_prg_cross_platform_known_answer_rebuilds_exact_bytes() -> None:
@@ -82,3 +116,50 @@ def test_resource_budget_requires_observations_and_registered_limits() -> None:
         "not_evaluated_missing_observation_or_registered_limit"
     )
     assert report["affects_gpu_operator_preflight_ready"] is False
+
+
+def test_threshold_free_measurement_cannot_claim_formal_blind_detection() -> None:
+    """metadata布尔值不得替代冻结阈值协议实际物化的判定字段。"""
+
+    record = {
+        "image_only_measurement_config_digest": "a" * 64,
+        "metadata": {
+            "measurement_status": "threshold_independent_image_only_evidence",
+            "same_threshold_geometry_rescue_protocol": True,
+        },
+        "lf_score": 0.1,
+        "tail_robust_score": 0.2,
+        "content_score": 0.3,
+    }
+
+    protocol, _ = _protocol_and_formal_record()
+    assert qualification._formal_same_threshold_decision_ready(
+        record,
+        protocol,
+    ) is False
+
+
+def test_formal_decision_requires_and_accepts_the_validated_protocol() -> None:
+    """完整协议物化的记录可由同一协议逐字重建。"""
+
+    protocol, record = _protocol_and_formal_record()
+
+    assert qualification._formal_same_threshold_decision_ready(
+        record,
+        protocol,
+    ) is True
+
+
+@pytest.mark.parametrize("digest", ("0" * 64, "f" * 64))
+def test_formal_decision_rejects_self_consistent_record_with_unbound_digest(
+    digest: str,
+) -> None:
+    """任意64hex摘要不能替代完整FrozenEvidenceProtocol身份。"""
+
+    protocol, record = _protocol_and_formal_record()
+    record["frozen_threshold_digest"] = digest
+
+    assert qualification._formal_same_threshold_decision_ready(
+        record,
+        protocol,
+    ) is False

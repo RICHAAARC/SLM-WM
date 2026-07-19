@@ -40,6 +40,9 @@ from experiments.protocol.image_only_evidence import (
     apply_frozen_evidence_protocol,
     calibrate_complete_evidence_protocol,
 )
+from experiments.protocol.content_routing_reference_quantile import (
+    ContentRoutingReferenceScalars,
+)
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
     load_completed_semantic_watermark_runtime_result,
@@ -285,9 +288,15 @@ def run_branch_risk_parameter_sensitivity(
     root: str | Path = ".",
     specs: tuple[BranchRiskSensitivitySpec, ...] | None = None,
     max_new_runs_per_session: int = 0,
+    *,
+    content_routing_references: ContentRoutingReferenceScalars | None = None,
 ) -> dict[str, Any]:
     """在完整 prompt 集上执行受治理的18项单参数敏感性实验。"""
 
+    if type(content_routing_references) is not ContentRoutingReferenceScalars:
+        raise RuntimeError(
+            "旧branch-risk实验入口缺少已资格化content routing references，禁止回退旧链"
+        )
     root_path = Path(root).resolve()
     formal_execution_run_lock = (
         repository_environment.require_published_formal_execution_lock(root_path)
@@ -430,11 +439,15 @@ def run_branch_risk_parameter_sensitivity(
             else:
                 if shared_context is None:
                     shared_context = load_semantic_watermark_runtime_context(
-                        shared_context_config
+                        shared_context_config,
+                        verified_formal_execution_lock=formal_execution_run_lock,
+                        repository_root=root_path,
                     )
                 result = write_semantic_watermark_runtime_outputs(
                     run_config,
                     root=root_path,
+                    references=content_routing_references,
+                    verified_formal_execution_lock=formal_execution_run_lock,
                     runtime_context=shared_context,
                 )
                 new_run_count += 1

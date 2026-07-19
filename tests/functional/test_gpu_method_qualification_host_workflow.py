@@ -13,10 +13,18 @@ import pytest
 from experiments.protocol.gpu_method_qualification import (
     GPU_METHOD_QUALIFICATION_SCHEMA,
 )
+from experiments.protocol.image_only_evidence import (
+    FrozenEvidenceProtocol,
+    apply_frozen_evidence_protocol,
+)
+from experiments.runners.image_only_dataset_runtime import (
+    calibrate_complete_evidence_protocol,
+)
 from main.core.digest import build_stable_digest
 from scripts import formal_workflow_entry
 from scripts import gpu_method_qualification_host_workflow as workflow
 from scripts import run_formal_workflow_host as host
+from tests.helpers.formal_detection_record import bind_formal_detection_record
 
 
 def _sha256(path: Path) -> str:
@@ -27,10 +35,15 @@ def _sha256(path: Path) -> str:
 
 def _qualification_report(
     *,
+    root: Path,
     repository_commit: str,
     paper_run_name: str,
     prompt_id: str,
     operator_ready: bool,
+    protocol: FrozenEvidenceProtocol,
+    protocol_path: Path,
+    formal_detection_path: Path,
+    formal_detection_count: int,
 ) -> dict[str, object]:
     """构造满足宿主交叉复验规则的最小资格化报告."""
 
@@ -43,6 +56,19 @@ def _qualification_report(
                 "paper_run_name": paper_run_name,
                 "prompt_id": prompt_id,
             },
+            "frozen_evidence_protocol_identity": {
+                "source_path": protocol_path.as_posix(),
+                "source_file_sha256": _sha256(protocol_path),
+                "threshold_digest": protocol.threshold_digest,
+                "image_only_measurement_config_digest": (
+                    protocol.image_only_measurement_config_digest
+                ),
+            },
+            "formal_detection_records_identity": {
+                "path": formal_detection_path.relative_to(root).as_posix(),
+                "file_sha256": _sha256(formal_detection_path),
+                "record_count": formal_detection_count,
+            },
         },
         "gpu_operator_preflight_ready": operator_ready,
         "gpu_resource_budget_ready": False,
@@ -50,6 +76,56 @@ def _qualification_report(
     }
     report["qualification_report_digest"] = build_stable_digest(report)
     return report
+
+
+def _frozen_protocol_evidence(
+    root: Path,
+    report_dir: Path,
+) -> tuple[FrozenEvidenceProtocol, Path, Path, int]:
+    """构造真实完整协议及其正式检测记录，供宿主证据测试消费。"""
+
+    raw_records = tuple(
+        bind_formal_detection_record(
+            {
+                "prompt_id": f"calibration-{index}",
+                "split": "calibration",
+                "sample_role": "clean_negative",
+                "detection_key_role": "registered_watermark_key",
+                "attack_id": "",
+                "content_score": score,
+                "aligned_content_score": score,
+                "attention_geometry_score": 0.0,
+                "registration_confidence": 0.0,
+                "attention_sync_score": 0.0,
+                "geometry_reliable": False,
+                "alignment": {"registration_geometry_reliable": False},
+            }
+        )
+        for index, score in enumerate((0.1, 0.2, 0.3))
+    )
+    protocol = calibrate_complete_evidence_protocol(
+        raw_records,
+        target_fpr=0.25,
+    )
+    input_dir = root / "inputs"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    protocol_path = (input_dir / "frozen_evidence_protocol.json").resolve()
+    protocol_path.write_text(
+        json.dumps(protocol.to_dict(), ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    formal_records = apply_frozen_evidence_protocol(raw_records, protocol)
+    formal_detection_path = (
+        report_dir / "formal_image_only_detection_records.jsonl"
+    ).resolve()
+    formal_detection_path.write_text(
+        "".join(
+            json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
+            for record in formal_records
+        ),
+        encoding="utf-8",
+    )
+    return protocol, protocol_path, formal_detection_path, len(formal_records)
 
 
 @pytest.mark.quick
@@ -67,11 +143,22 @@ def test_host_workflow_uses_exact_sd35_child_and_operator_gate(
     repository_commit = "a" * 40
     paper_run_name = "probe_paper"
     prompt_id = "probe_prompt_0001"
+    (
+        protocol,
+        protocol_path,
+        formal_detection_path,
+        formal_detection_count,
+    ) = _frozen_protocol_evidence(root, report_dir)
     qualification_report = _qualification_report(
+        root=root,
         repository_commit=repository_commit,
         paper_run_name=paper_run_name,
         prompt_id=prompt_id,
         operator_ready=operator_ready,
+        protocol=protocol,
+        protocol_path=protocol_path,
+        formal_detection_path=formal_detection_path,
+        formal_detection_count=formal_detection_count,
     )
     qualification_report_path = (
         report_dir / "gpu_method_qualification_report.json"
@@ -94,6 +181,11 @@ def test_host_workflow_uses_exact_sd35_child_and_operator_gate(
         ],
         "gpu_operator_preflight_ready": operator_ready,
         "gpu_resource_budget_ready": False,
+        "frozen_threshold_digest": protocol.threshold_digest,
+        "formal_detection_record_path": formal_detection_path.relative_to(
+            root
+        ).as_posix(),
+        "formal_detection_record_sha256": _sha256(formal_detection_path),
         "supports_paper_claim": False,
     }
     captured: dict[str, object] = {}
@@ -169,6 +261,10 @@ def test_host_workflow_uses_exact_sd35_child_and_operator_gate(
         result_path="outputs/host/qualification_result.json",
         known_answer="configs/keyed_prg_cross_platform_known_answer.json",
         qualification_output_root="outputs/gpu_method_qualification",
+        frozen_evidence_protocol=protocol_path,
+        reference_gradient=1.0,
+        reference_response=0.5,
+        reference_sensitivity=0.25,
     )
 
     assert captured["profile_id"] == "sd35_method_runtime_gpu"
@@ -178,10 +274,170 @@ def test_host_workflow_uses_exact_sd35_child_and_operator_gate(
         root.resolve() / "scripts/run_gpu_method_qualification.py"
     )
     assert child_argv[child_argv.index("--prompt-id") + 1] == prompt_id
+    assert child_argv[child_argv.index("--frozen-evidence-protocol") + 1] == str(
+        protocol_path
+    )
+    assert child_argv[child_argv.index("--reference-gradient") + 1] == "1.0"
     assert result["decision"] == ("pass" if operator_ready else "fail")
     assert result["return_code"] == (0 if operator_ready else 1)
     assert result["workflow_summary"]["gpu_resource_budget_ready"] is False
     assert result["supports_paper_claim"] is False
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "formal_path_outside_qualification_root",
+        "formal_record_missing",
+        "formal_record_sha",
+        "invocation_missing_formal_sha",
+        "invocation_threshold_digest",
+        "report_protocol_threshold_digest",
+        "formal_record_threshold_digest",
+    ),
+)
+def test_host_rejects_formal_detection_and_protocol_identity_drift(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    """宿主必须独立复验正式记录路径、文件与冻结阈值身份。"""
+
+    root = tmp_path / "repository"
+    report_dir = root / "outputs/gpu_method_qualification/runtime_run"
+    report_dir.mkdir(parents=True)
+    (
+        protocol,
+        protocol_path,
+        formal_detection_path,
+        formal_detection_count,
+    ) = _frozen_protocol_evidence(root, report_dir)
+    report = _qualification_report(
+        root=root,
+        repository_commit="a" * 40,
+        paper_run_name="probe_paper",
+        prompt_id="probe_prompt_0001",
+        operator_ready=True,
+        protocol=protocol,
+        protocol_path=protocol_path,
+        formal_detection_path=formal_detection_path,
+        formal_detection_count=formal_detection_count,
+    )
+    report_path = report_dir / "gpu_method_qualification_report.json"
+    invocation: dict[str, object] = {
+        "report_schema": workflow.QUALIFICATION_INVOCATION_RESULT_SCHEMA,
+        "schema_version": 1,
+        "gpu_method_qualification_report_path": report_path.relative_to(
+            root
+        ).as_posix(),
+        "gpu_method_qualification_report_sha256": "",
+        "gpu_method_qualification_report_digest": "",
+        "gpu_operator_preflight_ready": True,
+        "gpu_resource_budget_ready": False,
+        "frozen_threshold_digest": protocol.threshold_digest,
+        "formal_detection_record_path": formal_detection_path.relative_to(
+            root
+        ).as_posix(),
+        "formal_detection_record_sha256": _sha256(formal_detection_path),
+        "supports_paper_claim": False,
+    }
+
+    def persist_report() -> None:
+        report.pop("qualification_report_digest", None)
+        report["qualification_report_digest"] = build_stable_digest(report)
+        report_path.write_text(
+            json.dumps(report, ensure_ascii=False, sort_keys=True),
+            encoding="utf-8",
+        )
+        invocation["gpu_method_qualification_report_sha256"] = _sha256(
+            report_path
+        )
+        invocation["gpu_method_qualification_report_digest"] = report[
+            "qualification_report_digest"
+        ]
+
+    if mutation == "formal_path_outside_qualification_root":
+        outside = root / "outputs/other/formal.jsonl"
+        outside.parent.mkdir(parents=True)
+        outside.write_bytes(formal_detection_path.read_bytes())
+        invocation["formal_detection_record_path"] = outside.relative_to(
+            root
+        ).as_posix()
+    elif mutation == "formal_record_missing":
+        formal_detection_path.unlink()
+    elif mutation == "formal_record_sha":
+        invocation["formal_detection_record_sha256"] = "0" * 64
+    elif mutation == "invocation_missing_formal_sha":
+        del invocation["formal_detection_record_sha256"]
+    elif mutation == "invocation_threshold_digest":
+        invocation["frozen_threshold_digest"] = "0" * 64
+    elif mutation == "report_protocol_threshold_digest":
+        report["qualification_binding"]["frozen_evidence_protocol_identity"][
+            "threshold_digest"
+        ] = "0" * 64
+    elif mutation == "formal_record_threshold_digest":
+        rows = [
+            json.loads(line)
+            for line in formal_detection_path.read_text(
+                encoding="utf-8"
+            ).splitlines()
+            if line.strip()
+        ]
+        rows[0]["frozen_threshold_digest"] = "0" * 64
+        formal_detection_path.write_text(
+            "".join(
+                json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+                for row in rows
+            ),
+            encoding="utf-8",
+        )
+        changed_sha = _sha256(formal_detection_path)
+        invocation["formal_detection_record_sha256"] = changed_sha
+        report["qualification_binding"]["formal_detection_records_identity"][
+            "file_sha256"
+        ] = changed_sha
+    persist_report()
+    isolated_report = {
+        "report_schema": "isolated_scientific_execution_report",
+        "schema_version": 1,
+        "profile_id": workflow.SCIENTIFIC_PROFILE_ID,
+        "profile_digest": "b" * 64,
+        "direct_requirements_digest": "c" * 64,
+        "complete_hash_lock_digest": "d" * 64,
+        "complete_hash_lock_dependency_count": 10,
+        "dependency_environment_report_valid": True,
+        "dependency_environment_report_digest": "e" * 64,
+        "python_executable_sha256": "f" * 64,
+        "formal_execution_commit": "a" * 40,
+        "formal_execution_lock_ready": True,
+        "formal_execution_lock_revalidated_before_child": True,
+        "formal_execution_lock_revalidated_after_child": True,
+        "python_executable_revalidated_before_child": True,
+        "python_executable_revalidated_after_child": True,
+        "dependency_environment_report_revalidated_before_child": True,
+        "dependency_environment_report_revalidated_after_child": True,
+        "execution": {
+            "return_code": 0,
+            "stdout": json.dumps(invocation),
+            "stderr": "",
+        },
+        "decision": "pass",
+        "supports_paper_claim": False,
+    }
+
+    with pytest.raises(ValueError):
+        workflow._validate_qualification_evidence(
+            root=root,
+            repository_commit="a" * 40,
+            paper_run_name="probe_paper",
+            prompt_id="probe_prompt_0001",
+            qualification_output_root=(
+                root / "outputs/gpu_method_qualification"
+            ).resolve(),
+            isolated_report=isolated_report,
+            frozen_evidence_protocol=protocol,
+            frozen_evidence_protocol_path=protocol_path,
+        )
 
 
 @pytest.mark.quick
@@ -197,6 +453,14 @@ def test_formal_host_builds_qualification_child_command() -> None:
             "probe_paper",
             "--prompt-id",
             "probe_prompt_0001",
+            "--frozen-evidence-protocol",
+            "inputs/frozen_evidence_protocol.json",
+            "--reference-gradient",
+            "1.0",
+            "--reference-response",
+            "0.5",
+            "--reference-sensitivity",
+            "0.25",
             "--registered-budget",
             "configs/gpu_budget.json",
             "--result-path",
@@ -227,8 +491,55 @@ def test_formal_host_builds_qualification_child_command() -> None:
     assert command[command.index("--registered-budget") + 1] == (
         "configs/gpu_budget.json"
     )
+    assert command[command.index("--frozen-evidence-protocol") + 1] == (
+        "inputs/frozen_evidence_protocol.json"
+    )
+    assert command[command.index("--reference-gradient") + 1] == "1.0"
+    assert command[command.index("--reference-response") + 1] == "0.5"
+    assert command[command.index("--reference-sensitivity") + 1] == "0.25"
     assert "--workflow" not in command
     assert "--randomization-repeat-id" not in command
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "missing_option",
+    (
+        "--frozen-evidence-protocol",
+        "--reference-gradient",
+        "--reference-response",
+        "--reference-sensitivity",
+    ),
+)
+def test_formal_host_requires_protocol_and_three_references(
+    missing_option: str,
+) -> None:
+    """公开qualification CLI不得为协议或reference提供隐式默认值。"""
+
+    arguments = [
+        "--repository-commit",
+        "a" * 40,
+        "qualification",
+        "--paper-run-name",
+        "probe_paper",
+        "--prompt-id",
+        "probe_prompt_0001",
+        "--frozen-evidence-protocol",
+        "inputs/frozen_evidence_protocol.json",
+        "--reference-gradient",
+        "1.0",
+        "--reference-response",
+        "0.5",
+        "--reference-sensitivity",
+        "0.25",
+        "--result-path",
+        "outputs/host/qualification_result.json",
+    ]
+    index = arguments.index(missing_option)
+    del arguments[index : index + 2]
+
+    with pytest.raises(SystemExit):
+        host.build_parser().parse_args(arguments)
 
 
 @pytest.mark.quick
@@ -461,10 +772,11 @@ def test_formal_entry_propagates_qualification_decision(
             "complete_hash_lock_digest": "b" * 64,
         },
     )
-    monkeypatch.setattr(
-        formal_workflow_entry,
-        "run_gpu_method_qualification_host_workflow",
-        lambda **_kwargs: {
+    captured_qualification: dict[str, object] = {}
+
+    def fake_run_qualification(**kwargs: object) -> dict[str, object]:
+        captured_qualification.update(kwargs)
+        return {
             "workflow_summary": {
                 "workflow_completion_state": (
                     "gpu_operator_preflight_ready"
@@ -483,7 +795,12 @@ def test_formal_entry_propagates_qualification_decision(
                 [] if operator_ready else ["gpu_operator_preflight_not_ready"]
             ),
             "supports_paper_claim": False,
-        },
+        }
+
+    monkeypatch.setattr(
+        formal_workflow_entry,
+        "run_gpu_method_qualification_host_workflow",
+        fake_run_qualification,
     )
     arguments = argparse.Namespace(
         operation="qualification",
@@ -504,6 +821,10 @@ def test_formal_entry_propagates_qualification_decision(
         known_answer="configs/keyed_prg_cross_platform_known_answer.json",
         registered_budget="",
         qualification_output_root="outputs/gpu_method_qualification",
+        frozen_evidence_protocol="inputs/frozen_evidence_protocol.json",
+        reference_gradient=1.0,
+        reference_response=0.5,
+        reference_sensitivity=0.25,
     )
 
     payload = formal_workflow_entry.execute(arguments)
@@ -513,6 +834,12 @@ def test_formal_entry_propagates_qualification_decision(
     assert payload["workflow_name"] == "gpu_method_qualification"
     assert payload["workflow_summary"]["gpu_resource_budget_ready"] is False
     assert payload["supports_paper_claim"] is False
+    assert captured_qualification["frozen_evidence_protocol"] == (
+        "inputs/frozen_evidence_protocol.json"
+    )
+    assert captured_qualification["reference_gradient"] == 1.0
+    assert captured_qualification["reference_response"] == 0.5
+    assert captured_qualification["reference_sensitivity"] == 0.25
 
 
 @pytest.mark.quick
@@ -529,11 +856,22 @@ def test_host_workflow_rejects_report_digest_mismatch(
         / "gpu_method_qualification_report.json"
     )
     report_path.parent.mkdir(parents=True)
+    (
+        protocol,
+        protocol_path,
+        formal_detection_path,
+        formal_detection_count,
+    ) = _frozen_protocol_evidence(root, report_path.parent)
     report = _qualification_report(
+        root=root,
         repository_commit="a" * 40,
         paper_run_name="probe_paper",
         prompt_id="probe_prompt_0001",
         operator_ready=True,
+        protocol=protocol,
+        protocol_path=protocol_path,
+        formal_detection_path=formal_detection_path,
+        formal_detection_count=formal_detection_count,
     )
     report_path.write_text(json.dumps(report), encoding="utf-8")
     invocation = {
@@ -548,6 +886,11 @@ def test_host_workflow_rejects_report_digest_mismatch(
         ],
         "gpu_operator_preflight_ready": True,
         "gpu_resource_budget_ready": False,
+        "frozen_threshold_digest": protocol.threshold_digest,
+        "formal_detection_record_path": formal_detection_path.relative_to(
+            root
+        ).as_posix(),
+        "formal_detection_record_sha256": _sha256(formal_detection_path),
         "supports_paper_claim": False,
     }
 
@@ -598,6 +941,10 @@ def test_host_workflow_rejects_report_digest_mismatch(
             result_path="outputs/host/result.json",
             known_answer="configs/keyed_prg_cross_platform_known_answer.json",
             qualification_output_root="outputs/gpu_method_qualification",
+            frozen_evidence_protocol=protocol_path,
+            reference_gradient=1.0,
+            reference_response=0.5,
+            reference_sensitivity=0.25,
         )
 
 
@@ -648,6 +995,11 @@ def test_host_reports_scientific_child_exception_before_invocation_exists() -> N
             prompt_id="probe_prompt_0001",
             qualification_output_root=Path.cwd() / "outputs",
             isolated_report=isolated_report,
+            frozen_evidence_protocol=SimpleNamespace(
+                threshold_digest="1" * 64,
+                image_only_measurement_config_digest="2" * 64,
+            ),
+            frozen_evidence_protocol_path=Path.cwd() / "protocol.json",
         )
 
 
@@ -703,6 +1055,14 @@ def test_formal_entry_main_returns_nonzero_for_operator_failure(
             "c" * 64,
             "--prompt-id",
             "probe_prompt_0001",
+            "--frozen-evidence-protocol",
+            "inputs/frozen_evidence_protocol.json",
+            "--reference-gradient",
+            "1.0",
+            "--reference-response",
+            "0.5",
+            "--reference-sensitivity",
+            "0.25",
         ]
     )
 

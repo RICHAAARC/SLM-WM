@@ -62,6 +62,42 @@ def test_content_smoke_parser_does_not_default_reference_values() -> None:
     assert arguments.reference_sensitivity is None
 
 
+def test_frozen_protocol_must_match_the_runtime_measurement_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """完整协议即使自身有效也不得绑定另一套检测配置。"""
+
+    config = SemanticWatermarkRuntimeConfig()
+    identity = {
+        "image_only_measurement_config_digest": "a" * 64,
+        "lf_carrier_protocol_digest": "b" * 64,
+        "tail_carrier_protocol_digest": "c" * 64,
+        "lf_weight": 0.7,
+        "tail_robust_weight": 0.3,
+        "tail_fraction": 0.2,
+    }
+    monkeypatch.setattr(
+        entry,
+        "_build_image_only_measurement_config",
+        lambda _config: object(),
+    )
+    monkeypatch.setattr(
+        entry,
+        "image_only_measurement_config_identity_record",
+        lambda *_args, **_kwargs: dict(identity),
+    )
+    protocol = SimpleNamespace(
+        **identity,
+        attention_geometry_enabled=True,
+        image_alignment_enabled=True,
+    )
+
+    entry._require_frozen_protocol_matches_config(protocol, config)
+    protocol.tail_carrier_protocol_digest = "d" * 64
+    with pytest.raises(ValueError, match="检测配置不一致"):
+        entry._require_frozen_protocol_matches_config(protocol, config)
+
+
 def test_gpu_qualification_revalidates_registered_and_wrong_key_identity() -> None:
     """注册密钥与 wrong-key 必须作用于同一水印图像且材料摘要不同."""
 
@@ -129,23 +165,6 @@ def test_gpu_qualification_binding_covers_commit_models_dependency_and_prompt() 
             },
         }
     }
-    compatibility_core = {
-        "report_schema": "torch_func_transform_compatibility_v1",
-        "schema_version": 1,
-        "torch_version": environment["torch_version"],
-        "torch_cuda_version": environment["torch_cuda_version"],
-        "execution_device_name": environment["execution_device_name"],
-        "assert_operator": "torch._assert_async",
-        "forward_transform_operator": "torch.func.linearize",
-        "reverse_transform_operator": "torch.func.vjp",
-        "adjoint_absolute_error": 0.0,
-        "operator_compatibility_ready": True,
-        "supports_paper_claim": False,
-    }
-    compatibility = {
-        **compatibility_core,
-        "compatibility_report_digest": build_stable_digest(compatibility_core),
-    }
     core = {
         "code_version": environment["formal_execution_commit"],
         "dependency_profile_id": environment["dependency_profile_id"],
@@ -167,7 +186,15 @@ def test_gpu_qualification_binding_covers_commit_models_dependency_and_prompt() 
                 semantic_watermark_runtime_config_digest(config)
             ),
         },
-        "torch_func_compatibility": compatibility,
+        "content_routing_reference_identity": {
+            "reference_input_role": "explicit_smoke_only_unqualified",
+            "supports_paper_claim": False,
+            "reference_values": {
+                "reference_gradient": 1.0,
+                "reference_response": 0.5,
+                "reference_sensitivity": 0.25,
+            },
+        },
     }
     binding = {**core, "qualification_binding_digest": build_stable_digest(core)}
 
@@ -255,8 +282,29 @@ def test_gpu_qualification_entry_uses_real_writer_and_operator_exit_gate(
             diffusion_attacks_enabled=False,
         ),
     )
+    frozen_protocol_path = tmp_path / "frozen_evidence_protocol.json"
+    frozen_protocol_path.write_text("{}\n", encoding="utf-8")
+    frozen_protocol = SimpleNamespace(
+        threshold_digest="e" * 64,
+        image_only_measurement_config_digest="f" * 64,
+    )
+    monkeypatch.setattr(
+        entry,
+        "_load_frozen_evidence_protocol",
+        lambda _root, _path: (frozen_protocol, frozen_protocol_path),
+    )
+    monkeypatch.setattr(
+        entry,
+        "_require_frozen_protocol_matches_config",
+        lambda _protocol, _config: None,
+    )
+    monkeypatch.setattr(
+        entry,
+        "apply_frozen_evidence_protocol",
+        lambda rows, protocol: tuple(rows),
+    )
 
-    def fake_real_writer(config, root):
+    def fake_real_writer(config, root, **_kwargs):
         """记录入口是否复用正式方法 writer, 不执行 GPU 科学计算."""
 
         calls.append(config)
@@ -283,15 +331,6 @@ def test_gpu_qualification_entry_uses_real_writer_and_operator_exit_gate(
             "supports_paper_claim": False,
         },
     )
-    monkeypatch.setattr(
-        entry,
-        "_evaluate_torch_func_compatibility",
-        lambda *_args: {
-            "report_schema": "torch_func_transform_compatibility_v1",
-            "operator_compatibility_ready": True,
-            "supports_paper_claim": False,
-        },
-    )
     fake_torch = SimpleNamespace(
         cuda=SimpleNamespace(
             is_available=lambda: True,
@@ -301,6 +340,7 @@ def test_gpu_qualification_entry_uses_real_writer_and_operator_exit_gate(
     )
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    monkeypatch.setenv("SLM_WM_KEY_MATERIAL", "registered-key")
 
     exit_code = entry.main(
         (
@@ -312,6 +352,14 @@ def test_gpu_qualification_entry_uses_real_writer_and_operator_exit_gate(
             prompt.prompt_id,
             "--output-root",
             "outputs/gpu_method_qualification",
+            "--frozen-evidence-protocol",
+            str(frozen_protocol_path),
+            "--reference-gradient",
+            "1.0",
+            "--reference-response",
+            "0.5",
+            "--reference-sensitivity",
+            "0.25",
         )
     )
 
@@ -335,28 +383,73 @@ def test_gpu_qualification_entry_uses_real_writer_and_operator_exit_gate(
     )
     assert invocation["gpu_method_qualification_report_digest"] == "d" * 64
     assert invocation["gpu_operator_preflight_ready"] is operator_ready
+    assert invocation["frozen_threshold_digest"] == "e" * 64
     assert invocation["supports_paper_claim"] is False
 
 
-def test_torch_func_compatibility_executes_linearize_vjp_and_async_assert() -> None:
-    """轻量检查必须真实执行项目依赖的 PyTorch 变换组合."""
+def test_formal_qualification_requires_protocol_before_writer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """缺少FrozenEvidenceProtocol必须在模型writer前失败关闭。"""
 
-    import torch
+    prompt = SimpleNamespace(
+        prompt_id="prompt_registered",
+        prompt_text="一个受治理测试 Prompt",
+        prompt_digest="a" * 64,
+        prompt_set="probe_paper",
+        split="dev",
+    )
+    calls = {"writer": 0}
+    monkeypatch.setattr(entry, "_registered_prompt", lambda *_args: prompt)
+    monkeypatch.setattr(
+        entry.repository_environment,
+        "require_published_formal_execution_lock",
+        lambda _root: {"formal_execution_commit": "b" * 40},
+    )
+    monkeypatch.setattr(
+        entry.repository_environment,
+        "resolve_code_version",
+        lambda _root: "b" * 40,
+    )
+    monkeypatch.setattr(
+        entry,
+        "require_dependency_profile_ready",
+        lambda _profile_id: SimpleNamespace(formal_ready=True),
+    )
+    monkeypatch.setattr(
+        entry,
+        "build_method_config",
+        lambda _root: SemanticWatermarkRuntimeConfig(
+            device_name="cuda",
+            diffusion_attacks_enabled=False,
+        ),
+    )
 
-    report = entry._evaluate_torch_func_compatibility(torch, "cpu")
+    def writer(*_args, **_kwargs):
+        calls["writer"] += 1
+        raise AssertionError("writer must not run")
 
-    assert report["report_schema"] == "torch_func_transform_compatibility_v1"
-    assert report["execution_device_name"] == "cpu"
-    assert report["assert_operator"] == "torch._assert_async"
-    assert report["forward_transform_operator"] == "torch.func.linearize"
-    assert report["reverse_transform_operator"] == "torch.func.vjp"
-    assert report["adjoint_absolute_error"] <= 1e-5
-    assert report["operator_compatibility_ready"] is True
-    assert report["supports_paper_claim"] is False
+    monkeypatch.setattr(entry, "write_semantic_watermark_runtime_outputs", writer)
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    monkeypatch.setenv("SLM_WM_KEY_MATERIAL", "registered-key")
 
+    with pytest.raises(ValueError, match="frozen-evidence-protocol"):
+        entry.main(
+            (
+                "--root",
+                str(tmp_path),
+                "--paper-run-name",
+                "probe_paper",
+                "--prompt-id",
+                prompt.prompt_id,
+                "--reference-gradient",
+                "1.0",
+                "--reference-response",
+                "0.5",
+                "--reference-sensitivity",
+                "0.25",
+            )
+        )
 
-def test_torch_func_compatibility_rejects_missing_async_assert() -> None:
-    """目标 PyTorch 缺少异步断言时必须在加载大型模型前失败."""
-
-    with pytest.raises(RuntimeError, match="torch._assert_async"):
-        entry._evaluate_torch_func_compatibility(SimpleNamespace(), "cpu")
+    assert calls == {"writer": 0}

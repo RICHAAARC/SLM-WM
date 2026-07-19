@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
+import subprocess
+import sys
 from typing import Any
 
 import pytest
@@ -41,6 +45,103 @@ class _Pipeline:
         return value, value, value, value
 
 
+def test_unmigrated_production_variants_fail_before_pipeline_or_writer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """新正式链不得静默把消融配置当作full_dual_chain执行。"""
+
+    base = runtime.SemanticWatermarkRuntimeConfig()
+    variants = (
+        replace(base, semantic_routing_enabled=False),
+        replace(base, branch_risk_mode="shared_global"),
+        replace(base, lf_enabled=False),
+        replace(base, tail_robust_enabled=False),
+        replace(
+            base,
+            attention_geometry_enabled=False,
+            image_alignment_enabled=False,
+        ),
+        replace(base, tail_truncation_enabled=False),
+        replace(
+            base,
+            attention_relation_component_weights=(0.0, 1 / 3, 1 / 3, 1 / 3),
+        ),
+        replace(
+            base,
+            risk_parameter_protocol="single_model_internal_sensitivity",
+            lf_content_risk_config=replace(
+                base.lf_content_risk_config,
+                budget_gain=base.lf_content_risk_config.budget_gain + 0.001,
+            ),
+        ),
+    )
+    calls = {"pipeline": 0, "writer_core": 0}
+
+    def load_components(*_args: Any, **_kwargs: Any) -> Any:
+        calls["pipeline"] += 1
+        raise AssertionError("pipeline must not load")
+
+    def run_core(*_args: Any, **_kwargs: Any) -> Any:
+        calls["writer_core"] += 1
+        raise AssertionError("writer core must not run")
+
+    monkeypatch.setattr(
+        runtime,
+        "_load_content_runtime_smoke_components",
+        load_components,
+    )
+    monkeypatch.setattr(runtime, "run_semantic_watermark_runtime", run_core)
+    references = ContentRoutingReferenceScalars(1.0, 1.0, 1.0)
+
+    for index, config in enumerate(variants):
+        with pytest.raises(RuntimeError, match="full_dual_chain"):
+            runtime.run_content_runtime_smoke(
+                config,
+                references,
+                verified_formal_execution_lock={"lock": True},
+                repository_root=tmp_path,
+            )
+        output_dir = tmp_path / "outputs" / f"variant-{index}"
+        with pytest.raises(RuntimeError, match="full_dual_chain"):
+            runtime.write_semantic_watermark_runtime_outputs(
+                replace(config, output_dir=output_dir.relative_to(tmp_path).as_posix()),
+                root=tmp_path,
+                references=references,
+                verified_formal_execution_lock={"lock": True},
+            )
+        assert not output_dir.exists()
+
+    assert calls == {"pipeline": 0, "writer_core": 0}
+
+
+def test_formal_import_does_not_reach_legacy_jacobian_or_tail() -> None:
+    """正式runtime与新geometry公开入口不得加载或暴露旧执行依赖。"""
+
+    script = """
+import sys
+import experiments.runners.semantic_watermark_runtime as runtime
+import main.methods as methods
+_ = methods.build_attention_geometry_sync_update
+assert 'main.methods.subspace.jacobian_nullspace' not in sys.modules
+assert not hasattr(runtime, 'exact_jvp')
+assert not hasattr(runtime, 'build_tail_robust_template')
+assert not hasattr(runtime, 'optimize_attention_geometry_update')
+import main.methods.geometry as geometry
+import main.methods.subspace as subspace
+assert 'optimize_attention_geometry_update' not in geometry.__all__
+assert 'exact_jvp' not in subspace.__all__
+assert 'solve_psd_conjugate_gradient' not in subspace.__all__
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_smoke_component_loader_excludes_legacy_716_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -69,30 +170,10 @@ def test_smoke_component_loader_excludes_legacy_716_runtime(
         return SimpleNamespace(model_identity_digest="a" * 64)
 
     monkeypatch.setattr(runtime, "load_prompt_saliency_clip_runtime", prompt_loader)
-    monkeypatch.setattr(
-        runtime,
-        "load_clip_vision_model",
-        lambda *_args, **_kwargs: calls.__setitem__(
-            "legacy_loader", calls["legacy_loader"] + 1
-        ),
-    )
-    monkeypatch.setattr(
-        runtime,
-        "DifferentiableSemanticFeatureRuntime",
-        lambda *_args, **_kwargs: calls.__setitem__("feature", calls["feature"] + 1),
-    )
-    monkeypatch.setattr(
-        runtime,
-        "semantic_feature_protocol_record",
-        lambda: calls.__setitem__("protocol", calls["protocol"] + 1),
-    )
-    monkeypatch.setattr(
-        runtime.DiffusionAttackRuntime,
-        "from_text_to_image_pipeline",
-        lambda *_args, **_kwargs: calls.__setitem__(
-            "diffusion", calls["diffusion"] + 1
-        ),
-    )
+    assert not hasattr(runtime, "load_clip_vision_model")
+    assert not hasattr(runtime, "DifferentiableSemanticFeatureRuntime")
+    assert not hasattr(runtime, "semantic_feature_protocol_record")
+    assert not hasattr(runtime, "DiffusionAttackRuntime")
     monkeypatch.setattr(runtime, "_unconditional_embeddings", lambda *_args: (1, 2))
     monkeypatch.setitem(
         __import__("sys").modules,
@@ -179,7 +260,11 @@ def test_smoke_runtime_executes_only_index10_and_one_write(
         def close(self) -> None: order.append("close")
 
     monkeypatch.setattr(runtime, "DifferentiableAttentionRecorder", Recorder)
-    geometry = SimpleNamespace(geometry_update=torch.ones_like(latent), geometry_update_digest="d" * 64)
+    geometry = SimpleNamespace(
+        geometry_update=torch.ones_like(latent),
+        geometry_update_digest="d" * 64,
+        qk_atomic_records_digest="e" * 64,
+    )
     monkeypatch.setattr(runtime, "_build_attention_geometry_sync_update_with_evidence", lambda **_k: (order.append("geometry") or geometry, "evidence"))
     write = SimpleNamespace(
         written_latent=latent + 1.0,

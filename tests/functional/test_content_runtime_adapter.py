@@ -169,7 +169,7 @@ def _assert_result_fields_equal(actual: Any, expected: Any) -> None:
             assert actual_value == expected_value
 
 
-def test_public_contract_is_frozen_exact_keyword_only_and_not_package_exported(
+def test_public_contract_is_frozen_exact_keyword_only_and_formally_exported(
 ) -> None:
     assert adapter_module.__all__ == [
         "ContentObservationRuntimeResult",
@@ -209,8 +209,8 @@ def test_public_contract_is_frozen_exact_keyword_only_and_not_package_exported(
     )
     assert not hasattr(content, "ContentObservationRuntimeResult")
     assert not hasattr(content, "build_content_observation_routing")
-    assert not hasattr(methods, "ContentObservationRuntimeResult")
-    assert not hasattr(methods, "build_content_observation_routing")
+    assert methods.ContentObservationRuntimeResult is ContentObservationRuntimeResult
+    assert methods.build_content_observation_routing is build_content_observation_routing
 
     result = build_content_observation_routing(**_inputs())
     with pytest.raises(FrozenInstanceError):

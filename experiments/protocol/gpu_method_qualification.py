@@ -9,12 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from experiments.runners.image_only_dataset_runtime import (
-    _carrier_only_final_image_preservation_ready,
     _detection_qk_atomic_content_ready,
-    _final_image_attention_observability_ready,
-    _final_image_preservation_ready,
-    _scientific_content_binding_record_ready,
-    _scientific_update_record_ready,
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
@@ -25,6 +20,11 @@ from experiments.protocol.detection_key_identity import (
     REGISTERED_WRONG_KEY_ROLE,
     build_detection_key_plan_record,
     validate_detection_key_identity_record,
+)
+from experiments.protocol.image_only_evidence import (
+    FrozenEvidenceProtocol,
+    complete_evidence_decision,
+    validate_frozen_evidence_protocol_integrity,
 )
 from experiments.protocol.gpu_method_qualification_schema import (
     GPU_METHOD_QUALIFICATION_SCHEMA,
@@ -43,7 +43,6 @@ from main.core.keyed_prg import (
 
 GPU_OPERATOR_FACT_SCHEMA = "gpu_operator_preflight_fact_v1"
 GPU_RESOURCE_BUDGET_SCHEMA = "gpu_resource_budget_decision_v1"
-COMPLETE_FEATURE_WIDTH = 716
 
 
 def _registered_and_wrong_key_attribution_ready(
@@ -134,25 +133,20 @@ def _qualification_binding_ready(
     diffusion_source = (
         diffusion_source if isinstance(diffusion_source, Mapping) else {}
     )
-    vision_source = metadata.get("vision_model_source")
-    vision_source = vision_source if isinstance(vision_source, Mapping) else {}
     input_summary = resolved.get("input_summary")
     input_summary = input_summary if isinstance(input_summary, Mapping) else {}
     model_revisions = resolved.get("model_revisions")
     model_revisions = (
         model_revisions if isinstance(model_revisions, Mapping) else {}
     )
-    torch_func_compatibility = resolved.get("torch_func_compatibility")
-    torch_func_compatibility = (
-        torch_func_compatibility
-        if isinstance(torch_func_compatibility, Mapping)
-        else {}
+    reference_identity = resolved.get("content_routing_reference_identity")
+    reference_identity = (
+        reference_identity if isinstance(reference_identity, Mapping) else {}
     )
-    compatibility_digest_payload = {
-        field_name: value
-        for field_name, value in torch_func_compatibility.items()
-        if field_name != "compatibility_report_digest"
-    }
+    reference_values = reference_identity.get("reference_values")
+    reference_values = (
+        reference_values if isinstance(reference_values, Mapping) else {}
+    )
     digest_payload = {
         field_name: value
         for field_name, value in resolved.items()
@@ -179,35 +173,108 @@ def _qualification_binding_ready(
         == config.vision_model_revision
         and diffusion_source.get("repository_id") == config.model_id
         and diffusion_source.get("revision") == config.model_revision
-        and vision_source.get("repository_id") == config.vision_model_id
-        and vision_source.get("revision") == config.vision_model_revision
+        and _finite_nonnegative(
+            reference_values.get("reference_gradient")
+        )
+        and float(reference_values.get("reference_gradient")) > 0.0
+        and _finite_nonnegative(
+            reference_values.get("reference_response")
+        )
+        and float(reference_values.get("reference_response")) > 0.0
+        and _finite_nonnegative(
+            reference_values.get("reference_sensitivity")
+        )
+        and float(reference_values.get("reference_sensitivity")) > 0.0
+        and reference_identity.get("reference_input_role")
+        == "explicit_smoke_only_unqualified"
+        and reference_identity.get("supports_paper_claim") is False
         and input_summary.get("prompt_id") == config.prompt_id
         and input_summary.get("prompt_digest")
         == build_stable_digest({"prompt": config.prompt})
         and input_summary.get("method_runtime_config_digest")
         == semantic_watermark_runtime_config_digest(config)
-        and torch_func_compatibility.get("report_schema")
-        == "torch_func_transform_compatibility_v1"
-        and torch_func_compatibility.get("torch_version")
-        == execution_environment.get("torch_version")
-        and torch_func_compatibility.get("torch_cuda_version")
-        == str(execution_environment.get("torch_cuda_version"))
-        and torch_func_compatibility.get("execution_device_name")
-        == execution_environment.get("execution_device_name")
-        and torch_func_compatibility.get("assert_operator")
-        == "torch._assert_async"
-        and torch_func_compatibility.get("forward_transform_operator")
-        == "torch.func.linearize"
-        and torch_func_compatibility.get("reverse_transform_operator")
-        == "torch.func.vjp"
-        and torch_func_compatibility.get("operator_compatibility_ready") is True
-        and torch_func_compatibility.get("supports_paper_claim") is False
-        and torch_func_compatibility.get("compatibility_report_digest")
-        == build_stable_digest(compatibility_digest_payload)
         and resolved.get("qualification_binding_digest")
         == build_stable_digest(digest_payload)
     )
     return ready, resolved
+
+
+def _formal_same_threshold_decision_ready(
+    record: Mapping[str, Any],
+    protocol: FrozenEvidenceProtocol,
+) -> bool:
+    """只接受由冻结 evidence 协议物化的同阈值判定记录。"""
+
+    try:
+        validate_frozen_evidence_protocol_integrity(protocol)
+    except (TypeError, ValueError):
+        return False
+    structural_ready = bool(
+        record.get("frozen_threshold_digest") == protocol.threshold_digest
+        and record.get("frozen_content_threshold")
+        == protocol.content_threshold
+        and record.get("frozen_rescue_margin_low")
+        == protocol.rescue_margin_low
+        and record.get("frozen_geometry_score_threshold")
+        == protocol.geometry_score_threshold
+        and record.get("frozen_registration_confidence_threshold")
+        == protocol.registration_confidence_threshold
+        and record.get("frozen_attention_sync_score_threshold")
+        == protocol.attention_sync_score_threshold
+        and record.get("frozen_image_only_measurement_config_digest")
+        == protocol.image_only_measurement_config_digest
+        and record.get("frozen_attention_geometry_enabled")
+        is protocol.attention_geometry_enabled
+        and record.get("frozen_image_alignment_enabled")
+        is protocol.image_alignment_enabled
+        and record.get("frozen_geometry_rescue_enabled")
+        is protocol.geometry_rescue_enabled
+        and record.get("lf_carrier_protocol_digest")
+        == protocol.lf_carrier_protocol_digest
+        and record.get("tail_carrier_protocol_digest")
+        == protocol.tail_carrier_protocol_digest
+        and record.get("lf_weight") == protocol.lf_weight
+        and record.get("tail_robust_weight")
+        == protocol.tail_robust_weight
+        and record.get("tail_fraction") == protocol.tail_fraction
+        and type(record.get("formal_positive_by_content")) is bool
+        and type(record.get("formal_geometry_reliable")) is bool
+        and type(record.get("formal_rescue_eligible")) is bool
+        and type(record.get("formal_rescue_applied")) is bool
+        and type(record.get("formal_evidence_positive")) is bool
+        and record.get("formal_metric_status")
+        == "measured_image_only_detection"
+        and record.get("frozen_image_only_measurement_config_digest")
+        == record.get("image_only_measurement_config_digest")
+    )
+    if not structural_ready:
+        return False
+    try:
+        decision = complete_evidence_decision(
+            dict(record),
+            content_threshold=record["frozen_content_threshold"],
+            geometry_rescue_enabled=record["frozen_geometry_rescue_enabled"],
+            rescue_margin_low=record["frozen_rescue_margin_low"],
+            geometry_score_threshold=record[
+                "frozen_geometry_score_threshold"
+            ],
+            registration_confidence_threshold=record[
+                "frozen_registration_confidence_threshold"
+            ],
+            attention_sync_score_threshold=record[
+                "frozen_attention_sync_score_threshold"
+            ],
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+    return bool(
+        record["formal_positive_by_content"] is decision.positive_by_content
+        and record["formal_geometry_reliable"]
+        is decision.calibrated_geometry_reliable
+        and record["formal_rescue_eligible"] is decision.rescue_eligible
+        and record["formal_rescue_applied"] is decision.rescue_applied
+        and record["formal_evidence_positive"] is decision.evidence_positive
+    )
 
 
 def _read_json_mapping(path: Path) -> dict[str, Any]:
@@ -227,6 +294,16 @@ def _finite_nonnegative(value: Any) -> bool:
         and isinstance(value, (int, float))
         and math.isfinite(float(value))
         and float(value) >= 0.0
+    )
+
+
+def _finite_number(value: Any) -> bool:
+    """判断值为有限实数并排除 bool。"""
+
+    return bool(
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(float(value))
     )
 
 
@@ -316,88 +393,6 @@ def rebuild_keyed_prg_known_answer_report(
     return report
 
 
-def _null_space_operator_evidence(
-    update_records: Sequence[Mapping[str, Any]],
-    config: SemanticWatermarkRuntimeConfig,
-) -> dict[str, Any]:
-    """从每次真实注入记录提取完整 JVP/VJP 与 PSD-CG 事实."""
-
-    expected_branches = {
-        branch_name
-        for branch_name, enabled in (
-            ("lf_content", config.lf_enabled),
-            ("tail_robust", config.tail_robust_enabled),
-            ("attention_geometry", config.attention_geometry_enabled),
-        )
-        if enabled
-    }
-    rows: list[dict[str, Any]] = []
-    all_ready = bool(update_records and expected_branches)
-    for record in update_records:
-        branch_records = record.get("null_space_records")
-        branch_records = branch_records if isinstance(branch_records, dict) else {}
-        branch_rows: list[dict[str, Any]] = []
-        branch_set_ready = set(branch_records) == expected_branches
-        for branch_name in sorted(expected_branches):
-            branch = branch_records.get(branch_name)
-            branch = branch if isinstance(branch, dict) else {}
-            metadata = branch.get("metadata")
-            metadata = metadata if isinstance(metadata, dict) else {}
-            response_shape = branch.get("response_shape")
-            iteration_counts = branch.get("cg_iteration_counts")
-            residuals = branch.get("cg_relative_residuals")
-            row_ready = bool(
-                metadata.get("full_feature_jvp") is True
-                and metadata.get("full_feature_vjp") is True
-                and metadata.get("cg_damping") == 0.0
-                and metadata.get("cg_maximum_iterations")
-                == config.null_space_cg_max_iterations
-                and metadata.get("cg_relative_tolerance")
-                == config.null_space_cg_relative_tolerance
-                and response_shape
-                == [COMPLETE_FEATURE_WIDTH, config.null_rank]
-                and branch.get("cg_converged") is True
-                and isinstance(iteration_counts, list)
-                and len(iteration_counts) == config.null_rank
-                and all(
-                    type(value) is int
-                    and 0 <= value <= config.null_space_cg_max_iterations
-                    for value in iteration_counts
-                )
-                and isinstance(residuals, list)
-                and len(residuals) == config.null_rank
-                and all(
-                    _finite_nonnegative(value)
-                    and float(value) <= config.null_space_cg_relative_tolerance
-                    for value in residuals
-                )
-            )
-            branch_rows.append(
-                {
-                    "branch_name": branch_name,
-                    "complete_feature_width": COMPLETE_FEATURE_WIDTH,
-                    "response_shape": response_shape,
-                    "cg_iteration_counts": iteration_counts,
-                    "cg_relative_residuals": residuals,
-                    "branch_operator_ready": row_ready,
-                }
-            )
-            all_ready = all_ready and row_ready
-        all_ready = all_ready and branch_set_ready
-        rows.append(
-            {
-                "step_index": record.get("step_index"),
-                "branch_set_ready": branch_set_ready,
-                "branches": branch_rows,
-            }
-        )
-    return {
-        "expected_branch_names": sorted(expected_branches),
-        "update_operator_records": rows,
-        "complete_jvp_vjp_psd_cg_ready": bool(all_ready),
-    }
-
-
 def build_gpu_operator_preflight_report(
     runtime_result: Mapping[str, Any],
     update_records: Sequence[Mapping[str, Any]],
@@ -405,61 +400,101 @@ def build_gpu_operator_preflight_report(
     config: SemanticWatermarkRuntimeConfig,
     known_answer_path: str | Path,
     qualification_binding: Mapping[str, Any] | None = None,
+    frozen_evidence_protocol: FrozenEvidenceProtocol | None = None,
 ) -> dict[str, Any]:
     """验证单 Prompt 方法机制真实性, 不消费资源预算阈值."""
 
     result = dict(runtime_result)
     updates = tuple(dict(row) for row in update_records)
     detections = tuple(dict(row) for row in detection_records)
-    expected_steps = tuple(int(value) for value in config.injection_step_indices)
-    actual_steps = tuple(row.get("step_index") for row in updates)
-    scientific_update_ready = tuple(
-        _scientific_update_record_ready(row, config) for row in updates
+    update = updates[0] if len(updates) == 1 else {}
+    branch_fields = (
+        "lf_effective_l2",
+        "hf_tail_effective_l2",
+        "geometry_effective_l2",
     )
-    null_space_evidence = _null_space_operator_evidence(updates, config)
-    write_rows = [
-        {
-            "step_index": row.get("step_index"),
-            "quantized_write_update_norm": row.get(
-                "quantized_write_update_norm"
-            ),
-            "quantized_write_backtracking_step_count": row.get(
-                "quantized_write_backtracking_step_count"
-            ),
-            "quantized_write_common_scale": row.get(
-                "quantized_write_common_scale"
-            ),
-        }
-        for row in updates
-    ]
-    quantized_writes_ready = bool(
-        actual_steps == expected_steps
-        and len(updates) == len(expected_steps)
+    single_write_ready = bool(
+        config.injection_step_indices == (10,)
+        and len(updates) == 1
+        and update.get("step_index") == 10
+        and update.get("captured_previous_index") == 9
+        and update.get("captured_previous_count") == 1
+        and update.get("callback_write_index") == 10
+        and update.get("callback_write_count") == 1
+        and update.get("actual_dtype_single_write_count") == 1
+        and update.get("current_image_decode_count") == 1
+        and update.get("public_probe_additional_decode_count") == 1
+        and update.get("method_role") == "full_dual_chain"
         and all(
-            _finite_nonnegative(row["quantized_write_update_norm"])
-            and float(row["quantized_write_update_norm"]) > 0.0
-            and type(row["quantized_write_backtracking_step_count"]) is int
-            and 0
-            <= row["quantized_write_backtracking_step_count"]
-            <= config.quantized_budget_envelope_backtracking_maximum_steps
-            and _finite_nonnegative(row["quantized_write_common_scale"])
-            and float(row["quantized_write_common_scale"]) > 0.0
-            for row in write_rows
+            _finite_nonnegative(update.get(field_name))
+            and float(update[field_name]) > 0.0
+            for field_name in branch_fields
         )
+        and _finite_nonnegative(update.get("combined_effective_l2"))
+        and float(update.get("combined_effective_l2", 0.0)) > 0.0
+        and _finite_nonnegative(update.get("combined_effective_l2_limit"))
+        and float(update.get("combined_effective_l2", math.inf))
+        <= float(update.get("combined_effective_l2_limit", -math.inf))
+        and update.get("combined_effective_l2_ready") is True
+        and update.get("post_write_qk_strict_ready") is True
+        and _finite_number(update.get("content_only_postwrite_qk_score"))
+        and _finite_number(update.get("final_postwrite_qk_score"))
+        and float(update.get("final_postwrite_qk_score", -math.inf))
+        > float(update.get("content_only_postwrite_qk_score", math.inf))
+        and update.get("attention_module_names")
+        == list(config.attention_module_names)
     )
     update_qk_ready = bool(
-        updates
+        single_write_ready
         and all(
-            row.get("attention_module_names")
-            == list(config.attention_module_names)
-            and isinstance(row.get("attention_qk_atomic_content_records"), list)
-            and bool(row["attention_qk_atomic_content_records"])
-            for row in updates
+            type(update.get(field_name)) is str
+            and len(update[field_name]) == 64
+            and all(
+                character in "0123456789abcdef"
+                for character in update[field_name]
+            )
+            for field_name in (
+                "geometry_qk_atomic_records_digest",
+                "content_only_postwrite_qk_digest",
+                "final_postwrite_qk_digest",
+            )
         )
     )
     detection_qk_ready = bool(
         detections
         and all(_detection_qk_atomic_content_ready(row, config) for row in detections)
+    )
+    threshold_free_detection_ready = bool(
+        len(detections) == 3
+        and {row.get("sample_role") for row in detections}
+        == {"clean_negative", "positive_source", "wrong_key_negative"}
+        and all(
+            _finite_number(row.get("lf_score"))
+            and _finite_number(row.get("tail_robust_score"))
+            and _finite_number(row.get("content_score"))
+            and row.get("metadata", {}).get("measurement_status")
+            == "threshold_independent_image_only_evidence"
+            for row in detections
+        )
+    )
+    try:
+        if frozen_evidence_protocol is None:
+            raise ValueError("正式资格化缺少冻结 evidence protocol")
+        validate_frozen_evidence_protocol_integrity(frozen_evidence_protocol)
+        frozen_evidence_protocol_ready = True
+    except (TypeError, ValueError):
+        frozen_evidence_protocol_ready = False
+    blind_detection_ready = bool(
+        threshold_free_detection_ready
+        and frozen_evidence_protocol_ready
+        and all(
+            _formal_same_threshold_decision_ready(
+                row,
+                frozen_evidence_protocol,
+            )
+            for row in detections
+        )
+        and len({row["frozen_threshold_digest"] for row in detections}) == 1
     )
     provenance = result.get("metadata", {}).get(
         "scientific_unit_provenance",
@@ -490,6 +525,28 @@ def build_gpu_operator_preflight_report(
         _registered_and_wrong_key_attribution_ready(detections, config)
     )
     known_answer = rebuild_keyed_prg_known_answer_report(known_answer_path)
+    metadata = result.get("metadata")
+    metadata = metadata if isinstance(metadata, Mapping) else {}
+    runtime_identity_text = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+    legacy_runtime_absent = all(
+        token not in runtime_identity_text
+        for token in (
+            "semantic_feature_operator_contract",
+            "complete_716",
+            "exact_jvp",
+            "exact_vjp",
+            "psd_cg",
+        )
+    )
+    legacy_runtime_absent = bool(
+        legacy_runtime_absent
+        and metadata.get("legacy_runtime_dependency_absence_ready") is True
+        and metadata.get("forbidden_runtime_modules")
+        == [
+            "main.methods.subspace.jacobian_nullspace",
+            "main.methods.semantic.runtime",
+        ]
+    )
     facts = (
         _operator_fact(
             "exact_commit_dependency_model_and_input_binding",
@@ -506,54 +563,31 @@ def build_gpu_operator_preflight_report(
             attention_module_names=list(config.attention_module_names),
         ),
         _operator_fact(
-            "complete_716_feature_jvp_vjp_psd_cg",
-            null_space_evidence["complete_jvp_vjp_psd_cg_ready"],
-            **null_space_evidence,
+            "formal_s_t_r_q_lf_hf_qk_common_gamma_single_write",
+            single_write_ready,
+            update_record=update,
         ),
         _operator_fact(
-            "three_nonzero_quantized_latent_injections",
-            quantized_writes_ready,
-            expected_injection_step_indices=list(expected_steps),
-            actual_injection_step_indices=list(actual_steps),
-            quantized_write_records=write_rows,
-        ),
-        _operator_fact(
-            "scientific_update_records_are_content_bound",
-            bool(scientific_update_ready and all(scientific_update_ready)),
-            scientific_update_record_count=len(updates),
-            scientific_update_record_ready=list(scientific_update_ready),
-        ),
-        _operator_fact(
-            "real_qk_tensor_records_are_present",
-            update_qk_ready and detection_qk_ready,
-            generation_qk_ready=update_qk_ready,
+            "formal_image_only_lf_hf_tail_blind_detection",
+            blind_detection_ready and detection_qk_ready,
+            detection_record_count=len(detections),
             detection_qk_ready=detection_qk_ready,
-        ),
-        _operator_fact(
-            "final_three_image_feature_preservation",
-            bool(
-                _final_image_preservation_ready(result, config)
-                and _carrier_only_final_image_preservation_ready(result, config)
-            ),
-            clean_watermarked_preservation_ready=(
-                _final_image_preservation_ready(result, config)
-            ),
-            carrier_only_preservation_ready=(
-                _carrier_only_final_image_preservation_ready(result, config)
+            threshold_free_measurement_ready=threshold_free_detection_ready,
+            frozen_evidence_protocol_ready=frozen_evidence_protocol_ready,
+            frozen_threshold_digest=(
+                frozen_evidence_protocol.threshold_digest
+                if frozen_evidence_protocol_ready
+                else None
             ),
         ),
         _operator_fact(
-            "final_image_qk_dual_attribution_gain",
-            _final_image_attention_observability_ready(result, config),
+            "legacy_716_jvp_vjp_psd_cg_multi_injection_absent",
+            legacy_runtime_absent,
         ),
         _operator_fact(
             "registered_key_and_wrong_key_attribution",
             key_attribution_ready,
             **key_attribution_evidence,
-        ),
-        _operator_fact(
-            "scientific_content_binding",
-            _scientific_content_binding_record_ready(result),
         ),
         _operator_fact(
             "keyed_prg_cross_platform_known_answer",
@@ -662,6 +696,7 @@ def build_gpu_method_qualification_report(
     resource_observation: Mapping[str, Any] | None = None,
     registered_budget: Mapping[str, Any] | None = None,
     qualification_binding: Mapping[str, Any] | None = None,
+    frozen_evidence_protocol: FrozenEvidenceProtocol | None = None,
 ) -> dict[str, Any]:
     """组合方法和资源报告, 同时保持两个布尔门禁相互独立."""
 
@@ -672,6 +707,7 @@ def build_gpu_method_qualification_report(
         config,
         known_answer_path,
         qualification_binding,
+        frozen_evidence_protocol,
     )
     resource = build_gpu_resource_budget_report(
         resource_observation,

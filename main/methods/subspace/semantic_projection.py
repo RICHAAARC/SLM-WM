@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from main.core.keyed_prg import KEYED_PRG_VERSION, keyed_prg_protocol_record
-from main.methods.semantic import DifferentiableSemanticFeatureRuntime
+from main.methods.semantic.runtime import DifferentiableSemanticFeatureRuntime
 from main.methods.subspace.jacobian_nullspace import (
     ExactJacobianLinearization,
     generate_keyed_candidate_directions,

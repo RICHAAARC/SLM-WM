@@ -8,7 +8,7 @@ import pytest
 import torch
 import torch.nn.functional as functional
 
-from main.methods.semantic import (
+from main.methods.semantic.runtime import (
     DifferentiableSemanticFeatureRuntime,
 )
 from main.methods.semantic import BranchRiskConfig, build_branch_risk_fields

@@ -1,4 +1,4 @@
-"""正式重运行消融15项规范的轻量协议测试."""
+"""正式重运行消融14项规范的轻量协议测试."""
 
 from __future__ import annotations
 
@@ -46,13 +46,13 @@ def test_ablation_manifest_uses_complete_shared_randomization_plan() -> None:
 
 
 @pytest.mark.quick
-def test_formal_runtime_rerun_ablation_contract_is_exactly_fifteen_items() -> None:
+def test_formal_runtime_rerun_ablation_contract_is_exactly_fourteen_items() -> None:
     """正式消融必须覆盖机制开关与四个注意力分量留一对照."""
 
     contract = runtime_rerun_ablation_contract(default_runtime_rerun_ablation_specs())
 
-    assert len(FORMAL_RUNTIME_RERUN_ABLATION_IDS) == 15
-    assert len(set(FORMAL_RUNTIME_RERUN_ABLATION_IDS)) == 15
+    assert len(FORMAL_RUNTIME_RERUN_ABLATION_IDS) == 14
+    assert len(set(FORMAL_RUNTIME_RERUN_ABLATION_IDS)) == 14
     assert {
         "shared_global_risk_routing",
         "lf_content_only",

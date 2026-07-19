@@ -418,6 +418,14 @@ def build_child_command(
                 arguments.known_answer,
                 "--qualification-output-root",
                 arguments.qualification_output_root,
+                "--frozen-evidence-protocol",
+                arguments.frozen_evidence_protocol,
+                "--reference-gradient",
+                repr(arguments.reference_gradient),
+                "--reference-response",
+                repr(arguments.reference_response),
+                "--reference-sensitivity",
+                repr(arguments.reference_sensitivity),
             ]
         )
         if arguments.registered_budget:
@@ -523,6 +531,10 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("probe_paper", "pilot_paper", "full_paper"),
     )
     qualification.add_argument("--prompt-id", required=True)
+    qualification.add_argument("--frozen-evidence-protocol", required=True)
+    qualification.add_argument("--reference-gradient", required=True, type=float)
+    qualification.add_argument("--reference-response", required=True, type=float)
+    qualification.add_argument("--reference-sensitivity", required=True, type=float)
     qualification.set_defaults(
         known_answer="configs/keyed_prg_cross_platform_known_answer.json"
     )

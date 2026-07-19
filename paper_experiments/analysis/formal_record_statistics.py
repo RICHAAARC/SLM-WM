@@ -80,7 +80,9 @@ from experiments.runtime.scientific_content_binding import (
     recompute_scientific_content_binding_digest,
 )
 from main.core.digest import build_stable_digest
-from main.methods.carrier import tail_robust_carrier_protocol_record
+from main.methods.carrier.high_frequency_tail import (
+    HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST,
+)
 from main.methods.detection import project_image_only_measurement_record
 from main.methods.geometry import (
     ATTENTION_ALIGNMENT_ANCHOR_COUNT,
@@ -101,7 +103,7 @@ _FORMAL_CONTENT_WEIGHT_PROTOCOLS = {
     (1.0, 0.0),
     (0.0, 1.0),
 }
-_FORMAL_TAIL_FRACTIONS = {_FORMAL_METHOD_CONFIG.tail_fraction, 1.0}
+_FORMAL_TAIL_FRACTIONS = {_FORMAL_METHOD_CONFIG.tail_fraction}
 
 
 DATASET_QUALITY_METRIC_FIELDNAMES = (
@@ -454,13 +456,11 @@ def validate_frozen_evidence_protocol_record(
         raise FormalRecordStatisticsError(
             "消融冻结检测协议的内容分支权重无效"
         )
-    expected_tail_protocol = tail_robust_carrier_protocol_record(
-        protocol.tail_fraction,
-        prg_version=_FORMAL_METHOD_CONFIG.keyed_prg_version,
-    )
-    if protocol.tail_carrier_protocol_digest != expected_tail_protocol[
-        "tail_carrier_protocol_digest"
-    ]:
+    if (
+        protocol.tail_fraction != _FORMAL_METHOD_CONFIG.tail_fraction
+        or protocol.tail_carrier_protocol_digest
+        != HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST
+    ):
         raise FormalRecordStatisticsError(
             "消融冻结检测协议的尾部载体协议发生漂移"
         )

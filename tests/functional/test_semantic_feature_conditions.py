@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 from types import SimpleNamespace
 
 import pytest
 import torch
 
-from main.methods.semantic import (
+from main.methods.semantic.runtime import (
     DifferentiableSemanticFeatureRuntime,
 )
 from experiments.runners.semantic_watermark_runtime import (
@@ -27,6 +27,7 @@ from experiments.runners.semantic_watermark_runtime import (
     _runtime_public_detection_noise_identity,
     _three_way_final_image_preservation_records,
     run_semantic_watermark_runtime,
+    semantic_watermark_runtime_config_payload,
 )
 from experiments.runners.image_only_dataset_runtime import (
     _final_image_attention_observability_ready,
@@ -44,14 +45,16 @@ from main.methods.geometry.differentiable_attention import (
     qk_atomic_content_records_digest,
     qk_operator_metadata_records_digest,
 )
-from main.methods.carrier import keyed_prg_protocol_record
+from main.core.keyed_prg import keyed_prg_protocol_record
 from main.core.digest import build_stable_digest
 from main.core.keyed_prg import KEYED_PRG_VERSION
 from main.core.digest import (
     TENSOR_CONTENT_DIGEST_VERSION,
     tensor_content_sha256,
 )
-from main.methods.subspace import build_exact_jacobian_linearization
+from main.methods.subspace.jacobian_nullspace import (
+    build_exact_jacobian_linearization,
+)
 from main.methods.semantic.feature_protocol import (
     CLIP_VISION_CHANNEL_MEAN,
     CLIP_VISION_CHANNEL_STD,
@@ -274,15 +277,14 @@ def _counterfactual_update_records(
                     ),
                 }
             )
-            if config.null_space_enabled:
-                branch_risk_records[branch_name].update(
-                    {
-                        "branch_post_risk_direction_content_sha256": "c" * 64,
-                        "branch_post_risk_reference_direction_content_sha256": "e" * 64,
-                        "branch_post_risk_response_content_sha256": "f" * 64,
-                        "branch_post_risk_reference_response_content_sha256": "0" * 64,
-                    }
-                )
+            branch_risk_records[branch_name].update(
+                {
+                    "branch_post_risk_direction_content_sha256": "c" * 64,
+                    "branch_post_risk_reference_direction_content_sha256": "e" * 64,
+                    "branch_post_risk_response_content_sha256": "f" * 64,
+                    "branch_post_risk_reference_response_content_sha256": "0" * 64,
+                }
+            )
         risk_signal_content_records = {
             "current_decoded_rgb_content_sha256": "6" * 64,
             "previous_step_decoded_rgb_content_sha256": "7" * 64,
@@ -303,7 +305,7 @@ def _counterfactual_update_records(
             risk_signal_content_records,
             branch_risk_records,
             semantic_routing_enabled=config.semantic_routing_enabled,
-            null_space_enabled=config.null_space_enabled,
+            null_space_enabled=True,
             active_branch_names=tuple(branches),
         )
         records.append(
@@ -349,27 +351,25 @@ def _counterfactual_update_records(
                 "quantized_write_update_shape": [1, 16, 64, 64],
                 "quantized_write_update_norm": 0.01,
                 "maximum_quantized_write_relative_jacobian_response": (
-                    config.maximum_quantized_write_relative_jacobian_response
+                    0.0001
                 ),
                 "quantized_write_jacobian_gate_applicable": (
-                    config.null_space_enabled
+                    True
                 ),
                 "quantized_write_jacobian_response_norm": (
-                    1e-5 if config.null_space_enabled else None
+                    1e-5
                 ),
                 "quantized_write_reference_feature_norm": (
-                    1.0 if config.null_space_enabled else None
+                    1.0
                 ),
                 "quantized_write_relative_jacobian_response": (
-                    1e-5 if config.null_space_enabled else None
+                    1e-5
                 ),
                 "quantized_write_jacobian_gate_ready": (
-                    config.null_space_enabled
+                    True
                 ),
                 "quantized_write_jacobian_status": (
                     "measured_from_actual_quantized_latent_delta"
-                    if config.null_space_enabled
-                    else "not_applicable_jacobian_null_space_disabled"
                 ),
                 "keyed_prg_version": config.keyed_prg_version,
                 "keyed_prg_protocol_digest": keyed_prg_protocol_record(
@@ -482,16 +482,11 @@ def test_formal_jacobian_keeps_clip_and_handcrafted_structure_coordinates() -> N
 def test_runtime_entry_rejects_alignment_without_attention_geometry() -> None:
     """非法机制组合必须在加载模型和执行 GPU 工作前失败。"""
 
-    config = replace(
-        SemanticWatermarkRuntimeConfig(),
-        attention_geometry_enabled=False,
-        image_alignment_enabled=True,
-    )
-
     with pytest.raises(ValueError, match="真实注意力几何"):
-        run_semantic_watermark_runtime(
-            config,
-            runtime_context=object(),  # type: ignore[arg-type]
+        replace(
+            SemanticWatermarkRuntimeConfig(),
+            attention_geometry_enabled=False,
+            image_alignment_enabled=True,
         )
 
 
@@ -1555,10 +1550,13 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
     """反事实必须绑定首 latent、完整调度与无 attention 更新原子。"""
 
     full_config = SemanticWatermarkRuntimeConfig()
-    carrier_config = replace(
-        full_config,
-        attention_geometry_enabled=False,
-    )
+    full_config_payload = semantic_watermark_runtime_config_payload(full_config)
+    full_config_payload["null_space_enabled"] = True
+    full_config_payload[
+        "maximum_quantized_write_relative_jacobian_response"
+    ] = 0.0001
+    carrier_config = dict(full_config_payload)
+    carrier_config["attention_geometry_enabled"] = False
 
     full_records = _counterfactual_update_records(
         full_config,
@@ -1571,7 +1569,7 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
         attention_enabled=False,
     )
     identity = _carrier_only_counterfactual_identity(
-        full_config,
+        full_config_payload,
         carrier_config,
         full_records,
         carrier_records,
@@ -1605,7 +1603,7 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
     ][0]["head_width"] = 2
     with pytest.raises(RuntimeError, match="Q/K 算子元数据无效"):
         _carrier_only_counterfactual_identity(
-            full_config,
+            full_config_payload,
             carrier_config,
             full_operator_drift,
             carrier_records,
@@ -1637,7 +1635,7 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
     )
     with pytest.raises(RuntimeError, match="分支风险 Tensor 摘要"):
         _carrier_only_counterfactual_identity(
-            full_config,
+            full_config_payload,
             carrier_config,
             full_records,
             incomplete_risk_digest_records,
@@ -1651,7 +1649,7 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
     drifted_records[0]["attention_operator_timestep"] = -1.0
     with pytest.raises(RuntimeError, match="scheduler 轨迹"):
         _carrier_only_counterfactual_identity(
-            full_config,
+            full_config_payload,
             carrier_config,
             full_records,
             drifted_records,
@@ -1665,7 +1663,7 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
     initial_latent_drift[0]["latent_content_sha256_before"] = "b" * 64
     with pytest.raises(RuntimeError, match="首个注入前 latent"):
         _carrier_only_counterfactual_identity(
-            full_config,
+            full_config_payload,
             carrier_config,
             full_records,
             initial_latent_drift,
@@ -1679,7 +1677,7 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
     quantized_gate_drift[0]["quantized_write_jacobian_gate_ready"] = False
     with pytest.raises(RuntimeError, match="实际量化写回 Jacobian 门禁"):
         _carrier_only_counterfactual_identity(
-            full_config,
+            full_config_payload,
             carrier_config,
             full_records,
             quantized_gate_drift,
@@ -1693,7 +1691,7 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
     quantized_zero_drift[0]["quantized_write_update_norm"] = 0.0
     with pytest.raises(RuntimeError, match="实际 dtype 写回不得为0"):
         _carrier_only_counterfactual_identity(
-            full_config,
+            full_config_payload,
             carrier_config,
             full_records,
             quantized_zero_drift,
@@ -1707,7 +1705,7 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
     prg_identity_drift[0]["keyed_prg_protocol_digest"] = "d" * 64
     with pytest.raises(RuntimeError, match="密钥 PRG 协议身份"):
         _carrier_only_counterfactual_identity(
-            full_config,
+            full_config_payload,
             carrier_config,
             full_records,
             prg_identity_drift,
@@ -1721,7 +1719,7 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
     attention_atom_drift[0]["attention_score_before"] = 0.1
     with pytest.raises(RuntimeError, match="仍包含 attention 数值"):
         _carrier_only_counterfactual_identity(
-            full_config,
+            full_config_payload,
             carrier_config,
             full_records,
             attention_atom_drift,
@@ -1735,7 +1733,7 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
     source_drift[0]["metadata"]["attention_source"] = "real_qk_projection"
     with pytest.raises(RuntimeError, match="错误声明真实 Q/K"):
         _carrier_only_counterfactual_identity(
-            full_config,
+            full_config_payload,
             carrier_config,
             full_records,
             source_drift,
@@ -1749,7 +1747,7 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
     pair_identity_drift[0]["stable_pair_weight_identity_digest"] = "c" * 64
     with pytest.raises(RuntimeError, match="仍包含 attention 或 pair 身份"):
         _carrier_only_counterfactual_identity(
-            full_config,
+            full_config_payload,
             carrier_config,
             full_records,
             pair_identity_drift,
@@ -1763,7 +1761,7 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
     direct_source_drift[0]["attention_relation_direct_qk_source_ready"] = True
     with pytest.raises(RuntimeError, match="错误声明直接 Q/K"):
         _carrier_only_counterfactual_identity(
-            full_config,
+            full_config_payload,
             carrier_config,
             full_records,
             direct_source_drift,
@@ -1777,7 +1775,7 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
     null_space_drift[0]["null_space_records"]["attention_geometry"] = {}
     with pytest.raises(RuntimeError, match="活动分支身份"):
         _carrier_only_counterfactual_identity(
-            full_config,
+            full_config_payload,
             carrier_config,
             full_records,
             null_space_drift,
@@ -1791,7 +1789,13 @@ def test_carrier_only_artifact_binding_rejects_manifest_or_file_drift(
     """反事实原子、图像、记录与 manifest 必须可重建为同一身份。"""
 
     config = SemanticWatermarkRuntimeConfig(attention_geometry_enabled=True)
-    carrier_config = replace(config, attention_geometry_enabled=False)
+    config_payload = semantic_watermark_runtime_config_payload(config)
+    config_payload["null_space_enabled"] = True
+    config_payload[
+        "maximum_quantized_write_relative_jacobian_response"
+    ] = 0.0001
+    carrier_config = dict(config_payload)
+    carrier_config["attention_geometry_enabled"] = False
     full_records = _counterfactual_update_records(
         config,
         role="full_method",
@@ -1803,7 +1807,7 @@ def test_carrier_only_artifact_binding_rejects_manifest_or_file_drift(
         attention_enabled=False,
     )
     identity = _carrier_only_counterfactual_identity(
-        config,
+        config_payload,
         carrier_config,
         full_records,
         carrier_records,
@@ -1881,7 +1885,7 @@ def test_carrier_only_artifact_binding_rejects_manifest_or_file_drift(
         result,
         manifest,
         tmp_path.resolve(),
-        config,
+        config_payload,
     ) is True
     drifted_manifest = {
         **manifest,
@@ -1894,7 +1898,7 @@ def test_carrier_only_artifact_binding_rejects_manifest_or_file_drift(
         result,
         drifted_manifest,
         tmp_path.resolve(),
-        config,
+        config_payload,
     ) is False
 
     carrier_atom_path.write_text(
@@ -1905,7 +1909,7 @@ def test_carrier_only_artifact_binding_rejects_manifest_or_file_drift(
         result,
         manifest,
         tmp_path.resolve(),
-        config,
+        config_payload,
     ) is False
 
     tampered_records = [dict(record) for record in carrier_records]
@@ -1949,5 +1953,5 @@ def test_carrier_only_artifact_binding_rejects_manifest_or_file_drift(
         tampered_result,
         tampered_manifest,
         tmp_path.resolve(),
-        config,
+        config_payload,
     ) is False

@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hashlib
 import math
-from typing import Any, Callable, Iterable
+from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 from main.core.digest import (
     TENSOR_CONTENT_DIGEST_VERSION,
@@ -22,7 +22,8 @@ from main.core.keyed_prg import (
     build_keyed_uniform_tensor,
     keyed_prg_protocol_record,
 )
-from main.methods.subspace.jacobian_nullspace import JacobianNullSpaceResult
+if TYPE_CHECKING:
+    from main.methods.subspace.jacobian_nullspace import JacobianNullSpaceResult
 from main.methods.update_composition import (
     RiskBoundedUpdate,
     compose_ordered_float32_update_once,

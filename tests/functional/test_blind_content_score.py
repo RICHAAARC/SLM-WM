@@ -141,8 +141,8 @@ def _compute(
 
 
 @pytest.mark.quick
-def test_public_contract_is_frozen_exact_and_not_package_exported() -> None:
-    """公开字段、签名与隔离模块边界不得扩张。"""
+def test_public_contract_is_frozen_exact_and_package_exported() -> None:
+    """公开字段、签名与正式 carrier 导出必须保持一致。"""
 
     assert score_module.__all__ == [
         "BlindContentScore",
@@ -189,11 +189,10 @@ def test_public_contract_is_frozen_exact_and_not_package_exported() -> None:
     with pytest.raises(FrozenInstanceError):
         instance.blind_content_score = 1.0  # type: ignore[misc]
 
-    assert carrier_package.BlindContentScore.__module__ == (
-        "main.methods.carrier.keyed_tensor"
-    )
-    assert carrier_package.compute_blind_content_score.__module__ == (
-        "main.methods.carrier.keyed_tensor"
+    assert carrier_package.BlindContentScore is BlindContentScore
+    assert (
+        carrier_package.compute_blind_content_score
+        is compute_blind_content_score
     )
 
 

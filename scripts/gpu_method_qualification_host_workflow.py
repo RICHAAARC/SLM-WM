@@ -13,6 +13,10 @@ from experiments.protocol.gpu_method_qualification_schema import (
     GPU_METHOD_QUALIFICATION_INVOCATION_RESULT_SCHEMA,
     GPU_METHOD_QUALIFICATION_SCHEMA,
 )
+from experiments.protocol.image_only_evidence import (
+    FrozenEvidenceProtocol,
+    validate_frozen_evidence_protocol_integrity,
+)
 from experiments.runtime.isolated_scientific_execution import (
     execute_isolated_scientific_command,
 )
@@ -83,6 +87,48 @@ def _read_json_mapping(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _load_frozen_evidence_protocol(
+    root: Path,
+    requested_path: str | Path,
+) -> tuple[FrozenEvidenceProtocol, Path]:
+    """在启动科学子进程前复验正式冻结判定协议。"""
+
+    candidate = Path(requested_path).expanduser()
+    path = (
+        candidate.resolve()
+        if candidate.is_absolute()
+        else (root / candidate).resolve()
+    )
+    try:
+        protocol = FrozenEvidenceProtocol(**_read_json_mapping(path))
+        validate_frozen_evidence_protocol_integrity(protocol)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("冻结 evidence protocol 缺失或完整性无效") from exc
+    return protocol, path
+
+
+def _read_jsonl_mappings(path: Path) -> tuple[dict[str, Any], ...]:
+    """读取正式检测 JSONL，拒绝非对象记录。"""
+
+    records: list[dict[str, Any]] = []
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(),
+        start=1,
+    ):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError("正式检测记录不是有效 JSONL") from exc
+        if not isinstance(record, dict):
+            raise ValueError(f"正式检测记录第{line_number}行不是对象")
+        records.append(record)
+    if not records:
+        raise ValueError("正式检测记录不得为空")
+    return tuple(records)
+
+
 def _invocation_record(stdout: str) -> dict[str, Any] | None:
     """从科学子进程最后一条结构化输出读取资格化报告索引."""
 
@@ -122,6 +168,8 @@ def _validate_qualification_evidence(
     prompt_id: str,
     qualification_output_root: Path,
     isolated_report: Mapping[str, Any],
+    frozen_evidence_protocol: FrozenEvidenceProtocol,
+    frozen_evidence_protocol_path: Path,
 ) -> tuple[dict[str, Any], Path, dict[str, Any]]:
     """交叉复验子进程索引、资格化报告和隔离执行进程证据."""
 
@@ -189,6 +237,9 @@ def _validate_qualification_evidence(
         "gpu_method_qualification_report_digest",
         "gpu_operator_preflight_ready",
         "gpu_resource_budget_ready",
+        "frozen_threshold_digest",
+        "formal_detection_record_path",
+        "formal_detection_record_sha256",
         "supports_paper_claim",
     }
     if set(invocation) != expected_invocation_fields:
@@ -217,6 +268,32 @@ def _validate_qualification_evidence(
     ):
         raise ValueError("GPU 方法资格化报告文件摘要不一致")
 
+    formal_detection_path = _resolve_under_outputs(
+        root,
+        str(invocation["formal_detection_record_path"]),
+        "formal_detection_record_path",
+    )
+    try:
+        formal_detection_path.relative_to(qualification_output_root)
+    except ValueError as exc:
+        raise ValueError("正式检测记录不属于请求的资格化输出根") from exc
+    if not formal_detection_path.is_file():
+        raise ValueError("正式检测记录文件不存在")
+    if (
+        _file_sha256(formal_detection_path)
+        != invocation["formal_detection_record_sha256"]
+    ):
+        raise ValueError("正式检测记录文件摘要不一致")
+    formal_detection_records = _read_jsonl_mappings(formal_detection_path)
+    if any(
+        record.get("frozen_threshold_digest")
+        != frozen_evidence_protocol.threshold_digest
+        or record.get("frozen_image_only_measurement_config_digest")
+        != frozen_evidence_protocol.image_only_measurement_config_digest
+        for record in formal_detection_records
+    ):
+        raise ValueError("正式检测记录与冻结协议身份不一致")
+
     report = _read_json_mapping(report_path)
     report_digest = report.get("qualification_report_digest")
     digest_input = dict(report)
@@ -224,6 +301,50 @@ def _validate_qualification_evidence(
     binding = report.get("qualification_binding")
     binding_input = (
         binding.get("input_summary") if isinstance(binding, Mapping) else None
+    )
+    frozen_identity = (
+        binding.get("frozen_evidence_protocol_identity")
+        if isinstance(binding, Mapping)
+        else None
+    )
+    formal_detection_identity = (
+        binding.get("formal_detection_records_identity")
+        if isinstance(binding, Mapping)
+        else None
+    )
+    protocol_file_sha256 = _file_sha256(frozen_evidence_protocol_path)
+    frozen_identity_ready = (
+        isinstance(frozen_identity, Mapping)
+        and set(frozen_identity)
+        == {
+            "source_path",
+            "source_file_sha256",
+            "threshold_digest",
+            "image_only_measurement_config_digest",
+        }
+        and frozen_identity.get("source_path")
+        == frozen_evidence_protocol_path.as_posix()
+        and frozen_identity.get("source_file_sha256") == protocol_file_sha256
+        and frozen_identity.get("threshold_digest")
+        == frozen_evidence_protocol.threshold_digest
+        and frozen_identity.get("image_only_measurement_config_digest")
+        == frozen_evidence_protocol.image_only_measurement_config_digest
+    )
+    formal_detection_identity_ready = (
+        isinstance(formal_detection_identity, Mapping)
+        and set(formal_detection_identity)
+        == {"path", "file_sha256", "record_count"}
+        and formal_detection_identity.get("path")
+        == formal_detection_path.relative_to(root).as_posix()
+        and formal_detection_identity.get("file_sha256")
+        == invocation["formal_detection_record_sha256"]
+        and formal_detection_identity.get("record_count")
+        == len(formal_detection_records)
+    )
+    binding_input_ready = (
+        isinstance(binding_input, Mapping)
+        and binding_input.get("paper_run_name") == paper_run_name
+        and binding_input.get("prompt_id") == prompt_id
     )
     if not all(
         (
@@ -243,9 +364,11 @@ def _validate_qualification_evidence(
             isinstance(binding, Mapping),
             binding.get("code_version") == repository_commit,
             binding.get("dependency_profile_id") == SCIENTIFIC_PROFILE_ID,
-            isinstance(binding_input, Mapping),
-            binding_input.get("paper_run_name") == paper_run_name,
-            binding_input.get("prompt_id") == prompt_id,
+            binding_input_ready,
+            invocation.get("frozen_threshold_digest")
+            == frozen_evidence_protocol.threshold_digest,
+            frozen_identity_ready,
+            formal_detection_identity_ready,
         )
     ):
         raise ValueError("GPU 方法资格化报告未通过宿主证据复验")
@@ -303,6 +426,10 @@ def run_gpu_method_qualification_host_workflow(
     result_path: str | Path,
     known_answer: str | Path,
     qualification_output_root: str | Path,
+    frozen_evidence_protocol: str | Path,
+    reference_gradient: float,
+    reference_response: float,
+    reference_sensitivity: float,
     registered_budget: str | Path | None = None,
 ) -> dict[str, Any]:
     """在受治理隔离环境中运行单 Prompt 资格化并重建宿主结论."""
@@ -317,6 +444,10 @@ def run_gpu_method_qualification_host_workflow(
         root_path,
         qualification_output_root,
         "qualification_output_root",
+    )
+    protocol, protocol_path = _load_frozen_evidence_protocol(
+        root_path,
+        frozen_evidence_protocol,
     )
     execution_report_path = resolved_result_path.with_name(
         resolved_result_path.stem
@@ -334,6 +465,14 @@ def run_gpu_method_qualification_host_workflow(
         str(known_answer),
         "--output-root",
         str(resolved_output_root),
+        "--frozen-evidence-protocol",
+        str(protocol_path),
+        "--reference-gradient",
+        repr(reference_gradient),
+        "--reference-response",
+        repr(reference_response),
+        "--reference-sensitivity",
+        repr(reference_sensitivity),
     ]
     if registered_budget is not None:
         child_argv.extend(["--registered-budget", str(registered_budget)])
@@ -363,6 +502,8 @@ def run_gpu_method_qualification_host_workflow(
         prompt_id=prompt_id,
         qualification_output_root=resolved_output_root,
         isolated_report=isolated_report,
+        frozen_evidence_protocol=protocol,
+        frozen_evidence_protocol_path=protocol_path,
     )
     operator_ready = report["gpu_operator_preflight_ready"]
     failure_reasons = [] if operator_ready else ["gpu_operator_preflight_not_ready"]

@@ -20,7 +20,7 @@ def test_method_semantic_registry_audit_passes_for_repository() -> None:
     report = run_audit(ROOT)
 
     assert report["decision"] == "pass", report["violations"]
-    assert "main/methods/semantic/feature_protocol.py" in {
+    assert "experiments/runners/semantic_watermark_runtime.py" in {
         Path(path).as_posix() for path in report["checked_paths"]
     }
 

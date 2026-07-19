@@ -1,4 +1,4 @@
-"""冻结构造式方法定义与“潜流形”术语边界。"""
+"""冻结正式内容双链方法身份与核心接口边界。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,10 @@ from experiments.runners.semantic_watermark_runtime import (
 )
 from main.methods.carrier import build_low_frequency_template
 from main.methods.detection import ImageOnlyMeasurementConfig
-from main.methods.geometry import recover_attention_affine_alignment
+from main.methods.geometry import (
+    FROZEN_SD35_ATTENTION_MODULE_NAMES,
+    recover_attention_affine_alignment,
+)
 from main.methods.method_definition import (
     METHOD_DEFINITION_SCHEMA,
     semantic_conditioned_latent_method_definition,
@@ -23,499 +26,73 @@ from main.methods.method_definition import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
-METHOD_DOCUMENT = (
-    ROOT
-    / "docs"
-    / "builds"
-    / "method_mechanism_design_content_adaptive_dual_carrier_latent_watermark.md"
-)
-PRIMITIVE_DOCUMENT = (
-    ROOT
-    / "docs"
-    / "builds"
-    / "algorithm_primitives_content_adaptive_dual_carrier_latent_watermark.md"
-)
-CONSTRUCTION_DOCUMENT = (
-    ROOT / "docs" / "builds" / "project_construction_state.md"
-)
-FIELD_REGISTRY = ROOT / "docs" / "field_registry.md"
-EXPECTED_METHOD_DEFINITION = {
-    "method_definition_schema": "slm_wm_constructive_local_tangent_definition",
-    "method_name": "semantic_conditioned_latent_manifold_watermarking",
-    "update_construction": {
-        "semantics": "branchwise_constructive_safe_subspace_updates",
-        "content_branch_rule": "project_template_then_risk_bounded_scale",
-        "attention_branch_rule": (
-            "project_direct_qk_gradient_then_risk_bounded_monotonic_backtracking"
-        ),
-        "composition_rule": "single_core_ordered_actual_dtype_branch_sum",
-        "composition_implementation_layer": "main",
-        "joint_argmax_solved": False,
-    },
-    "branch_risk": {
-        "signal_calibration_rule": (
-            "analytic_bounded_signals_without_per_sample_minmax"
-        ),
-        "neutral_texture_rule": "fixed_constant_risk_term",
-        "neutral_texture_value": 0.5,
-        "eligibility_rule": "strict_risk_less_than_threshold",
-        "budget_broadcast_protocol": "per_sample_hw_repeat_channels_nchw",
-        "zero_support_rule": "exact_zero_direction_or_fail_closed",
-        "effective_budget_rule": (
-            "configured_budget_times_eligibility_indicator"
-        ),
-        "risk_bounded_scale_protocol": (
-            "direction_peak_frozen_budget_ceiling_box"
-        ),
-        "amplitude_envelope_rule": (
-            "nominal_l2_times_unit_direction_linf_times_"
-            "effective_budget_over_frozen_ceiling"
-        ),
-        "direction_scaling_rule": (
-            "maximum_feasible_global_scalar_without_coordinate_clipping"
-        ),
-        "direction_ratio_epsilon": 1e-12,
-        "direction_ratio_epsilon_role": (
-            "zero_budget_leakage_and_active_coordinate_selection"
-        ),
-        "numerical_epsilon_role": (
-            "nonzero_step_and_response_denominator_stability"
-        ),
-        "epsilon_roles_interchangeable": False,
-    },
-    "local_geometry": {
-        "latent_manifold_term_scope": (
-            "local_implicit_feature_level_set_tangent_interpretation"
-        ),
-        "numerical_object": "kernel_of_local_feature_jacobian",
-        "feature_width": 716,
-        "branch_risk_conditioned": True,
-        "local_tangent_residual_gated": True,
-        "global_nonlinear_manifold_constructed": False,
-        "constant_rank_condition_verified": False,
-        "chart_geodesic_or_retraction_used": False,
-        "qr_column_reference_rule": (
-            "routed_candidate_right_solve_upper_triangular_qr_factor"
-        ),
-        "qr_reference_solve_protocol": (
-            "right_upper_triangular_solve_without_explicit_inverse"
-        ),
-        "null_space_numerical_epsilon": 1e-12,
-        "maximum_qr_condition_number": 1e6,
-        "maximum_orthogonality_error": 1e-5,
-        "shared_rms_column_reference_used": False,
-        "explicit_qr_factor_inverse_used": False,
-        "projection_energy_rule": "squared_l2_ratio",
-        "cg_convergence_residual_rule": (
-            "recompute_right_hand_side_minus_operator_returned_solution"
-        ),
-        "cg_convergence_scale_rule": (
-            "true_residual_l2_divided_by_right_hand_side_l2"
-        ),
-        "cg_zero_iteration_rule": "exact_zero_right_hand_side_only",
-        "absolute_residual_convergence_allowed": False,
-        "post_risk_direction_jvp_rule": (
-            "required_independently_for_each_active_branch"
-        ),
-        "post_risk_reference_direction_rule": (
-            "unprojected_carrier_template_or_direct_qk_gradient"
-        ),
-    },
-    "semantic_feature_operator": {
-        "semantic_feature_protocol_schema": (
-            "semantic_conditioned_latent_complete_feature_operator"
-        ),
-        "vae_latent_transform": (
-            "latent_divide_scaling_factor_then_add_shift_factor"
-        ),
-        "vae_decoded_image_transform": (
-            "decoded_divide_two_add_half_then_clamp_zero_one"
-        ),
-        "clip_vision_input_size": 224,
-        "clip_vision_resize_mode": "bicubic",
-        "clip_vision_resize_align_corners": False,
-        "clip_vision_resize_antialias": True,
-        "clip_vision_channel_mean": [0.48145466, 0.4578275, 0.40821073],
-        "clip_vision_channel_std": [0.26862954, 0.26130258, 0.27577711],
-        "clip_projected_embedding_source": "image_embeds",
-        "clip_projected_embedding_normalization": (
-            "l2_normalize_last_dimension"
-        ),
-        "clip_token_sequence_source": "last_hidden_state",
-        "clip_cls_token_index": 0,
-        "clip_patch_token_start_index": 1,
-        "semantic_feature_schema": (
-            "normalized_projected_clip_image_embedding"
-        ),
-        "semantic_feature_width": 512,
-        "handcrafted_structure_feature_schema": (
-            "explicit_rgb_statistics_gradient_spatial_pool_structure_vector"
-        ),
-        "handcrafted_structure_feature_width": 204,
-        "handcrafted_structure_feature_components": [
-            {"component_name": "rgb_channel_mean", "coordinate_count": 3},
-            {
-                "component_name": (
-                    "rgb_channel_population_standard_deviation"
-                ),
-                "coordinate_count": 3,
-            },
-            {
-                "component_name": "rgb_horizontal_absolute_gradient_mean",
-                "coordinate_count": 3,
-            },
-            {
-                "component_name": "rgb_vertical_absolute_gradient_mean",
-                "coordinate_count": 3,
-            },
-            {
-                "component_name": (
-                    "rgb_adaptive_average_pool_channel_row_column"
-                ),
-                "coordinate_count": 192,
-            },
-        ],
-        "structure_pool_shape": [8, 8],
-        "structure_tensor_flatten_order": (
-            "batch_channel_row_column_with_single_sample"
-        ),
-        "joint_feature_concatenation_order": [
-            "normalized_projected_clip_image_embedding",
-            "explicit_structure_coordinates",
-        ],
-        "joint_feature_width": 716,
-        "feature_compression_applied": False,
-        "semantic_feature_protocol_digest": (
-            "31e1738470de7072877ab57ae76b2283687198546fc8a9db9078b644e8ae1356"
-        ),
-    },
-    "carrier_normalization": {
-        "lf_carrier_protocol_schema": (
-            "slm_wm_low_frequency_carrier_protocol"
-        ),
-        "lf_kernel_size": 5,
-        "lf_stride": 1,
-        "lf_padding": 2,
-        "lf_boundary_mode": "zero_padding",
-        "lf_ceil_mode": False,
-        "lf_count_include_pad": True,
-        "lf_divisor_override": None,
-        "lf_pooling_axes": "height_width_only",
-        "lf_batch_channel_isolation": True,
-        "lf_content_rule": "subtract_global_mean_then_l2_normalize",
-        "lf_normalization_scope": "global_tensor",
-        "lf_detection_score_weight": 0.70,
-        "tail_robust_detection_score_weight": 0.30,
-        "tail_robust_rule": (
-            "amplitude_truncate_then_l2_normalize_without_mean_centering"
-        ),
-        "tail_carrier_protocol_schema": (
-            "slm_wm_tail_robust_carrier_protocol"
-        ),
-        "tail_selection_rule": (
-            "descending_absolute_value_then_ascending_flat_index"
-        ),
-        "tail_nonselected_coordinate_rule": "exact_zero_after_normalization",
-        "raw_aligned_template_identity_rule": (
-            "same_shape_same_key_same_protocol_exact_content_digest"
-        ),
-        "content_correlation_rule": (
-            "dot_of_independently_centered_l2_normalized_vectors"
-        ),
-        "content_correlation_domain_rule": (
-            "finite_inputs_and_nonzero_centered_energy"
-        ),
-        "undefined_content_correlation_score_allowed": False,
-        "fixed_fpr_carrier_identity_rule": (
-            "lf_and_tail_protocol_digests_frozen_from_calibration"
-        ),
-    },
-    "attention_geometry": {
-        "attention_operator_schedule_index": 7,
-        "generation_and_detection_schedule_rule": (
-            "shared_fixed_attention_operator_schedule_index"
-        ),
-        "post_step_schedule_selects_attention_operator": False,
-        "relation_source": "direct_to_q_to_k_sampled_image_token_subgraph",
-        "probability_inverse_relation_allowed": False,
-        "relation_numerical_epsilon": 1e-12,
-        "valid_row_energy_rule": (
-            "both_centered_weighted_energies_strictly_above_epsilon_squared"
-        ),
-        "operator_metadata_evidence_rule": (
-            "shared_full_record_validation_and_digest_recomputation"
-        ),
-        "active_relation_numerical_domain_rule": (
-            "all_qk_projection_normalization_logits_probability_relation_"
-            "projection_pair_weight_and_component_scores_finite"
-        ),
-        "nonfinite_attention_score_substitution_allowed": False,
-        "risk_bounded_scale_is_backtracking_start": True,
-        "acceptance_rule": (
-            "actual_candidate_score_strictly_above_original_and_content_base"
-        ),
-        "full_joint_attention_all_tokens_optimized": False,
-    },
-    "image_only_alignment": {
-        "alignment_requires_attention_geometry": True,
-        "alignment_and_aligned_content_bidirectional": True,
-        "attention_module_names": [
-            "transformer_blocks.0.attn",
-            "transformer_blocks.23.attn",
-        ],
-        "cross_layer_selection_rule": (
-            "lexicographic_objective_observation_confidence_"
-            "then_frozen_layer_order"
-        ),
-        "cross_layer_tie_break_rule": (
-            "earlier_frozen_attention_module_name"
-        ),
-        "anchor_selection_rule": (
-            "evenly_spaced_over_sampled_token_index_range"
-        ),
-        "attention_anchor_count": 12,
-        "inlier_ratio_denominator": "valid_covered_anchor_count",
-        "attention_residual_threshold": 0.20,
-        "attention_residual_coordinate_unit": (
-            "normalized_xy_euclidean_distance"
-        ),
-        "attention_minimum_inlier_ratio": 0.50,
-        "attention_coordinate_convention": (
-            "normalized_xy_token_centers_corner_endpoints"
-        ),
-        "attention_grid_align_corners": True,
-        "image_resampling_mode": "bilinear",
-        "image_padding_mode": "border",
-        "image_quantization_protocol": (
-            "clamp_0_1_multiply_255_floor_uint8_rgb"
-        ),
-        "gate_parameter_source": (
-            "preregistered_formal_method_configuration"
-        ),
-        "calibration_data_used_for_gate_parameters": False,
-        "alignment_digest_binds_gate_parameters": True,
-        "registration_objective_margin_rule": (
-            "best_registration_objective_minus_identity_registration_objective"
-        ),
-        "registration_objective_margin_required_positive": True,
-    },
-    "image_only_measurement": {
-        "measurement_config_schema": (
-            "slm_wm_image_only_measurement_config"
-        ),
-        "extraction_profile_schema": (
-            "slm_wm_image_only_extraction_profile"
-        ),
-        "image_preprocessing_protocol": (
-            "diffusers_sd3_image_processor_rgb_preprocess"
-        ),
-        "vae_encoding_protocol": (
-            "sd3_vae_latent_dist_mode_shift_then_scale"
-        ),
-        "measurement_identity_scope": (
-            "complete_image_to_latent_qk_and_carrier_configuration"
-        ),
-        "threshold_or_decision_fields_allowed": False,
-    },
-    "image_only_evidence_calibration": {
-        "measurement_scope": (
-            "threshold_independent_continuous_evidence_only"
-        ),
-        "measurement_forbidden_content": (
-            "calibration_parameters_thresholds_and_decisions"
-        ),
-        "calibration_source_role": (
-            "registered_key_unattacked_clean_negative_only"
-        ),
-        "partition_sort_key": "sha256_partition_protocol_nul_prompt_id",
-        "window_fit_count_rule": "floor_calibration_count_divided_by_3",
-        "threshold_freeze_count_rule": (
-            "calibration_count_minus_window_fit_count"
-        ),
-        "partition_subsets_disjoint": True,
-        "allowed_false_positive_count_rule": (
-            "max_0_floor_target_fpr_times_negative_count_plus_1_minus_1"
-        ),
-        "window_fit_parameter_scope": [
-            "three_attention_geometry_thresholds",
-            "provisional_raw_content_threshold",
-            "rescue_margin_low",
-        ],
-        "rescue_candidate_rule": (
-            "negative_raw_margins_exact_and_nextafter_toward_zero_"
-            "plus_nextafter_zero_toward_negative_infinity"
-        ),
-        "rescue_selection_rule": (
-            "numerically_smallest_widest_candidate_within_"
-            "window_fit_false_positive_budget"
-        ),
-        "geometry_ready_rule": (
-            "structural_alignment_and_stable_pair_and_three_frozen_gates"
-        ),
-        "geometry_measurement_numerical_domain_rule": (
-            "raw_and_aligned_content_attention_registration_and_sync_finite"
-        ),
-        "malformed_geometry_raw_content_fallback_allowed": False,
-        "decision_equivalent_score_rule": (
-            "geometry_ready_max_raw_min_aligned_raw_minus_rescue_"
-            "otherwise_raw"
-        ),
-        "final_threshold_source": (
-            "threshold_freeze_decision_equivalent_scores_only"
-        ),
-        "shared_baseline_threshold_freeze_prompt_ids": True,
-        "raw_aligned_use_single_content_threshold": True,
-        "geometry_rescue_enablement_rule": (
-            "attention_geometry_enabled_and_image_alignment_enabled"
-        ),
-        "geometry_rescue_disabled_score_rule": (
-            "raw_content_score_only"
-        ),
-        "geometry_rescue_disabled_parameter_rule": (
-            "rescue_and_geometry_thresholds_none_counts_zero_ready_false"
-        ),
-        "applied_record_recalibration_rule": (
-            "explicit_threshold_free_measurement_projection_required"
-        ),
-        "test_positive_attacked_tuning_allowed": False,
-    },
-    "write_validation": {
-        "branch_amplitude_envelope_validation_rule": (
-            "required_on_each_materialized_active_branch_update"
-        ),
-        "actual_dtype_composition_protocol": (
-            "float32_ordered_branch_sum_add_float32_latent_single_cast"
-        ),
-        "actual_dtype_composition_order": [
-            "lf_content",
-            "tail_robust",
-            "attention_geometry",
-        ],
-        "combined_budget_envelope_rule": "sum_active_branch_envelopes",
-        "quantized_budget_envelope_absolute_tolerance": 0.0,
-        "quantized_budget_envelope_backtracking_factor": 0.5,
-        "quantized_budget_envelope_backtracking_maximum_steps": 24,
-        "quantized_envelope_recovery_rule": (
-            "common_positive_scalar_backtracking_then_full_revalidation"
-        ),
-        "attention_post_composition_validation_rule": (
-            "required_after_any_common_scalar_backtracking"
-        ),
-        "actual_dtype_budget_envelope_validation_rule": "required",
-        "actual_dtype_update_jvp_validation_rule": "required",
-        "finite_feature_change_validation_rule": "required",
-    },
-    "ablation_isolation": {
-        "without_branch_risk_routing": (
-            "unit_effective_budget_without_eligibility_filter"
-        ),
-        "without_jacobian_null_space": (
-            "retain_risk_support_and_amplitude_envelope"
-        ),
-        "inactive_branch_envelope_rule": "exclude_from_combined_envelope_sum",
-    },
-    "keyed_prg": {
-        "keyed_prg_version": (
-            "sha256_counter_normal_icdf_table20_float32"
-        ),
-        "keyed_prg_protocol_digest": (
-            "e1f97fd7457893cf4d92c0ffa383b44219cf6b1034055e43dcadf1d535ab1595"
-        ),
-        "canonical_device": "cpu",
-        "canonical_dtype": "float32",
-        "uniform_output_rule": "direct_open_unit_interval_float32",
-        "uniform_output_role": "attention_relation_signs",
-        "uniform_uses_normal_transform": False,
-        "gaussian_output_rule": (
-            "20bit_msb_stream_index_to_frozen_midpoint_inverse_normal_cdf_float32"
-        ),
-        "gaussian_output_roles": [
-            "content_carrier_templates",
-            "jacobian_candidate_directions",
-            "public_image_only_detection_noise",
-        ],
-        "public_detection_noise_key_role": (
-            "deterministic_public_protocol_identity_not_secret_key"
-        ),
-        "gaussian_uses_frozen_normal_quantile_table": True,
-        "uniform_and_gaussian_roles_interchangeable": False,
-    },
-    "branch_names": [
-        "lf_content",
-        "tail_robust",
-        "attention_geometry",
-    ],
-}
+METHOD_DOCUMENT = ROOT / "docs/builds/method_mechanism_design_content_adaptive_dual_carrier_latent_watermark.md"
+PRIMITIVE_DOCUMENT = ROOT / "docs/builds/algorithm_primitives_content_adaptive_dual_carrier_latent_watermark.md"
 EXPECTED_METHOD_DEFINITION_DIGEST = (
-    "f0c129f537b6acec36926d9a999f52ca68c749a4e3eb0cb7a25bfdd639948e4d"
+    "f2f69ad790dd1249063cca95733b890349cfdccbbef4ec22aa1df9fbe59cfcd7"
 )
 
 
 @pytest.mark.constraint
-def test_machine_readable_method_definition_freezes_constructive_semantics() -> None:
-    """可机读记录必须拒绝联合优化和全局流形的过强解释."""
+def test_machine_readable_method_definition_freezes_formal_dual_chain() -> None:
+    """机器身份必须绑定正式内容观测、单写回、Q/K 与盲检测。"""
 
     definition = semantic_conditioned_latent_method_definition()
-
-    assert METHOD_DEFINITION_SCHEMA == "slm_wm_constructive_local_tangent_definition"
-    assert definition == EXPECTED_METHOD_DEFINITION
-    assert definition["update_construction"]["joint_argmax_solved"] is False
-    assert (
-        definition["local_geometry"]["numerical_object"]
-        == "kernel_of_local_feature_jacobian"
+    assert METHOD_DEFINITION_SCHEMA == "slm_wm_content_dual_chain_definition_v1"
+    assert definition["method_definition_schema"] == METHOD_DEFINITION_SCHEMA
+    assert definition["method_name"] == (
+        "content_adaptive_dual_carrier_latent_watermark"
     )
-    assert (
-        definition["local_geometry"]["global_nonlinear_manifold_constructed"]
-        is False
+    assert definition["content_observations"]["ordered_observations"] == [
+        "semantic_saliency",
+        "texture_complexity",
+        "adjacent_latent_response",
+        "public_probe_local_sensitivity",
+    ]
+    update = definition["generation_update"]
+    assert update["capture_index"] == 9
+    assert update["write_index"] == 10
+    assert update["write_count"] == 1
+    assert update["actual_dtype_single_write"] is True
+    assert update["legacy_multi_injection_allowed"] is False
+    geometry = definition["attention_geometry"]
+    assert geometry["relation_source"] == "direct_qk"
+    assert geometry["attention_module_names"] == list(
+        FROZEN_SD35_ATTENTION_MODULE_NAMES
     )
-    assert (
-        definition["local_geometry"]["constant_rank_condition_verified"]
-        is False
-    )
+    assert geometry["jacobian_null_space_allowed"] is False
+    assert geometry["jvp_vjp_allowed"] is False
+    assert geometry["psd_cg_allowed"] is False
+    detection = definition["blind_detection"]
+    assert detection["templates"] == "unmasked_formal_lf_and_hf_tail"
+    assert detection["geometry_score_can_directly_decide_positive"] is False
     assert semantic_conditioned_latent_method_definition_digest() == (
         EXPECTED_METHOD_DEFINITION_DIGEST
     )
 
 
 @pytest.mark.constraint
-def test_method_documents_define_local_tangent_constructive_protocol() -> None:
-    """无状态规范必须排除局部切空间方法，状态差距单独登记。"""
+def test_method_documents_define_formal_content_dual_chain() -> None:
+    """两份无状态规范必须描述同一正式单写回内容双链。"""
 
     method_text = METHOD_DOCUMENT.read_text(encoding="utf-8")
     primitive_text = PRIMITIVE_DOCUMENT.read_text(encoding="utf-8")
-    construction_text = CONSTRUCTION_DOCUMENT.read_text(encoding="utf-8")
-
     assert "唯一算法原语权威来源" in primitive_text
-    assert "不定义方法数学语义" in primitive_text
-    assert "716维特征水平集及其一阶局部切空间解释" in primitive_text
-    assert "Jacobian Null Space、完整 JVP/VJP 和 PSD-CG" in primitive_text
-    assert "项目构建状态的唯一有状态来源" in construction_text
-    assert "正式运行仍执行716维特征" in construction_text
+    assert "callback 索引10" in primitive_text
+    assert "索引9只保存" in primitive_text
+    assert "不得调用 JVP/VJP" in primitive_text
+    assert "仅图像检测" in method_text
+    assert "共同回溯" in method_text
     assert "GitNexus 影响面" not in method_text
-    assert "\\arg\\max" not in primitive_text
-    assert "\\Delta J" not in primitive_text
-
-
-@pytest.mark.constraint
-def test_field_registry_uses_numerical_basis_and_method_definition() -> None:
-    """字段登记不得把数值 Null Space 基底误称为流形维度."""
-
-    text = FIELD_REGISTRY.read_text(encoding="utf-8")
-
-    assert "| basis_rank |" in text
-    assert "| method_definition |" in text
-    assert "| method_definition_digest |" in text
-    assert "| manifold_dimension |" not in text
 
 
 @pytest.mark.constraint
 def test_runtime_config_identity_binds_method_definition() -> None:
-    """单次科学运行身份必须绑定冻结的方法语义摘要."""
+    """单次科学运行身份必须绑定当前正式方法摘要。"""
 
     payload = semantic_watermark_runtime_config_payload(
         SemanticWatermarkRuntimeConfig()
     )
-
     assert payload["method_definition"] == (
         semantic_conditioned_latent_method_definition()
     )
@@ -526,7 +103,7 @@ def test_runtime_config_identity_binds_method_definition() -> None:
 
 @pytest.mark.constraint
 def test_attention_alignment_gate_has_no_core_fallback_defaults() -> None:
-    """核心检测和配准 API 必须要求调用方显式提供结构门禁."""
+    """核心检测和配准 API 必须要求调用方显式提供结构门禁。"""
 
     signature = inspect.signature(recover_attention_affine_alignment)
     for parameter_name in (
@@ -534,10 +111,7 @@ def test_attention_alignment_gate_has_no_core_fallback_defaults() -> None:
         "residual_threshold",
         "minimum_inlier_ratio",
     ):
-        assert (
-            signature.parameters[parameter_name].default
-            is inspect.Parameter.empty
-        )
+        assert signature.parameters[parameter_name].default is inspect.Parameter.empty
     for field_name in (
         "attention_anchor_count",
         "attention_residual_threshold",
@@ -550,15 +124,23 @@ def test_attention_alignment_gate_has_no_core_fallback_defaults() -> None:
 
 @pytest.mark.constraint
 def test_low_frequency_carrier_has_no_core_fallback_defaults() -> None:
-    """LF 构造和检测配置必须要求调用方显式提供完整协议."""
+    """正式 LF 构造与检测配置必须显式接收完整协议。"""
 
     signature = inspect.signature(build_low_frequency_template)
-    assert (
-        signature.parameters["low_frequency_config"].default
-        is inspect.Parameter.empty
-    )
-    field = ImageOnlyMeasurementConfig.__dataclass_fields__[
-        "low_frequency_config"
+    assert list(signature.parameters) == [
+        "reference_latent",
+        "key_material",
+        "model_identity_digest",
+        "prg_version",
     ]
+    assert all(
+        parameter.default is inspect.Parameter.empty
+        for parameter in signature.parameters.values()
+    )
+    assert (
+        signature.parameters["prg_version"].kind
+        is inspect.Parameter.KEYWORD_ONLY
+    )
+    field = ImageOnlyMeasurementConfig.__dataclass_fields__["low_frequency_config"]
     assert field.default is MISSING
     assert field.default_factory is MISSING

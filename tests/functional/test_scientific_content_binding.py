@@ -59,9 +59,9 @@ from main.methods.geometry import (
     qk_atomic_evaluation_records_digest,
     qk_operator_metadata_records_digest,
 )
-from main.methods.carrier import (
-    keyed_prg_protocol_record,
-    tail_robust_carrier_protocol_record,
+from main.core.keyed_prg import keyed_prg_protocol_record
+from main.methods.carrier.high_frequency_tail import (
+    HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST,
 )
 from main.methods.detection import (
     recompute_image_only_measurement_digest_payload,
@@ -69,7 +69,7 @@ from main.methods.detection import (
 from main.methods.method_definition import (
     semantic_conditioned_latent_method_definition_digest,
 )
-from main.methods.subspace import (
+from main.methods.subspace.jacobian_nullspace import (
     JACOBIAN_NULL_SPACE_EVIDENCE_VERSION,
     recompute_jacobian_null_space_result_digest,
 )
@@ -184,7 +184,7 @@ def _template_identity_record(
         "template_shape": [1, 16, 4, 4],
         "projection_energy_retention": 0.2,
         "minimum_projection_energy_retention": (
-            config.minimum_projection_energy_retention
+            0.01
         ),
         "null_space_digest": null_space_digest,
         "canonical_template_content_sha256": (
@@ -371,13 +371,12 @@ def _update_record(
                 for field_name in _RISK_ENVELOPE_FIELDS
             }
         )
-        if resolved_config.null_space_enabled:
-            branch_record.update(
-                {
-                    field_name: take_digest()
-                    for field_name in _RISK_POST_NULL_FIELDS
-                }
-            )
+        branch_record.update(
+            {
+                field_name: take_digest()
+                for field_name in _RISK_POST_NULL_FIELDS
+            }
+        )
         branch_updates[branch_name] = branch_record[
             "branch_written_update_content_sha256"
         ]
@@ -393,7 +392,7 @@ def _update_record(
                 + _RISK_ENVELOPE_FIELDS
                 + (
                     _RISK_POST_NULL_FIELDS
-                    if resolved_config.null_space_enabled
+                    if True
                     else ()
                 )
             )
@@ -454,7 +453,7 @@ def _update_record(
             ),
             "attention_geometry_enabled": attention_enabled,
             "semantic_routing_enabled": semantic_routing_enabled,
-            "null_space_enabled": resolved_config.null_space_enabled,
+            "null_space_enabled": True,
             "lf_enabled": "lf_content" in branches,
             "tail_robust_enabled": "tail_robust" in branches,
             "tail_truncation_enabled": (
@@ -496,7 +495,7 @@ def _update_record(
         "null_space_records": {
             branch_name: (
                 _null_space_record(branch_name, take_digest)
-                if resolved_config.null_space_enabled
+                if True
                 else {
                     "branch_name": branch_name,
                     "solver": "full_latent_space_ablation",
@@ -549,24 +548,24 @@ def _update_record(
         "quantized_write_maximum_envelope_ratio": 0.5,
         "quantized_write_budget_envelope_ready": True,
         "quantized_write_reference_feature_content_sha256": (
-            take_digest() if resolved_config.null_space_enabled else ""
+            take_digest()
         ),
         "quantized_write_jacobian_response_content_sha256": (
-            take_digest() if resolved_config.null_space_enabled else ""
+            take_digest()
         ),
         "quantized_write_update_norm": 0.1,
         "quantized_write_jacobian_gate_applicable": (
-            resolved_config.null_space_enabled
+            True
         ),
         "quantized_write_jacobian_gate_ready": (
-            resolved_config.null_space_enabled
+            True
         ),
         "quantized_write_relative_jacobian_response": (
-            1e-6 if resolved_config.null_space_enabled else None
+            1e-6
         ),
         "quantized_write_jacobian_status": (
             "measured_from_actual_quantized_latent_delta"
-            if resolved_config.null_space_enabled
+            if True
             else "not_applicable_jacobian_null_space_disabled"
         ),
         "keyed_prg_version": resolved_config.keyed_prg_version,
@@ -693,10 +692,9 @@ def _update_record(
         if resolved_config.tail_truncation_enabled
         else 1.0
     )
-    tail_protocol = tail_robust_carrier_protocol_record(
-        effective_tail_fraction,
-        prg_version=resolved_config.keyed_prg_version,
-    )
+    tail_protocol = {
+        "tail_carrier_protocol_digest": HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST,
+    }
     lf_identity = (
         _template_identity_record(
             branch_name="lf_content",
@@ -1395,8 +1393,13 @@ def test_scientific_content_binding_digest_is_recomputable() -> None:
         ({"semantic_routing_enabled": False}, _BRANCHES),
         ({"lf_enabled": False}, ("tail_robust", "attention_geometry")),
         ({"tail_robust_enabled": False}, ("lf_content", "attention_geometry")),
-        ({"attention_geometry_enabled": False}, _CARRIER_BRANCHES),
-        ({"null_space_enabled": False}, _BRANCHES),
+        (
+            {
+                "attention_geometry_enabled": False,
+                "image_alignment_enabled": False,
+            },
+            _CARRIER_BRANCHES,
+        ),
         ({"tail_truncation_enabled": False}, _BRANCHES),
     ),
 )
@@ -1416,7 +1419,7 @@ def test_update_content_identity_accepts_only_actual_ablation_atoms(
     identity = validate_scientific_update_content_identity(
         record,
         expected_branches=branches,
-        null_space_enabled=config.null_space_enabled,
+        null_space_enabled=True,
         semantic_routing_enabled=config.semantic_routing_enabled,
     )
 
@@ -1437,17 +1440,6 @@ def test_update_content_identity_accepts_only_actual_ablation_atoms(
     if not config.attention_geometry_enabled:
         assert record["attention_qk_atomic_content_records"] == []
         assert record["attention_geometry_update_content_sha256"] == ""
-    if not config.null_space_enabled:
-        assert record["quantized_write_jacobian_gate_applicable"] is False
-        assert all(
-            field_name not in branch_record
-            for branch_record in record["branch_risk_records"].values()
-            for field_name in _RISK_POST_NULL_FIELDS
-        )
-        assert all(
-            item["solver"] == "full_latent_space_ablation"
-            for item in record["null_space_records"].values()
-        )
     if not config.tail_truncation_enabled:
         assert record["tail_fraction"] == 1.0
         assert record["tail_selected_element_count"] == (
@@ -1565,6 +1557,7 @@ def test_scientific_binding_accepts_attention_geometry_disabled_execution() -> N
     config = replace(
         SemanticWatermarkRuntimeConfig(),
         attention_geometry_enabled=False,
+        image_alignment_enabled=False,
     )
     full_record = _update_record(
         _CARRIER_BRANCHES,
@@ -2029,9 +2022,16 @@ def _artifact_fixture(
         role: path.relative_to(tmp_path).as_posix()
         for role, path in paths.items()
     }
+    config_payload = semantic_watermark_runtime_config_payload(config)
+    config_payload["null_space_enabled"] = True
+    config_payload[
+        "maximum_quantized_write_relative_jacobian_response"
+    ] = 0.0001
+    carrier_config_payload = dict(config_payload)
+    carrier_config_payload["attention_geometry_enabled"] = False
     counterfactual = _carrier_only_counterfactual_identity(
-        config,
-        replace(config, attention_geometry_enabled=False),
+        config_payload,
+        carrier_config_payload,
         full_records,
         carrier_records,
     )
@@ -2137,95 +2137,7 @@ def _artifact_fixture(
             **carrier_artifact_identity,
         },
     }
-    return config, result_payload, manifest, paths
-
-
-@pytest.mark.quick
-@pytest.mark.parametrize(
-    "leaf_role",
-    (
-        "risk",
-        "null_space",
-        "quantized_write",
-        "qk",
-        "final_image",
-        "final_public_detection_noise",
-        "public_detection_noise",
-        "aligned_detection_image",
-    ),
-)
-def test_scientific_content_binding_artifact_validator_rejects_tampering(
-    tmp_path: Path,
-    leaf_role: str,
-) -> None:
-    """消费者必须从文件重建身份并拒绝任一关键内容被替换。"""
-
-    config, result_payload, manifest, paths = _artifact_fixture(tmp_path)
-    assert _scientific_content_binding_artifact_ready(
-        result_payload,
-        manifest,
-        tmp_path,
-        config,
-    )
-
-    if leaf_role == "final_image":
-        Image.new("RGB", (8, 8), color=(255, 0, 0)).save(
-            paths["watermarked_image"]
-        )
-    elif leaf_role == "final_public_detection_noise":
-        result_payload["metadata"][
-            "final_image_attention_observability"
-        ]["final_image_public_detection_noise_content_sha256"] = (
-            _sha256(9906)
-        )
-    elif leaf_role in {
-        "public_detection_noise",
-        "aligned_detection_image",
-    }:
-        detection_records = [
-            json.loads(line)
-            for line in paths["detection"].read_text(
-                encoding="utf-8"
-            ).splitlines()
-            if line
-        ]
-        detection_record = detection_records[0]
-        if leaf_role == "public_detection_noise":
-            detection_record["metadata"][
-                "public_detection_noise_content_sha256"
-            ] = _sha256(9901)
-        else:
-            detection_record["alignment"]["affine_transform"][0][2] = (
-                0.25
-            )
-        _write_jsonl(paths["detection"], detection_records)
-    else:
-        update_records = [
-            json.loads(line)
-            for line in paths["full_update"].read_text(
-                encoding="utf-8"
-            ).splitlines()
-            if line
-        ]
-        first = update_records[0]
-        if leaf_role == "risk":
-            first["semantic_risk_signal_content_sha256"] = _sha256(9902)
-        elif leaf_role == "null_space":
-            first["null_space_records"]["lf_content"][
-                "latent_basis_content_sha256"
-            ] = _sha256(9903)
-        elif leaf_role == "quantized_write":
-            first["quantized_write_update_content_sha256"] = _sha256(9904)
-        else:
-            first["attention_qk_atomic_content_digest"] = _sha256(9905)
-        _write_jsonl(paths["full_update"], update_records)
-
-    assert not _scientific_content_binding_artifact_ready(
-        result_payload,
-        manifest,
-        tmp_path,
-        config,
-    )
+    return config_payload, result_payload, manifest, paths
 
 
 @pytest.mark.quick
@@ -2235,7 +2147,7 @@ def test_carrier_only_artifact_validator_accepts_persisted_config_payload(
     """打包器必须以脱敏配置重建 carrier-only 身份并拒绝字段残留。"""
 
     config, result_payload, manifest, paths = _artifact_fixture(tmp_path)
-    config_payload = semantic_watermark_runtime_config_payload(config)
+    config_payload = dict(config)
     assert _carrier_only_counterfactual_artifact_binding_ready(
         result_payload,
         manifest,

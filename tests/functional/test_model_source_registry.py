@@ -69,9 +69,7 @@ def test_primary_model_config_matches_immutable_source_registry() -> None:
         method_config.vision_torch_dtype,
     ) == (1.5305, 0.0609, "float16", "float32")
     assert method_config.public_detection_schedule_index == 7
-    assert method_config.public_detection_schedule_index == (
-        method_config.injection_step_indices[0] + 1
-    )
+    assert method_config.injection_step_indices == (10,)
     assert method_config.public_detection_noise_prg_protocol == (
         "sha256_counter_normal_icdf_table20_float32"
     )
@@ -106,8 +104,6 @@ def test_primary_model_config_matches_immutable_source_registry() -> None:
         assert runtime_value == expected_value
     assert config.inference_steps == method_config.inference_steps
     assert config.injection_step_indices == method_config.injection_step_indices
-    assert config.candidate_count == method_config.jacobian_candidate_count
-    assert config.null_rank == method_config.null_space_rank
     assert config.attention_module_names == (
         "transformer_blocks.0.attn",
         "transformer_blocks.23.attn",
@@ -174,17 +170,6 @@ def test_primary_model_config_matches_immutable_source_registry() -> None:
         "budget_ceiling": 1.0,
         "budget_gain": 0.70,
     }
-    assert (
-        method_config.null_space_numerical_epsilon,
-        method_config.maximum_qr_condition_number,
-        method_config.maximum_orthogonality_error,
-        method_config.qr_reference_solve_protocol,
-    ) == (
-        1e-12,
-        1e6,
-        1e-5,
-        "right_upper_triangular_solve_without_explicit_inverse",
-    )
     assert (
         method_config.lf_kernel_size,
         method_config.lf_stride,
@@ -293,7 +278,7 @@ def test_dataset_runtime_rejects_alignment_gate_environment_drift(
 
 @pytest.mark.quick
 def test_paper_method_settings_include_frozen_risk_and_write_protocols() -> None:
-    """三级论文配置必须共享完整风险、Null Space 和量化合成常量。"""
+    """三级论文配置必须共享当前风险与单次量化合成常量。"""
 
     settings = load_formal_method_runtime_config(".").paper_method_settings()
 
@@ -303,9 +288,6 @@ def test_paper_method_settings_include_frozen_risk_and_write_protocols() -> None
         "per_sample_hw_repeat_channels_nchw"
     )
     assert settings["lf_content_risk_config"]["budget_ceiling"] == 1.0
-    assert settings["qr_reference_solve_protocol"] == (
-        "right_upper_triangular_solve_without_explicit_inverse"
-    )
     assert settings["quantized_branch_composition_protocol"] == (
         "float32_ordered_branch_sum_add_float32_latent_single_cast"
     )

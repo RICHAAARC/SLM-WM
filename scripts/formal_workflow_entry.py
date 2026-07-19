@@ -190,6 +190,10 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             result_path=arguments.result_path,
             known_answer=arguments.known_answer,
             qualification_output_root=arguments.qualification_output_root,
+            frozen_evidence_protocol=arguments.frozen_evidence_protocol,
+            reference_gradient=arguments.reference_gradient,
+            reference_response=arguments.reference_response,
+            reference_sensitivity=arguments.reference_sensitivity,
             registered_budget=(arguments.registered_budget or None),
         )
         workflow_name = QUALIFICATION_WORKFLOW_NAME
@@ -311,6 +315,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="configs/keyed_prg_cross_platform_known_answer.json",
     )
     parser.add_argument("--registered-budget", default="")
+    parser.add_argument("--frozen-evidence-protocol", default="")
     parser.add_argument(
         "--qualification-output-root",
         default="outputs/gpu_method_qualification",
@@ -349,8 +354,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         ):
             raise ValueError("单 repeat 证据入口缺少 package 搜索目录或 repeat ID")
-        if arguments.operation == "qualification" and not arguments.prompt_id:
-            raise ValueError("GPU 方法资格化入口必须提供 Prompt ID")
+        if arguments.operation == "qualification" and (
+            not arguments.prompt_id
+            or not arguments.frozen_evidence_protocol
+            or any(
+                value is None
+                for value in (
+                    arguments.reference_gradient,
+                    arguments.reference_response,
+                    arguments.reference_sensitivity,
+                )
+            )
+        ):
+            raise ValueError(
+                "GPU 方法资格化入口必须提供 Prompt、冻结协议和三个 reference"
+            )
         if arguments.operation == "content_runtime_smoke" and (
             not arguments.prompt_id
             or any(

@@ -23,6 +23,11 @@ from experiments.protocol.formal_randomization import formal_randomization_repea
 from experiments.protocol.gpu_method_qualification import (
     build_gpu_method_qualification_report,
 )
+from experiments.protocol.image_only_evidence import (
+    FrozenEvidenceProtocol,
+    apply_frozen_evidence_protocol,
+    validate_frozen_evidence_protocol_integrity,
+)
 from experiments.protocol.gpu_method_qualification_schema import (
     GPU_METHOD_QUALIFICATION_INVOCATION_RESULT_SCHEMA,
 )
@@ -37,6 +42,7 @@ from experiments.protocol.prompts import (
 from experiments.protocol.splits import apply_split_assignments
 from experiments.runners.image_only_dataset_workload import build_method_config
 from experiments.runners.semantic_watermark_runtime import (
+    _build_image_only_measurement_config,
     semantic_watermark_runtime_config_digest,
     run_content_runtime_smoke,
     write_semantic_watermark_runtime_outputs,
@@ -50,6 +56,7 @@ from experiments.runtime.scientific_unit_provenance import (
     validate_scientific_unit_provenance,
 )
 from main.core.digest import build_stable_digest
+from main.methods.detection import image_only_measurement_config_identity_record
 
 
 DEFAULT_KNOWN_ANSWER_PATH = Path(
@@ -95,6 +102,67 @@ def _read_jsonl(path: Path) -> tuple[dict[str, Any], ...]:
     return tuple(rows)
 
 
+def _write_jsonl(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
+    """写出由正式冻结协议物化的检测记录。"""
+
+    path.write_text(
+        "".join(
+            json.dumps(dict(row), ensure_ascii=False, sort_keys=True) + "\n"
+            for row in rows
+        ),
+        encoding="utf-8",
+    )
+
+
+def _load_frozen_evidence_protocol(
+    root: Path,
+    requested_path: str | None,
+) -> tuple[FrozenEvidenceProtocol, Path]:
+    """在任何模型调用前读取并复验完整冻结判定协议。"""
+
+    if type(requested_path) is not str or not requested_path:
+        raise ValueError("正式GPU资格化必须显式提供--frozen-evidence-protocol")
+    candidate = Path(requested_path).expanduser()
+    path = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+    try:
+        protocol = FrozenEvidenceProtocol(**_read_json(path))
+        validate_frozen_evidence_protocol_integrity(protocol)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("冻结 evidence protocol 缺失或完整性无效") from exc
+    return protocol, path
+
+
+def _require_frozen_protocol_matches_config(
+    protocol: FrozenEvidenceProtocol,
+    config: Any,
+) -> None:
+    """在模型运行前绑定冻结阈值与本次正式检测配置。"""
+
+    measurement_identity = image_only_measurement_config_identity_record(
+        _build_image_only_measurement_config(config),
+        attention_geometry_enabled=config.attention_geometry_enabled,
+        image_alignment_enabled=config.image_alignment_enabled,
+    )
+    expected = {
+        "image_only_measurement_config_digest": measurement_identity[
+            "image_only_measurement_config_digest"
+        ],
+        "lf_carrier_protocol_digest": measurement_identity[
+            "lf_carrier_protocol_digest"
+        ],
+        "tail_carrier_protocol_digest": measurement_identity[
+            "tail_carrier_protocol_digest"
+        ],
+        "lf_weight": measurement_identity["lf_weight"],
+        "tail_robust_weight": measurement_identity["tail_robust_weight"],
+        "tail_fraction": measurement_identity["tail_fraction"],
+        "attention_geometry_enabled": config.attention_geometry_enabled,
+        "image_alignment_enabled": config.image_alignment_enabled,
+    }
+    if any(getattr(protocol, name) != value for name, value in expected.items()):
+        raise ValueError("冻结 evidence protocol 与本次正式检测配置不一致")
+
+
 def _resolve_under_outputs(root: Path, path: str | Path) -> Path:
     """把资格化持久化目录限制在仓库 outputs/ 下."""
 
@@ -129,107 +197,13 @@ def _registered_prompt(root: Path, paper_run_name: str, prompt_id: str) -> Any:
     return matches[0]
 
 
-def _evaluate_torch_func_compatibility(
-    torch_module: Any,
-    device_name: str,
-) -> dict[str, Any]:
-    """在小张量上验证正式方法依赖的 JVP、VJP 和异步断言组合.
-
-    该检查只验证目标 PyTorch 运行时是否支持项目已经采用的算子组合, 不替代
-    真实716维 VAE 与 CLIP 计算图资格化. 使用小张量可以在加载 SD3.5 前快速
-    发现依赖版本或设备后端不兼容, 避免为确定性兼容错误消耗模型加载时间和显存.
-    """
-
-    assert_async = getattr(torch_module, "_assert_async", None)
-    if not callable(assert_async):
-        raise RuntimeError("正式 PyTorch 运行时缺少 torch._assert_async")
-    if not hasattr(torch_module, "func"):
-        raise RuntimeError("正式 PyTorch 运行时缺少 torch.func")
-
-    primal = torch_module.tensor(
-        [0.25, -0.5, 0.75, 1.25],
-        dtype=torch_module.float32,
-        device=device_name,
-    )
-    tangent = torch_module.tensor(
-        [1.0, -0.25, 0.5, -0.75],
-        dtype=torch_module.float32,
-        device=device_name,
-    )
-
-    def feature(candidate: Any) -> Any:
-        """构造同时经过异步有限值断言的可微小型特征向量."""
-
-        assert_async(
-            torch_module.isfinite(candidate).all(),
-            "torch.func 兼容检查输入必须为有限值",
-        )
-        return torch_module.stack(
-            (
-                candidate.square().sum(),
-                torch_module.sin(candidate).sum(),
-            )
-        )
-
-    output, jvp_function = torch_module.func.linearize(feature, primal)
-    jvp = jvp_function(tangent)
-    cotangent = torch_module.tensor(
-        [0.75, -0.25],
-        dtype=torch_module.float32,
-        device=device_name,
-    )
-    _, vjp_function = torch_module.func.vjp(feature, primal)
-    (vjp,) = vjp_function(cotangent)
-    if str(primal.device).startswith("cuda"):
-        torch_module.cuda.synchronize(primal.device)
-
-    finite_ready = bool(
-        torch_module.isfinite(
-            torch_module.cat((output.reshape(-1), jvp.reshape(-1), vjp.reshape(-1)))
-        )
-        .all()
-        .detach()
-        .cpu()
-        .item()
-    )
-    adjoint_absolute_error = float(
-        (
-            (jvp * cotangent).sum() - (tangent * vjp).sum()
-        )
-        .abs()
-        .detach()
-        .cpu()
-        .item()
-    )
-    if not finite_ready or adjoint_absolute_error > 1e-5:
-        raise RuntimeError("正式 PyTorch JVP/VJP 兼容检查未满足有限值或伴随一致性")
-
-    report = {
-        "report_schema": "torch_func_transform_compatibility_v1",
-        "schema_version": 1,
-        "torch_version": str(torch_module.__version__),
-        "torch_cuda_version": str(getattr(torch_module.version, "cuda", None)),
-        "execution_device_name": str(primal.device),
-        "assert_operator": "torch._assert_async",
-        "forward_transform_operator": "torch.func.linearize",
-        "reverse_transform_operator": "torch.func.vjp",
-        "adjoint_absolute_error": adjoint_absolute_error,
-        "operator_compatibility_ready": True,
-        "supports_paper_claim": False,
-    }
-    return {
-        **report,
-        "compatibility_report_digest": build_stable_digest(report),
-    }
-
-
 def _qualification_binding(
     *,
     root: Path,
     runtime_result: Mapping[str, Any],
     config: Any,
     prompt_record: Any,
-    torch_func_compatibility: Mapping[str, Any],
+    reference_identity: Mapping[str, Any],
 ) -> dict[str, Any]:
     """绑定 Git、依赖锁、模型 revision、Prompt 和真实运行文件摘要."""
 
@@ -282,7 +256,7 @@ def _qualification_binding(
                 semantic_watermark_runtime_config_digest(config)
             ),
         },
-        "torch_func_compatibility": dict(torch_func_compatibility),
+        "content_routing_reference_identity": dict(reference_identity),
         "runtime_artifact_paths": runtime_paths,
         "runtime_artifact_sha256": artifact_sha256,
     }
@@ -307,6 +281,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_KNOWN_ANSWER_PATH),
     )
     parser.add_argument("--registered-budget")
+    parser.add_argument("--frozen-evidence-protocol")
     parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT))
     parser.add_argument("--content-runtime-smoke", action="store_true")
     parser.add_argument("--reference-gradient", type=float)
@@ -440,11 +415,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         diffusion_attacks_enabled=False,
         output_dir=(output_root / "runtime_runs").relative_to(root).as_posix(),
     )
+    key_material = os.environ.get("SLM_WM_KEY_MATERIAL")
+    if type(key_material) is not str or not key_material:
+        raise RuntimeError("formal runtime requires SLM_WM_KEY_MATERIAL")
+    config = replace(config, key_material=key_material)
     if args.content_runtime_smoke:
-        key_material = os.environ.get("SLM_WM_KEY_MATERIAL")
-        if type(key_material) is not str or not key_material:
-            raise RuntimeError("content runtime smoke requires SLM_WM_KEY_MATERIAL")
-        config = replace(config, key_material=key_material)
+        if args.frozen_evidence_protocol is not None:
+            raise ValueError("content runtime smoke 必须保持threshold-free")
+        frozen_evidence_protocol = None
+        frozen_evidence_protocol_path = None
+    else:
+        (
+            frozen_evidence_protocol,
+            frozen_evidence_protocol_path,
+        ) = _load_frozen_evidence_protocol(
+            root,
+            args.frozen_evidence_protocol,
+        )
+        _require_frozen_protocol_matches_config(
+            frozen_evidence_protocol,
+            config,
+        )
     import torch
 
     if not torch.cuda.is_available() or not config.device_name.startswith("cuda"):
@@ -462,25 +453,59 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(json.dumps(invocation, ensure_ascii=False, sort_keys=True))
         return 0
-    torch_func_compatibility = _evaluate_torch_func_compatibility(
-        torch,
-        config.device_name,
-    )
+    references, reference_identity = _explicit_smoke_references(args)
     torch.cuda.reset_peak_memory_stats()
     started_at = time.perf_counter()
-    result = write_semantic_watermark_runtime_outputs(config, root=root)
+    result = write_semantic_watermark_runtime_outputs(
+        config,
+        root=root,
+        references=references,
+        verified_formal_execution_lock=execution_lock,
+    )
     wall_time_seconds = time.perf_counter() - started_at
     peak_gpu_memory_bytes = int(torch.cuda.max_memory_allocated())
     runtime_result = result.to_dict()
     update_records = _read_jsonl(root / result.update_record_path)
-    detection_records = _read_jsonl(root / result.detection_record_path)
+    raw_detection_records = _read_jsonl(root / result.detection_record_path)
+    if frozen_evidence_protocol is None or frozen_evidence_protocol_path is None:
+        raise RuntimeError("正式GPU资格化没有冻结 evidence protocol")
+    detection_records = apply_frozen_evidence_protocol(
+        raw_detection_records,
+        frozen_evidence_protocol,
+    )
+    report_dir = output_root / result.run_id
+    report_dir.mkdir(parents=True, exist_ok=False)
+    formal_detection_path = report_dir / "formal_image_only_detection_records.jsonl"
+    _write_jsonl(formal_detection_path, detection_records)
     binding = _qualification_binding(
         root=root,
         runtime_result=runtime_result,
         config=config,
         prompt_record=prompt_record,
-        torch_func_compatibility=torch_func_compatibility,
+        reference_identity=reference_identity,
     )
+    binding_payload = {
+        field_name: value
+        for field_name, value in binding.items()
+        if field_name != "qualification_binding_digest"
+    }
+    binding_payload["frozen_evidence_protocol_identity"] = {
+        "source_path": frozen_evidence_protocol_path.as_posix(),
+        "source_file_sha256": _file_sha256(frozen_evidence_protocol_path),
+        "threshold_digest": frozen_evidence_protocol.threshold_digest,
+        "image_only_measurement_config_digest": (
+            frozen_evidence_protocol.image_only_measurement_config_digest
+        ),
+    }
+    binding_payload["formal_detection_records_identity"] = {
+        "path": formal_detection_path.relative_to(root).as_posix(),
+        "file_sha256": _file_sha256(formal_detection_path),
+        "record_count": len(detection_records),
+    }
+    binding = {
+        **binding_payload,
+        "qualification_binding_digest": build_stable_digest(binding_payload),
+    }
     probe_method_only_gpu_hours = (
         wall_time_seconds
         * RUN_EXPECTED_PROMPT_COUNTS["probe_paper"]
@@ -510,9 +535,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         resource_observation=resource_observation,
         registered_budget=registered_budget,
         qualification_binding=binding,
+        frozen_evidence_protocol=frozen_evidence_protocol,
     )
-    report_dir = output_root / result.run_id
-    report_dir.mkdir(parents=True, exist_ok=False)
     report_path = report_dir / "gpu_method_qualification_report.json"
     report_path.write_text(
         json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -532,6 +556,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             "gpu_operator_preflight_ready"
         ],
         "gpu_resource_budget_ready": report["gpu_resource_budget_ready"],
+        "frozen_threshold_digest": frozen_evidence_protocol.threshold_digest,
+        "formal_detection_record_path": formal_detection_path.relative_to(
+            root
+        ).as_posix(),
+        "formal_detection_record_sha256": _file_sha256(formal_detection_path),
         "supports_paper_claim": False,
     }
     print(json.dumps(invocation_result, ensure_ascii=False, sort_keys=True))

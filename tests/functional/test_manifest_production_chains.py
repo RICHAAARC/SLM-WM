@@ -57,6 +57,9 @@ from experiments.protocol.formal_randomization import (
     validate_formal_prompt_randomization_identity,
 )
 from experiments.protocol.splits import apply_split_assignments
+from experiments.protocol.content_routing_reference_quantile import (
+    ContentRoutingReferenceScalars,
+)
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
     build_semantic_watermark_run_id,
@@ -451,6 +454,11 @@ def test_runtime_rerun_writer_package_and_closure_share_manifest_config(
         target_fpr=TARGET_FPR,
         paper_run_name=PAPER_RUN_NAME,
         root=tmp_path,
+        content_routing_references=ContentRoutingReferenceScalars(
+            reference_gradient=1.0,
+            reference_response=0.5,
+            reference_sensitivity=0.25,
+        ),
     )
     output_dir = (
         tmp_path / "outputs/formal_mechanism_ablation" / PAPER_RUN_NAME

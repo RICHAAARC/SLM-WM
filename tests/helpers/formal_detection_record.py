@@ -13,7 +13,9 @@ from experiments.runners.image_only_dataset_runtime import (
     formal_low_frequency_carrier_protocol_record,
 )
 from main.core.digest import build_stable_digest
-from main.methods.carrier import tail_robust_carrier_protocol_record
+from main.methods.carrier.high_frequency_tail import (
+    HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST,
+)
 from main.methods.detection import (
     ImageOnlyMeasurementConfig,
     image_only_measurement_config_identity_record,
@@ -155,6 +157,7 @@ def _synthetic_alignment_record(
 def bind_formal_detection_record(
     record: Mapping[str, Any],
     *,
+    method_role: str = "full_dual_chain",
     lf_weight: float = _FORMAL_METHOD_CONFIG.lf_detection_score_weight,
     tail_robust_weight: float = (
         _FORMAL_METHOD_CONFIG.tail_robust_detection_score_weight
@@ -177,7 +180,7 @@ def bind_formal_detection_record(
             abs_tol=1e-12,
         )
         or type(tail_fraction) is not float
-        or not 0.0 < tail_fraction <= 1.0
+        or tail_fraction != _FORMAL_METHOD_CONFIG.tail_fraction
     ):
         raise ValueError("测试内容载体权重或 tail_fraction 无效")
     resolved = dict(record)
@@ -267,15 +270,9 @@ def bind_formal_detection_record(
         resolved["registration_confidence"] = None
         resolved["attention_sync_score"] = None
     supplied_content_score = float(resolved["content_score"])
-    lf_score = (
-        float(resolved.get("lf_score", supplied_content_score))
-        if lf_weight > 0.0
-        else 0.0
-    )
-    tail_score = (
-        float(resolved.get("tail_robust_score", supplied_content_score))
-        if tail_robust_weight > 0.0
-        else 0.0
+    lf_score = float(resolved.get("lf_score", supplied_content_score))
+    tail_score = float(
+        resolved.get("tail_robust_score", supplied_content_score)
     )
     content_score = lf_weight * lf_score + tail_robust_weight * tail_score
     aligned_score_value = resolved.get("aligned_content_score")
@@ -287,19 +284,13 @@ def bind_formal_detection_record(
     aligned_lf_score = (
         None
         if aligned_score is None
-        else (
-            float(resolved.get("aligned_lf_score", aligned_score))
-            if lf_weight > 0.0
-            else 0.0
-        )
+        else float(resolved.get("aligned_lf_score", aligned_score))
     )
     aligned_tail_score = (
         None
         if aligned_score is None
-        else (
-            float(resolved.get("aligned_tail_robust_score", aligned_score))
-            if tail_robust_weight > 0.0
-            else 0.0
+        else float(
+            resolved.get("aligned_tail_robust_score", aligned_score)
         )
     )
     aligned_score = (
@@ -323,31 +314,21 @@ def bind_formal_detection_record(
             _FORMAL_METHOD_CONFIG.attention_unstable_pair_weight,
         )
     )
-    lf_template_sha256 = (
-        str(
-            resolved.get(
-                "lf_template_content_sha256",
-                metadata.get("lf_template_content_sha256", "a" * 64),
-            )
+    lf_template_sha256 = str(
+        resolved.get(
+            "lf_template_content_sha256",
+            metadata.get("lf_template_content_sha256", "a" * 64),
         )
-        if lf_weight > 0.0
-        else ""
     )
     protocol_digest = _LF_PROTOCOL["lf_carrier_protocol_digest"]
-    tail_protocol = tail_robust_carrier_protocol_record(
-        tail_fraction,
-        prg_version=_FORMAL_METHOD_CONFIG.keyed_prg_version,
-    )
-    tail_protocol_digest = tail_protocol["tail_carrier_protocol_digest"]
-    tail_template_sha256 = (
-        str(
-            resolved.get(
-                "tail_template_content_sha256",
-                metadata.get("tail_template_content_sha256", "c" * 64),
-            )
+    if tail_fraction != _FORMAL_METHOD_CONFIG.tail_fraction:
+        raise ValueError("测试记录必须使用正式20%高频尾部比例")
+    tail_protocol_digest = HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST
+    tail_template_sha256 = str(
+        resolved.get(
+            "tail_template_content_sha256",
+            metadata.get("tail_template_content_sha256", "c" * 64),
         )
-        if tail_robust_weight > 0.0
-        else ""
     )
     tail_template_shape_value = resolved.get(
         "tail_template_shape",
@@ -362,20 +343,16 @@ def bind_formal_detection_record(
         )
     ):
         raise ValueError("测试 tail 模板形状必须是4维正整数序列")
-    tail_template_shape = (
-        list(tail_template_shape_value)
-        if tail_robust_weight > 0.0
-        else []
-    )
+    tail_template_shape = list(tail_template_shape_value)
     tail_template_element_count = (
         math.prod(tail_template_shape) if tail_template_shape else 0
     )
     tail_selected_element_count = (
-        math.ceil(tail_template_element_count * tail_fraction)
+        max(1, (tail_template_element_count + 4) // 5)
         if tail_template_element_count
         else 0
     )
-    tail_threshold = 1.0 if tail_robust_weight > 0.0 else 0.0
+    tail_threshold = 1.0
     tail_retained_fraction = (
         tail_selected_element_count / tail_template_element_count
         if tail_template_element_count
@@ -517,6 +494,7 @@ def bind_formal_detection_record(
         attention_stable_token_fraction=attention_stable_token_fraction,
         attention_unstable_pair_weight=attention_unstable_pair_weight,
         attention_relation_component_weights=tuple(component_weights),
+        method_role=method_role,
     )
     measurement_config_identity = image_only_measurement_config_identity_record(
         measurement_config,

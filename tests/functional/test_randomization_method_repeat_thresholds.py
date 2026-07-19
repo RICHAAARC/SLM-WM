@@ -1460,8 +1460,6 @@ def test_bridge_rejects_nine_runtime_records_with_method_setting_drift(
     ("field_name", "drift_value"),
     (
         ("injection_step_indices", [1, 2]),
-        ("candidate_count", 999),
-        ("null_rank", 1),
     ),
 )
 def test_bridge_rejects_nine_runtime_records_with_alias_drift(

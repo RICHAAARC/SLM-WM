@@ -99,6 +99,7 @@ def test_public_contract_is_frozen_and_exact() -> None:
     """公开类型、字段、签名和模块导出不得扩张。"""
 
     assert hf_tail_module.__all__ == [
+        "HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST",
         "HighFrequencyTailCarrierTemplate",
         "build_high_frequency_tail_template",
     ]

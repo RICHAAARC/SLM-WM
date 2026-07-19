@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from main.core.digest import (
     TENSOR_CONTENT_DIGEST_VERSION,
@@ -22,7 +22,8 @@ from main.core.keyed_prg import (
     keyed_prg_protocol_record,
     require_supported_keyed_prg_version,
 )
-from main.methods.subspace.jacobian_nullspace import JacobianNullSpaceResult
+if TYPE_CHECKING:
+    from main.methods.subspace.jacobian_nullspace import JacobianNullSpaceResult
 
 
 LOW_FREQUENCY_CARRIER_PROTOCOL_SCHEMA = (

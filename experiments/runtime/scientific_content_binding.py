@@ -27,9 +27,6 @@ from main.methods.geometry import (
     qk_operator_metadata_records_digest,
     qk_operator_metadata_records_ready,
 )
-from main.methods.subspace import (
-    recompute_jacobian_null_space_result_digest,
-)
 from main.methods.update_composition import (
     recompute_quantized_composition_evidence_digest,
 )
@@ -578,6 +575,11 @@ def _update_content_identity(
         != resolved.get("latent_content_sha256_after")
     ):
         raise ValueError("量化写回的前后 latent 身份与注入原子不一致")
+
+    if null_space_enabled:
+        from main.methods.subspace.jacobian_nullspace import (
+            recompute_jacobian_null_space_result_digest,
+        )
 
     null_space_records = _mapping(
         resolved.get("null_space_records"),

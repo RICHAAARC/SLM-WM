@@ -37,8 +37,8 @@ def test_build_index_names_every_registered_document_once() -> None:
 
 
 @pytest.mark.constraint
-def test_legacy_and_runtime_protocols_are_not_build_specifications() -> None:
-    """历史兼容记录和运行恢复协议不得与目标构建规范并列。"""
+def test_registry_points_to_current_build_specification() -> None:
+    """正式方法追踪不得继续把历史协议当作当前定义来源。"""
 
     assert not (BUILDS / "method_semantic_invariants.md").exists()
     assert not (BUILDS / "external_gpu_workflow_persistence.md").exists()
@@ -55,7 +55,9 @@ def test_legacy_and_runtime_protocols_are_not_build_specifications() -> None:
     pointers = {item["definition_pointer"] for item in registry["invariants"]}
     assert pointers
     assert all(
-        pointer.startswith("docs/legacy/method_semantic_invariants.md#")
+        pointer.startswith(
+            "docs/builds/method_mechanism_design_content_adaptive_dual_carrier_latent_watermark.md#"
+        )
         for pointer in pointers
     )
 

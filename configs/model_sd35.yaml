@@ -64,12 +64,6 @@ attention_geometry_risk_config:
   budget_floor: 0.05
   budget_ceiling: 1.0
   budget_gain: 0.70
-jacobian_candidate_count: 20
-null_space_rank: 4
-null_space_numerical_epsilon: 0.000000000001
-maximum_qr_condition_number: 1000000.0
-maximum_orthogonality_error: 0.00001
-qr_reference_solve_protocol: right_upper_triangular_solve_without_explicit_inverse
 lf_relative_strength: 0.0025
 tail_relative_strength: 0.0015
 attention_relative_strength: 0.0010
@@ -93,20 +87,15 @@ attention_backtracking_maximum_steps: 8
 minimum_final_image_attention_score_gain: 0.0001
 tail_fraction: 0.20
 keyed_prg_version: sha256_counter_normal_icdf_table20_float32
-minimum_projection_energy_retention: 0.01
-maximum_relative_response_residual: 0.0001
-maximum_quantized_write_relative_jacobian_response: 0.0001
 quantized_branch_composition_protocol: float32_ordered_branch_sum_add_float32_latent_single_cast
 quantized_branch_composition_order: [lf_content, tail_robust, attention_geometry]
 combined_budget_envelope_rule: sum_active_branch_envelopes
 quantized_budget_envelope_absolute_tolerance: 0.0
 quantized_budget_envelope_backtracking_factor: 0.5
 quantized_budget_envelope_backtracking_maximum_steps: 24
-null_space_cg_max_iterations: 64
-null_space_cg_relative_tolerance: 0.000001
 minimum_semantic_preservation_cosine: 0.995
 maximum_handcrafted_structure_feature_relative_drift: 0.02
-injection_step_indices: [6, 10, 14]
+injection_step_indices: [10]
 attention_operator_schedule_index: 7
 public_detection_schedule_index: 7
 public_detection_noise_prg_protocol: sha256_counter_normal_icdf_table20_float32

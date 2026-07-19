@@ -784,9 +784,10 @@ def test_ablation_runtime_aggregate_rebuild_fails_closed_on_drift(
         target.update(
             bind_formal_detection_record(
                 target,
+                method_role="lf_only_content",
                 lf_weight=1.0,
                 tail_robust_weight=0.0,
-                tail_fraction=1.0,
+                tail_fraction=0.20,
             )
         )
 

@@ -274,9 +274,10 @@ def test_calibration_rejects_mixed_low_frequency_carrier_identity() -> None:
     mixed_rows = list(_raw_measurements(rows[:3]))
     mixed_rows[1] = bind_formal_detection_record(
         mixed_rows[1],
+        method_role="lf_only_content",
         lf_weight=1.0,
         tail_robust_weight=0.0,
-        tail_fraction=1.0,
+        tail_fraction=0.20,
     )
 
     with pytest.raises(
@@ -338,9 +339,10 @@ def test_apply_frozen_protocol_rejects_low_frequency_record_drift() -> None:
     assert protocol.to_dict() == protocol_record
     drifted = bind_formal_detection_record(
         project_image_only_measurement_record(rows[3]),
+        method_role="lf_only_content",
         lf_weight=1.0,
         tail_robust_weight=0.0,
-        tail_fraction=1.0,
+        tail_fraction=0.20,
     )
 
     with pytest.raises(

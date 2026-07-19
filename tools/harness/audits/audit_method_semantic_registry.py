@@ -23,9 +23,9 @@ from tools.harness.lib.method_semantic_registry import (
 )
 
 
-EXPECTED_METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_definition"
+EXPECTED_METHOD_DEFINITION_SCHEMA = "slm_wm_content_dual_chain_definition_v1"
 EXPECTED_METHOD_DEFINITION_DIGEST = (
-    "f0c129f537b6acec36926d9a999f52ca68c749a4e3eb0cb7a25bfdd639948e4d"
+    "f2f69ad790dd1249063cca95733b890349cfdccbbef4ec22aa1df9fbe59cfcd7"
 )
 
 
@@ -36,10 +36,10 @@ def run_audit(root: str | Path) -> dict[str, Any]:
     checked_paths = [
         str(REGISTRY_RELATIVE_PATH),
         "configs/model_sd35.yaml",
-        "docs/legacy/method_semantic_invariants.md",
+        "docs/builds/method_mechanism_design_content_adaptive_dual_carrier_latent_watermark.md",
         "docs/field_registry.md",
         "main/methods/method_definition.py",
-        "main/methods/semantic/feature_protocol.py",
+        "experiments/runners/semantic_watermark_runtime.py",
     ]
     violations: list[dict[str, Any]] = []
     if METHOD_DEFINITION_SCHEMA != EXPECTED_METHOD_DEFINITION_SCHEMA:

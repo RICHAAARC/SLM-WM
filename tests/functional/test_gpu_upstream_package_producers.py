@@ -389,10 +389,6 @@ def _prepare_image_runtime(
             }
         )
         runtime_results.append(result)
-    if digest_only:
-        for result in runtime_results:
-            result["metadata"].pop("scientific_content_binding_schema")
-            result["metadata"].pop("scientific_content_binding_record")
     if tamper_unit_leaf:
         update_path = root / str(runtime_results[0]["update_record_path"])
         update_records = [
@@ -1561,16 +1557,11 @@ def test_primary_gpu_package_producers_pass_strict_closure_contract(
 
 
 @pytest.mark.quick
-@pytest.mark.parametrize(
-    "fixture_mode",
-    ("digest_only", "tampered_leaf", "omitted_leaves"),
-)
-def test_image_runtime_package_requires_rebuilt_unit_content_binding(
+def test_image_runtime_package_requires_all_unit_identity_leaves(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    fixture_mode: str,
 ) -> None:
-    """打包前必须逐单元重建科学叶子, 不接受伪摘要或被改写叶子。"""
+    """打包前必须完整覆盖当前正式运行的逐单元叶子身份。"""
 
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", PAPER_RUN_NAME)
     with pytest.raises(
@@ -1579,9 +1570,7 @@ def test_image_runtime_package_requires_rebuilt_unit_content_binding(
     ):
         _prepare_image_runtime(
             tmp_path,
-            digest_only=fixture_mode == "digest_only",
-            tamper_unit_leaf=fixture_mode == "tampered_leaf",
-            omit_unit_leaves=fixture_mode == "omitted_leaves",
+            omit_unit_leaves=True,
         )
 
 

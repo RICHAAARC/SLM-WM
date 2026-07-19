@@ -22,6 +22,7 @@ from main.methods.carrier.keyed_tensor import (
 
 
 __all__ = [
+    "HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST",
     "HighFrequencyTailCarrierTemplate",
     "build_high_frequency_tail_template",
 ]
@@ -161,6 +162,9 @@ def _high_pass_identity_digest() -> str:
     )
 
 
+HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST = _high_pass_identity_digest()
+
+
 @dataclass(frozen=True)
 class HighFrequencyTailCarrierTemplate:
     """保存正式 HF-tail 标准载体及其可重建身份。"""
@@ -220,7 +224,7 @@ def build_high_frequency_tail_template(
     scoring_key_identity_digest = build_stable_digest(
         {"key_material": key_material}
     )
-    high_pass_identity_digest = _high_pass_identity_digest()
+    high_pass_identity_digest = HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST
     template_content_sha256 = tensor_content_sha256(canonical_template)
     template_digest = build_stable_digest(
         {

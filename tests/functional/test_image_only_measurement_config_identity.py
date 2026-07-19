@@ -6,7 +6,13 @@ from copy import deepcopy
 from dataclasses import replace
 
 import pytest
+import torch
 
+from experiments.runners.semantic_watermark_runtime import (
+    SemanticWatermarkRuntimeConfig,
+    _build_image_only_measurement_config,
+)
+from main.core.digest import build_stable_digest
 from main.core.keyed_prg import KEYED_PRG_VERSION
 from main.methods.carrier import (
     LOW_FREQUENCY_BOUNDARY_MODE,
@@ -17,6 +23,8 @@ from main.methods.carrier import (
     LOW_FREQUENCY_PADDING,
     LOW_FREQUENCY_STRIDE,
     LowFrequencyCarrierConfig,
+    build_high_frequency_tail_template,
+    build_low_frequency_template,
 )
 from main.methods.detection import (
     ImageOnlyMeasurementConfig,
@@ -78,6 +86,7 @@ def _config() -> ImageOnlyMeasurementConfig:
         attention_stable_token_fraction=0.50,
         attention_unstable_pair_weight=0.25,
         attention_relation_component_weights=(0.25, 0.25, 0.25, 0.25),
+        method_role="full_dual_chain",
     )
 
 
@@ -102,8 +111,11 @@ def _config() -> ImageOnlyMeasurementConfig:
         {"attention_anchor_count": 13},
         {"attention_residual_threshold": 0.21},
         {"attention_minimum_inlier_ratio": 0.51},
-        {"lf_weight": 0.60, "tail_robust_weight": 0.40},
-        {"tail_fraction": 0.21},
+        {
+            "method_role": "lf_only_content",
+            "lf_weight": 1.0,
+            "tail_robust_weight": 0.0,
+        },
         {"attention_stable_token_fraction": 0.51},
         {"attention_unstable_pair_weight": 0.26},
         {
@@ -170,8 +182,50 @@ def test_measurement_identity_rejects_alignment_without_attention_geometry() -> 
         image_only_measurement_config_identity_record(
             _config(),
             attention_geometry_enabled=False,
-            image_alignment_enabled=True,
+        image_alignment_enabled=True,
+    )
+
+
+def test_generation_and_detection_rebuild_identical_formal_carriers() -> None:
+    """嵌入与盲检必须从同一model/revision身份逐值重建LF/HF。"""
+
+    runtime_config = SemanticWatermarkRuntimeConfig(key_material="identity-key")
+    measurement_config = _build_image_only_measurement_config(runtime_config)
+    generation_identity = build_stable_digest(
+        {
+            "model_id": runtime_config.model_id,
+            "model_revision": runtime_config.model_revision,
+        }
+    )
+    detection_identity = build_stable_digest(
+        {
+            "model_id": measurement_config.model_id,
+            "model_revision": measurement_config.model_revision,
+        }
+    )
+    reference = torch.arange(30, dtype=torch.float32).reshape(1, 2, 3, 5)
+
+    assert measurement_config.model_id == runtime_config.model_id
+    assert measurement_config.model_revision == runtime_config.model_revision
+    assert detection_identity == generation_identity
+    for builder in (
+        build_low_frequency_template,
+        build_high_frequency_tail_template,
+    ):
+        embedded = builder(
+            reference,
+            runtime_config.key_material,
+            generation_identity,
+            prg_version=runtime_config.keyed_prg_version,
         )
+        detected = builder(
+            reference,
+            runtime_config.key_material,
+            detection_identity,
+            prg_version=measurement_config.keyed_prg_version,
+        )
+        assert embedded.template_digest == detected.template_digest
+        assert torch.equal(embedded.template, detected.template)
 
 
 @pytest.mark.parametrize(

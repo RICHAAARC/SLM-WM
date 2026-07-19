@@ -11,7 +11,7 @@ from experiments.protocol.formal_randomization import (
 from main.core.digest import tensor_content_sha256
 from main.core.keyed_prg import KEYED_PRG_VERSION
 from main.core.normal_quantile_table import NORMAL_QUANTILE_TABLE_SHA256
-from main.methods.carrier import (
+from main.methods.carrier.keyed_tensor import (
     LowFrequencyCarrierConfig,
     build_low_frequency_template,
     build_tail_robust_template,

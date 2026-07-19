@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, replace
 import json
 import math
 from pathlib import Path
+import sys
 import time
 from types import SimpleNamespace
 from typing import Any, Mapping, Sequence
@@ -38,7 +39,6 @@ from experiments.protocol.image_only_evidence import (
     decision_equivalent_score,
     validate_frozen_evidence_protocol_integrity,
 )
-from experiments.runtime.diffusion.semantic_model_loader import load_clip_vision_model
 from experiments.runtime.diffusion.prompt_saliency_model_loader import (
     load_prompt_saliency_clip_runtime,
 )
@@ -50,10 +50,6 @@ from experiments.protocol.attacks import (
     default_attack_configs,
     formal_attack_seed_protocol_record,
     formal_attack_seed_random,
-)
-from experiments.runtime.diffusion.regeneration_attacks import (
-    DiffusionAttackRuntime,
-    default_diffusion_attack_specs,
 )
 from experiments.runtime.image_attacks import apply_standard_image_attack
 from experiments.runtime.diffusion.sd3_pipeline_runtime import load_pipeline, tensor_norm
@@ -82,16 +78,17 @@ from main.core.digest import (
     build_stable_digest,
     tensor_content_sha256,
 )
-from main.core.keyed_prg import build_keyed_gaussian_tensor
-from main.methods.carrier import (
+from main.core.keyed_prg import (
     KEYED_PRG_VERSION,
-    LowFrequencyCarrierConfig,
-    build_low_frequency_template,
-    build_tail_robust_template,
+    build_keyed_gaussian_tensor,
     keyed_prg_protocol_record,
-    project_canonical_template,
     require_supported_keyed_prg_version,
-    tail_robust_carrier_protocol_record,
+)
+from main.methods.carrier.keyed_tensor import (
+    LowFrequencyCarrierConfig,
+)
+from main.methods.carrier.high_frequency_tail import (
+    HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST,
 )
 from main.methods.detection import (
     ImageOnlyMeasurementConfig,
@@ -113,7 +110,6 @@ from main.methods.geometry import (
     build_attention_relation_graph_identity,
     build_stable_attention_pair_weights,
     compute_attention_geometry_gradient,
-    optimize_attention_geometry_update,
     qk_atomic_evaluation_records_digest,
     qk_atomic_evaluation_records_ready,
     qk_operator_metadata_records_digest,
@@ -126,21 +122,6 @@ from main.methods.geometry import (
 from main.methods.method_definition import (
     semantic_conditioned_latent_method_definition,
     semantic_conditioned_latent_method_definition_digest,
-)
-from main.methods.semantic import (
-    BRANCH_NAMES,
-    BranchRiskConfig,
-    DifferentiableSemanticFeatureRuntime,
-    build_active_branch_risk_fields,
-    semantic_feature_protocol_record,
-)
-from main.methods.subspace import (
-    ExactJacobianLinearization,
-    build_exact_jacobian_linearization,
-    exact_jvp,
-    generate_keyed_candidate_directions,
-    solve_semantic_branch_subspace,
-    solve_jacobian_null_space,
 )
 from main.methods.update_composition import (
     build_quantized_composition_candidate,
@@ -264,22 +245,6 @@ class SemanticWatermarkRuntimeConfig:
         _FORMAL_METHOD_CONFIG.injection_step_indices
     )
     injection_step_indices: tuple[int, ...] = _FORMAL_METHOD_CONFIG.injection_step_indices
-    jacobian_candidate_count: int = _FORMAL_METHOD_CONFIG.jacobian_candidate_count
-    candidate_count: int = _FORMAL_METHOD_CONFIG.jacobian_candidate_count
-    null_space_rank: int = _FORMAL_METHOD_CONFIG.null_space_rank
-    null_rank: int = _FORMAL_METHOD_CONFIG.null_space_rank
-    null_space_numerical_epsilon: float = (
-        _FORMAL_METHOD_CONFIG.null_space_numerical_epsilon
-    )
-    maximum_qr_condition_number: float = (
-        _FORMAL_METHOD_CONFIG.maximum_qr_condition_number
-    )
-    maximum_orthogonality_error: float = (
-        _FORMAL_METHOD_CONFIG.maximum_orthogonality_error
-    )
-    qr_reference_solve_protocol: str = (
-        _FORMAL_METHOD_CONFIG.qr_reference_solve_protocol
-    )
     lf_relative_strength: float = _FORMAL_METHOD_CONFIG.lf_relative_strength
     tail_relative_strength: float = _FORMAL_METHOD_CONFIG.tail_relative_strength
     attention_relative_strength: float = _FORMAL_METHOD_CONFIG.attention_relative_strength
@@ -327,11 +292,6 @@ class SemanticWatermarkRuntimeConfig:
     )
     tail_fraction: float = _FORMAL_METHOD_CONFIG.tail_fraction
     keyed_prg_version: str = _FORMAL_METHOD_CONFIG.keyed_prg_version
-    minimum_projection_energy_retention: float = _FORMAL_METHOD_CONFIG.minimum_projection_energy_retention
-    maximum_relative_response_residual: float = _FORMAL_METHOD_CONFIG.maximum_relative_response_residual
-    maximum_quantized_write_relative_jacobian_response: float = (
-        _FORMAL_METHOD_CONFIG.maximum_quantized_write_relative_jacobian_response
-    )
     quantized_branch_composition_protocol: str = (
         _FORMAL_METHOD_CONFIG.quantized_branch_composition_protocol
     )
@@ -349,12 +309,6 @@ class SemanticWatermarkRuntimeConfig:
     )
     quantized_budget_envelope_backtracking_maximum_steps: int = (
         _FORMAL_METHOD_CONFIG.quantized_budget_envelope_backtracking_maximum_steps
-    )
-    null_space_cg_max_iterations: int = (
-        _FORMAL_METHOD_CONFIG.null_space_cg_max_iterations
-    )
-    null_space_cg_relative_tolerance: float = (
-        _FORMAL_METHOD_CONFIG.null_space_cg_relative_tolerance
     )
     minimum_semantic_preservation_cosine: float = (
         _FORMAL_METHOD_CONFIG.minimum_semantic_preservation_cosine
@@ -404,7 +358,6 @@ class SemanticWatermarkRuntimeConfig:
     )
     semantic_routing_enabled: bool = True
     branch_risk_mode: str = "branch_specific"
-    null_space_enabled: bool = True
     lf_enabled: bool = True
     tail_robust_enabled: bool = True
     tail_truncation_enabled: bool = True
@@ -498,21 +451,12 @@ class SemanticWatermarkRuntimeConfig:
         if (
             self.torch_dtype != self.latent_torch_dtype
             or self.injection_step_indices != self.attention_injection_steps
-            or self.candidate_count != self.jacobian_candidate_count
-            or self.null_rank != self.null_space_rank
         ):
             raise ValueError("方法运行别名字段必须与唯一正式配置保持一致")
         if self.device_name != "cuda":
             raise ValueError("正式真实方法运行要求 CUDA 设备")
-        if self.candidate_count < self.null_rank or self.null_rank <= 0:
-            raise ValueError("candidate_count 必须不小于正的 null_rank")
-        if any(
-            index <= 0 or index >= self.inference_steps - 1
-            for index in self.injection_step_indices
-        ):
-            raise ValueError(
-                "post-step 注入时刻必须保留相邻的前后调度时刻"
-            )
+        if self.injection_step_indices != (10,):
+            raise ValueError("正式 callback 必须只在索引10执行一次写回")
         if type(self.tail_fraction) is not float or not 0.0 < self.tail_fraction <= 1.0:
             raise ValueError("tail_fraction 必须为 (0, 1] 内的精确 float")
         self.low_frequency_carrier_config
@@ -533,18 +477,6 @@ class SemanticWatermarkRuntimeConfig:
         validate_attention_relation_component_weights(
             self.attention_relation_component_weights
         )
-        if not 0.0 < self.minimum_projection_energy_retention <= 1.0:
-            raise ValueError("minimum_projection_energy_retention 必须位于 (0, 1]")
-        if not 0.0 < self.maximum_relative_response_residual <= 1.0:
-            raise ValueError("maximum_relative_response_residual 必须位于 (0, 1]")
-        if not 0.0 < self.maximum_quantized_write_relative_jacobian_response <= 1.0:
-            raise ValueError(
-                "maximum_quantized_write_relative_jacobian_response 必须位于 (0, 1]"
-            )
-        if self.null_space_cg_max_iterations <= 0:
-            raise ValueError("null_space_cg_max_iterations 必须为正整数")
-        if not 0.0 < self.null_space_cg_relative_tolerance < 1.0:
-            raise ValueError("null_space_cg_relative_tolerance 必须位于 (0, 1)")
         if not 0.0 < self.minimum_semantic_preservation_cosine <= 1.0:
             raise ValueError(
                 "minimum_semantic_preservation_cosine 必须位于 (0, 1]"
@@ -563,6 +495,8 @@ class SemanticWatermarkRuntimeConfig:
             )
         if not self.lf_enabled and not self.tail_robust_enabled:
             raise ValueError("正式内容检测至少需要启用一个内容载体分支")
+        if self.image_alignment_enabled and not self.attention_geometry_enabled:
+            raise ValueError("图像配准要求启用真实注意力几何")
         if len(self.attention_module_names) < 2:
             raise ValueError("真实注意力关系稳定度至少需要两个 Q/K 注意力层")
         if len(set(self.attention_module_names)) != len(
@@ -619,6 +553,38 @@ class SemanticWatermarkRuntimeConfig:
         return f"{self.model_id}@{self.model_revision}"
 
 
+def _require_full_content_runtime_config(
+    config: SemanticWatermarkRuntimeConfig,
+) -> None:
+    """在重型运行前拒绝尚未迁移到新链的消融配置。"""
+
+    if type(config) is not SemanticWatermarkRuntimeConfig:
+        raise TypeError("config 必须为精确 SemanticWatermarkRuntimeConfig")
+    required_values = {
+        "semantic_routing_enabled": True,
+        "branch_risk_mode": "branch_specific",
+        "lf_enabled": True,
+        "tail_robust_enabled": True,
+        "tail_truncation_enabled": True,
+        "attention_geometry_enabled": True,
+        "image_alignment_enabled": True,
+        "risk_parameter_protocol": "formal_reference",
+        "attention_relation_component_weights": (
+            _FORMAL_METHOD_CONFIG.attention_relation_component_weights
+        ),
+    }
+    drifted = tuple(
+        field_name
+        for field_name, expected in required_values.items()
+        if getattr(config, field_name) != expected
+    )
+    if drifted:
+        raise RuntimeError(
+            "当前新正式 runtime 只允许 full_dual_chain；尚未迁移的消融配置必须失败关闭: "
+            + ",".join(drifted)
+        )
+
+
 @dataclass(frozen=True)
 class SemanticWatermarkRuntimeResult:
     """保存真实嵌入、图像输出和仅图像检测摘要。"""
@@ -642,98 +608,37 @@ class SemanticWatermarkRuntimeResult:
 
 @dataclass
 class SemanticWatermarkRuntimeContext:
-    """保存可跨 Prompt 复用的真实模型和特征运行时。"""
+    """保存可跨 Prompt 复用的正式内容双链运行组件。"""
 
     pipeline: Any
-    feature_runtime: DifferentiableSemanticFeatureRuntime
+    prompt_saliency_runtime: Any
     attention_modules: tuple[tuple[str, Any], ...]
     unconditional_prompt: Any
     unconditional_pooled: Any
     runtime_versions: dict[str, Any]
-    diffusion_attack_runtime: DiffusionAttackRuntime | None
 
 
 def load_semantic_watermark_runtime_context(
     config: SemanticWatermarkRuntimeConfig,
+    *,
+    verified_formal_execution_lock: Mapping[str, Any],
+    repository_root: str | Path,
 ) -> SemanticWatermarkRuntimeContext:
-    """一次加载 SD3/SD3.5、CLIP 和注意力模块, 供数据集运行复用。"""
+    """只加载 SD3.5、Prompt-saliency、正式 Q/K 层与检测条件。"""
 
-    pipeline, runtime_versions = load_pipeline(config)
-    from diffusers.models.attention_processor import AttnProcessor
-
-    pipeline.vae.set_attn_processor(AttnProcessor())
-    runtime_versions["scientific_autograd_operator_configuration"] = {
-        "clip_attention_implementation": "eager",
-        "vae_attention_processor": "AttnProcessor",
-        "reason": "exact_forward_ad_and_input_gradient_compatibility",
-    }
-    vision_model = load_clip_vision_model(
-        config.vision_model_id,
-        config.vision_model_revision,
-        config.device_name,
-        config.vision_torch_dtype,
-    )
-    runtime_versions["vision_model_source"] = require_registered_model_reference(
-        config.vision_model_id,
-        config.vision_model_revision,
-        required_usage_role="semantic_condition_encoder",
-    ).to_dict()
-    feature_runtime = DifferentiableSemanticFeatureRuntime(pipeline.vae, vision_model)
-    runtime_versions["semantic_feature_operator_contract"] = (
-        semantic_feature_protocol_record()
-    )
-    for parameter in pipeline.transformer.parameters():
-        parameter.requires_grad_(False)
-    attention_modules = _attention_modules(
-        pipeline,
-        config.attention_module_names,
-    )
-    runtime_versions["attention_operator_contract"] = {
-        "attention_module_names": list(config.attention_module_names),
-        "attention_alignment_layer_selection_rule": (
-            config.attention_alignment_layer_selection_rule
-        ),
-        "image_alignment_resampling_mode": (
-            config.image_alignment_resampling_mode
-        ),
-        "image_alignment_padding_mode": (
-            config.image_alignment_padding_mode
-        ),
-        "image_alignment_quantization_protocol": (
-            config.image_alignment_quantization_protocol
-        ),
-        "attention_coordinate_convention": (
-            config.attention_coordinate_convention
-        ),
-        "attention_grid_align_corners": (
-            config.attention_grid_align_corners
-        ),
-        "attention_operator_schedule_index": (
-            config.attention_operator_schedule_index
-        ),
-        "public_detection_schedule_index": (
-            config.public_detection_schedule_index
-        ),
-    }
-    unconditional_prompt, unconditional_pooled = _unconditional_embeddings(
-        pipeline,
-        pipeline._execution_device,
-        config.public_detection_conditioning_protocol,
-        config.public_detection_condition_text,
-    )
-    diffusion_attack_runtime = (
-        DiffusionAttackRuntime.from_text_to_image_pipeline(pipeline, config)
-        if config.diffusion_attacks_enabled
-        else None
+    _require_full_content_runtime_config(config)
+    components = _load_content_runtime_smoke_components(
+        config,
+        verified_formal_execution_lock=verified_formal_execution_lock,
+        repository_root=repository_root,
     )
     return SemanticWatermarkRuntimeContext(
-        pipeline=pipeline,
-        feature_runtime=feature_runtime,
-        attention_modules=attention_modules,
-        unconditional_prompt=unconditional_prompt,
-        unconditional_pooled=unconditional_pooled,
-        runtime_versions=runtime_versions,
-        diffusion_attack_runtime=diffusion_attack_runtime,
+        pipeline=components.pipeline,
+        prompt_saliency_runtime=components.prompt_saliency_runtime,
+        attention_modules=components.attention_modules,
+        unconditional_prompt=components.unconditional_prompt,
+        unconditional_pooled=components.unconditional_pooled,
+        runtime_versions=components.runtime_versions,
     )
 
 
@@ -757,6 +662,7 @@ def _load_content_runtime_smoke_components(
 ) -> _ContentRuntimeSmokeComponents:
     """Load only SD3.5, formal Q/K layers, and the Prompt-saliency towers."""
 
+    _require_full_content_runtime_config(config)
     pipeline, runtime_versions = load_pipeline(config)
     from diffusers.models.attention_processor import AttnProcessor
 
@@ -834,15 +740,16 @@ def _content_runtime_prompt_embeddings(
     return prompt_embeds, pooled_prompt_embeds
 
 
-def run_content_runtime_smoke(
+def _run_content_runtime_generation(
     config: SemanticWatermarkRuntimeConfig,
     references: ContentRoutingReferenceScalars,
     *,
-    verified_formal_execution_lock: Mapping[str, Any],
-    repository_root: str | Path,
-) -> tuple[Any, dict[str, Any]]:
-    """Run one real index-10 content/QK single-write generation sample."""
+    components: _ContentRuntimeSmokeComponents,
+    include_clean: bool,
+) -> tuple[Any | None, Any, dict[str, Any]]:
+    """以既有正式组件运行 clean 与索引10单写回生成。"""
 
+    _require_full_content_runtime_config(config)
     import torch
 
     if type(config) is not SemanticWatermarkRuntimeConfig:
@@ -851,11 +758,6 @@ def run_content_runtime_smoke(
         raise TypeError("references must be exact ContentRoutingReferenceScalars")
     if type(config.key_material) is not str or not config.key_material:
         raise ValueError("content smoke requires explicit non-empty key material")
-    components = _load_content_runtime_smoke_components(
-        config,
-        verified_formal_execution_lock=verified_formal_execution_lock,
-        repository_root=repository_root,
-    )
     pipeline = components.pipeline
     base_latent_shape = (
         1,
@@ -876,13 +778,7 @@ def run_content_runtime_smoke(
         config.prompt,
     )
     model_identity_digest = build_stable_digest(
-        {
-            "model_id": config.model_id,
-            "model_revision": config.model_revision,
-            "sd35_operator_identity": components.runtime_versions.get(
-                "sd35_operator_identity"
-            ),
-        }
+        {"model_id": config.model_id, "model_revision": config.model_revision}
     )
     public_probe_identity = build_public_probe_identity(config.model_revision)
     captured_z9: Any | None = None
@@ -1080,21 +976,34 @@ def run_content_runtime_smoke(
             "content_only_postwrite_qk_digest": content_qk_digest,
             "final_postwrite_qk_digest": final_qk_digest,
             "routing_identity_digest": observations.routing.routing_identity_digest,
+            "geometry_qk_atomic_records_digest": (
+                geometry.qk_atomic_records_digest
+            ),
             "geometry_update_digest": geometry.geometry_update_digest,
         }
         return callback_kwargs
 
+    common_kwargs = {
+        "prompt": config.prompt,
+        "negative_prompt": config.negative_prompt,
+        "width": config.width,
+        "height": config.height,
+        "num_inference_steps": config.inference_steps,
+        "guidance_scale": config.guidance_scale,
+        "output_type": "pil",
+    }
+    clean_image = None
+    if include_clean:
+        with torch.no_grad():
+            clean_image = pipeline(
+                latents=base_latent.detach().clone(),
+                **common_kwargs,
+            ).images[0]
     output = pipeline(
-        prompt=config.prompt,
-        negative_prompt=config.negative_prompt,
-        width=config.width,
-        height=config.height,
-        num_inference_steps=config.inference_steps,
-        guidance_scale=config.guidance_scale,
         latents=base_latent,
-        output_type="pil",
         callback_on_step_end=callback,
         callback_on_step_end_tensor_inputs=["latents"],
+        **common_kwargs,
     )
     if (
         captured_z9_count != 1
@@ -1105,7 +1014,7 @@ def run_content_runtime_smoke(
         or not diagnostic
     ):
         raise RuntimeError("content smoke did not execute the unique index-10 write")
-    return output.images[0], {
+    return clean_image, output.images[0], {
         **diagnostic,
         "base_latent_identity_digest_random": base_identity[
             "base_latent_identity_digest_random"
@@ -1116,6 +1025,30 @@ def run_content_runtime_smoke(
         ),
         "legacy_semantic_feature_operator_present": False,
     }
+
+
+def run_content_runtime_smoke(
+    config: SemanticWatermarkRuntimeConfig,
+    references: ContentRoutingReferenceScalars,
+    *,
+    verified_formal_execution_lock: Mapping[str, Any],
+    repository_root: str | Path,
+) -> tuple[Any, dict[str, Any]]:
+    """运行一个真实索引10内容/QK单写回样本。"""
+
+    _require_full_content_runtime_config(config)
+    components = _load_content_runtime_smoke_components(
+        config,
+        verified_formal_execution_lock=verified_formal_execution_lock,
+        repository_root=repository_root,
+    )
+    _, watermarked_image, diagnostic = _run_content_runtime_generation(
+        config,
+        references,
+        components=components,
+        include_clean=False,
+    )
+    return watermarked_image, diagnostic
 
 
 def _stable_json(value: Any) -> str:
@@ -1158,13 +1091,9 @@ def semantic_watermark_runtime_config_payload(
     payload["lf_carrier_protocol_digest"] = (
         config.low_frequency_carrier_config.protocol_digest
     )
-    tail_carrier_protocol = tail_robust_carrier_protocol_record(
-        config.tail_fraction if config.tail_truncation_enabled else 1.0,
-        prg_version=config.keyed_prg_version,
+    payload["tail_carrier_protocol_digest"] = (
+        HIGH_FREQUENCY_TAIL_PROTOCOL_DIGEST
     )
-    payload["tail_carrier_protocol_digest"] = tail_carrier_protocol[
-        "tail_carrier_protocol_digest"
-    ]
     payload["method_definition"] = semantic_conditioned_latent_method_definition()
     payload["method_definition_digest"] = (
         semantic_conditioned_latent_method_definition_digest()
@@ -2176,6 +2105,8 @@ def _branch_risk_configs(
     不等价于完全移除路由。
     """
 
+    from main.methods.semantic.branch_risk import BranchRiskConfig
+
     if config.branch_risk_mode == "branch_specific":
         formal_configs = {
             "lf_content": config.lf_content_risk_config,
@@ -2395,6 +2326,7 @@ def _quantized_write_jacobian_response_record(
     """
 
     import torch
+    from main.methods.subspace.jacobian_nullspace import exact_jvp
 
     if not 0.0 < maximum_relative_response <= 1.0:
         raise ValueError("实际写回 Jacobian 相对响应阈值必须位于 (0, 1]")
@@ -2501,6 +2433,8 @@ def _post_risk_direction_jacobian_record(
     """
 
     import torch
+    from main.methods.semantic.branch_risk import BRANCH_NAMES
+    from main.methods.subspace.jacobian_nullspace import exact_jvp
 
     if branch_name not in BRANCH_NAMES:
         raise ValueError("branch_name 不是冻结的三分支角色")
@@ -3495,7 +3429,7 @@ def _build_image_only_measurement_config(
         else (1.0 if config.lf_enabled else 0.0)
     )
     return ImageOnlyMeasurementConfig(
-        model_id=config.carrier_model_reference,
+        model_id=config.model_id,
         model_revision=config.model_revision,
         vae_class_name=config.vae_class_name,
         transformer_class_name=config.transformer_class_name,
@@ -3553,6 +3487,13 @@ def _build_image_only_measurement_config(
         attention_residual_threshold=config.attention_residual_threshold,
         attention_minimum_inlier_ratio=(
             config.attention_minimum_inlier_ratio
+        ),
+        method_role=(
+            "lf_only_content"
+            if config.lf_enabled and not config.tail_robust_enabled
+            else "hf_tail_only_content"
+            if config.tail_robust_enabled and not config.lf_enabled
+            else "full_dual_chain"
         ),
     )
 
@@ -4267,7 +4208,7 @@ def _resolve_injection_schedule_times(
     )
 
 
-def run_semantic_watermark_runtime(
+def _legacy_semantic_watermark_runtime(
     config: SemanticWatermarkRuntimeConfig,
     runtime_context: SemanticWatermarkRuntimeContext | None = None,
 ) -> tuple[
@@ -4280,12 +4221,33 @@ def run_semantic_watermark_runtime(
     Any | None,
     dict[str, Any],
 ]:
-    """执行 clean/watermarked 生成和最终图像盲检。"""
+    """保留迁移审计所需的旧实现体；正式入口不得调用。"""
 
     if config.image_alignment_enabled and not config.attention_geometry_enabled:
         raise ValueError("图像配准必须以真实注意力几何测量为前提")
 
     import torch
+    from main.methods.carrier.keyed_tensor import (
+        build_low_frequency_template,
+        build_tail_robust_template,
+        project_canonical_template,
+        tail_robust_carrier_protocol_record,
+    )
+    from main.methods.geometry.differentiable_attention import (
+        optimize_attention_geometry_update,
+    )
+    from main.methods.semantic.branch_risk import (
+        build_active_branch_risk_fields,
+    )
+    from experiments.runtime.diffusion.regeneration_attacks import (
+        default_diffusion_attack_specs,
+    )
+    from main.methods.subspace.jacobian_nullspace import (
+        build_exact_jacobian_linearization,
+    )
+    from main.methods.subspace.semantic_projection import (
+        solve_semantic_branch_subspace,
+    )
 
     started_at = time.time()
     run_id = build_semantic_watermark_run_id(config)
@@ -6020,13 +5982,298 @@ def run_semantic_watermark_runtime(
     )
 
 
+def run_semantic_watermark_runtime(
+    config: SemanticWatermarkRuntimeConfig,
+    *,
+    references: ContentRoutingReferenceScalars,
+    verified_formal_execution_lock: Mapping[str, Any],
+    repository_root: str | Path,
+    runtime_context: SemanticWatermarkRuntimeContext | None = None,
+) -> tuple[
+    SemanticWatermarkRuntimeResult,
+    tuple[dict[str, Any], ...],
+    tuple[dict[str, Any], ...],
+    tuple[dict[str, Any], ...],
+    Any,
+    Any,
+    Any | None,
+    dict[str, Any],
+]:
+    """执行正式索引10单写回生成与仅图像盲检测。"""
+
+    _require_full_content_runtime_config(config)
+    import torch
+
+    if type(config) is not SemanticWatermarkRuntimeConfig:
+        raise TypeError("config 必须为精确 SemanticWatermarkRuntimeConfig")
+    if type(references) is not ContentRoutingReferenceScalars:
+        raise TypeError("正式 runtime 必须显式接收 ContentRoutingReferenceScalars")
+    if config.injection_step_indices != (10,):
+        raise ValueError("正式 runtime 只允许索引10单次写回")
+    if config.standard_attack_profiles or config.diffusion_attacks_enabled:
+        raise RuntimeError(
+            "未资格化 reference 的正式单样本链不得启动攻击或实验矩阵"
+        )
+
+    started_at = time.time()
+    context = runtime_context or load_semantic_watermark_runtime_context(
+        config,
+        verified_formal_execution_lock=verified_formal_execution_lock,
+        repository_root=repository_root,
+    )
+    serialized_runtime_versions = json.dumps(
+        context.runtime_versions,
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    for forbidden in (
+        "semantic_feature_operator_contract",
+        "DifferentiableSemanticFeatureRuntime",
+        "complete_716",
+        "exact_jvp",
+        "exact_vjp",
+        "psd_cg",
+    ):
+        if forbidden in serialized_runtime_versions:
+            raise RuntimeError("正式 runtime 仍携带旧716/JVP/VJP/PSD-CG身份")
+    components = _ContentRuntimeSmokeComponents(
+        pipeline=context.pipeline,
+        prompt_saliency_runtime=context.prompt_saliency_runtime,
+        attention_modules=context.attention_modules,
+        unconditional_prompt=context.unconditional_prompt,
+        unconditional_pooled=context.unconditional_pooled,
+        runtime_versions=context.runtime_versions,
+    )
+    clean_image, watermarked_image, diagnostic = (
+        _run_content_runtime_generation(
+            config,
+            references,
+            components=components,
+            include_clean=True,
+        )
+    )
+    if clean_image is None:
+        raise RuntimeError("正式 runtime 必须生成共享base latent的clean图像")
+
+    measurement_config = _build_image_only_measurement_config(config)
+    attention_extractor = _image_attention_extractor(
+        context.pipeline,
+        config,
+        context.attention_modules,
+        context.unconditional_prompt,
+        context.unconditional_pooled,
+    )
+    run_id = build_semantic_watermark_run_id(config)
+    paired_quality = compute_image_quality_metrics(clean_image, watermarked_image)
+    detections: list[dict[str, Any]] = []
+    detection_key_plan = build_detection_key_plan_record(config.key_material)
+    for sample_role, image, detection_key_role in (
+        ("clean_negative", clean_image, REGISTERED_WATERMARK_KEY_ROLE),
+        ("positive_source", watermarked_image, REGISTERED_WATERMARK_KEY_ROLE),
+        ("wrong_key_negative", watermarked_image, REGISTERED_WRONG_KEY_ROLE),
+    ):
+        detection_key, detection_key_identity = (
+            resolve_detection_key_material_and_identity(
+                config.key_material,
+                detection_key_role,
+            )
+        )
+        noise_cursor = _public_detection_noise_evidence_cursor(
+            attention_extractor
+        )
+        detection = measure_image_only_watermark(
+            image=image,
+            key_material=detection_key,
+            config=measurement_config,
+            image_latent_encoder=lambda candidate: _encode_image_latent(
+                context.pipeline,
+                candidate,
+            ),
+            image_attention_extractor=attention_extractor,
+            image_aligner=_align_image if config.image_alignment_enabled else None,
+        )
+        record = detection.to_record()
+        _bind_public_detection_noise_qk_evidence(
+            record,
+            attention_extractor,
+            noise_cursor,
+        )
+        record.update(
+            {
+                "run_id": run_id,
+                "prompt_id": config.prompt_id,
+                "split": config.split,
+                "sample_role": sample_role,
+                **detection_key_identity,
+                "embedding_pair_ssim": float(paired_quality["ssim"]),
+                "attack_id": None,
+            }
+        )
+        record["metadata"] = {
+            **record["metadata"],
+            "method_role": measurement_config.method_role,
+            "measurement_status": "threshold_independent_image_only_evidence",
+            "reference_source": "explicit_smoke_only_unqualified",
+            "supports_paper_claim": False,
+        }
+        detections.append(record)
+
+    update_record = {
+        "run_id": run_id,
+        "step_index": 10,
+        "method_role": diagnostic["method_role"],
+        "captured_previous_index": diagnostic["captured_previous_index"],
+        "captured_previous_count": diagnostic["captured_previous_count"],
+        "callback_write_index": diagnostic["callback_write_index"],
+        "callback_write_count": diagnostic["callback_write_count"],
+        "actual_dtype_single_write_count": diagnostic[
+            "actual_dtype_single_write_count"
+        ],
+        "current_image_decode_count": diagnostic["current_image_decode_count"],
+        "public_probe_additional_decode_count": diagnostic[
+            "public_probe_additional_decode_count"
+        ],
+        "lf_effective_l2": diagnostic["lf_effective_l2"],
+        "hf_tail_effective_l2": diagnostic["hf_tail_effective_l2"],
+        "geometry_effective_l2": diagnostic["geometry_effective_l2"],
+        "combined_effective_l2": diagnostic["combined_effective_l2"],
+        "combined_effective_l2_limit": diagnostic[
+            "combined_effective_l2_limit"
+        ],
+        "combined_effective_l2_ready": diagnostic[
+            "combined_effective_l2_ready"
+        ],
+        "common_gamma": diagnostic["common_gamma"],
+        "content_only_postwrite_qk_score": diagnostic[
+            "content_only_postwrite_qk_score"
+        ],
+        "final_postwrite_qk_score": diagnostic["final_postwrite_qk_score"],
+        "post_write_qk_strict_ready": diagnostic[
+            "post_write_qk_strict_ready"
+        ],
+        "actual_dtype_single_write_digest": diagnostic[
+            "actual_dtype_single_write_digest"
+        ],
+        "routing_identity_digest": diagnostic["routing_identity_digest"],
+        "geometry_update_digest": diagnostic["geometry_update_digest"],
+        "geometry_qk_atomic_records_digest": diagnostic[
+            "geometry_qk_atomic_records_digest"
+        ],
+        "content_only_postwrite_qk_digest": diagnostic[
+            "content_only_postwrite_qk_digest"
+        ],
+        "final_postwrite_qk_digest": diagnostic[
+            "final_postwrite_qk_digest"
+        ],
+        "attention_module_names": list(config.attention_module_names),
+        "reference_source": "explicit_smoke_only_unqualified",
+        "supports_paper_claim": False,
+    }
+    if not all(
+        float(update_record[field_name]) > 0.0
+        for field_name in (
+            "lf_effective_l2",
+            "hf_tail_effective_l2",
+            "geometry_effective_l2",
+            "combined_effective_l2",
+        )
+    ):
+        raise RuntimeError("full_dual_chain 三个正式分支必须均产生非零实际写回")
+    if (
+        update_record["combined_effective_l2_ready"] is not True
+        or not float(update_record["combined_effective_l2"])
+        <= float(update_record["combined_effective_l2_limit"])
+        or update_record["post_write_qk_strict_ready"] is not True
+        or not float(update_record["final_postwrite_qk_score"])
+        > float(update_record["content_only_postwrite_qk_score"])
+    ):
+        raise RuntimeError("正式单写回预算或post-write Q/K门禁未闭合")
+
+    runtime_versions = dict(context.runtime_versions)
+    forbidden_runtime_modules = (
+        "main.methods.subspace.jacobian_nullspace",
+        "main.methods.semantic.runtime",
+    )
+    legacy_runtime_dependency_absence_ready = not any(
+        module_name in sys.modules for module_name in forbidden_runtime_modules
+    )
+    random_identity_random = {
+        "generation_seed_random": int(config.seed),
+        "watermark_key_material_digest_random": build_stable_digest(
+            {"key_material": config.key_material}
+        ),
+        "detection_key_plan_digest_random": detection_key_plan[
+            "detection_key_plan_digest_random"
+        ],
+    }
+    provenance = build_scientific_unit_provenance(
+        scientific_unit_id=run_id,
+        scientific_unit_config_digest=semantic_watermark_runtime_config_digest(
+            config
+        ),
+        runtime_environment=runtime_versions["runtime_environment"],
+        execution_device_name=str(context.pipeline._execution_device),
+        torch_module=torch,
+        random_identity_random=random_identity_random,
+    )
+    result = SemanticWatermarkRuntimeResult(
+        run_id=run_id,
+        run_decision="pass",
+        clean_image_path="",
+        watermarked_image_path="",
+        update_record_path="",
+        detection_record_path="",
+        manifest_path="",
+        update_count=1,
+        elapsed_seconds=time.time() - started_at,
+        metadata={
+            **runtime_versions,
+            "method_runtime": "formal_content_dual_chain_single_write",
+            "formal_method_config_digest": config.formal_method_config_digest,
+            "method_definition": semantic_conditioned_latent_method_definition(),
+            "method_definition_digest": (
+                semantic_conditioned_latent_method_definition_digest()
+            ),
+            "detector_input_access_mode": "image_key_public_model_only",
+            "threshold_free_blind_measurement_ready": bool(detections),
+            "formal_blind_detection_ready": False,
+            "legacy_runtime_dependency_absence_ready": (
+                legacy_runtime_dependency_absence_ready
+            ),
+            "forbidden_runtime_modules": list(forbidden_runtime_modules),
+            "paired_quality": paired_quality,
+            "content_runtime_diagnostic": diagnostic,
+            "reference_source": "explicit_smoke_only_unqualified",
+            "supports_paper_claim": False,
+            "scientific_unit_config_digest": (
+                semantic_watermark_runtime_config_digest(config)
+            ),
+            "scientific_unit_provenance": provenance,
+        },
+    )
+    return (
+        result,
+        (update_record,),
+        (),
+        tuple(detections),
+        clean_image,
+        watermarked_image,
+        None,
+        {},
+    )
+
+
 def write_semantic_watermark_runtime_outputs(
     config: SemanticWatermarkRuntimeConfig,
     root: str | Path = ".",
+    *,
+    references: ContentRoutingReferenceScalars,
+    verified_formal_execution_lock: Mapping[str, Any],
     runtime_context: SemanticWatermarkRuntimeContext | None = None,
 ) -> SemanticWatermarkRuntimeResult:
     """运行真实方法并把全部持久化产物写入 outputs。"""
 
+    _require_full_content_runtime_config(config)
     root_path = Path(root).resolve()
     output_dir = (root_path / config.output_dir).resolve()
     outputs_root = (root_path / "outputs").resolve()
@@ -6044,6 +6291,9 @@ def write_semantic_watermark_runtime_outputs(
         attacked_images,
     ) = run_semantic_watermark_runtime(
         config,
+        references=references,
+        verified_formal_execution_lock=verified_formal_execution_lock,
+        repository_root=root_path,
         runtime_context=runtime_context,
     )
     detection_key_plan = build_detection_key_plan_record(
@@ -6142,251 +6392,81 @@ def write_semantic_watermark_runtime_outputs(
             encoding="utf-8",
         )
     detection_path.write_text("".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in governed_detections), encoding="utf-8")
-    resolved_result_payload = result.to_dict()
-    resolved_metadata = dict(resolved_result_payload["metadata"])
-    observability_record = dict(
-        resolved_metadata.get("final_image_attention_observability", {})
-    )
-    carrier_preservation_record = dict(
-        resolved_metadata.get("carrier_only_final_image_preservation") or {}
-    )
-    counterfactual_record = dict(
-        resolved_metadata.get("carrier_only_counterfactual") or {}
-    )
-    if carrier_only_image is not None:
-        carrier_image_path = carrier_only_image_path.relative_to(root_path).as_posix()
-        carrier_image_digest = file_digest(carrier_only_image_path)
-        carrier_image_identity = {
-            "carrier_only_counterfactual_image_path": carrier_image_path,
-            "carrier_only_counterfactual_image_digest": carrier_image_digest,
-        }
-        carrier_atom_content_digest = build_stable_digest(
-            list(carrier_only_update_records)
-        )
-        if (
-            counterfactual_record.get(
-                "carrier_only_counterfactual_atom_content_digest"
-            )
-            != carrier_atom_content_digest
-        ):
-            raise RuntimeError("carrier-only 持久化原子的内容摘要与运行身份不一致")
-        carrier_atom_identity = {
-            "carrier_only_counterfactual_atom_path": (
-                carrier_only_update_path.relative_to(root_path).as_posix()
-            ),
-            "carrier_only_counterfactual_atom_file_sha256": file_digest(
-                carrier_only_update_path
-            ),
-            "carrier_only_counterfactual_atom_content_digest": (
-                carrier_atom_content_digest
-            ),
-        }
-        observability_record.update(carrier_image_identity)
-        observability_record.update(carrier_atom_identity)
-        carrier_preservation_record.update(carrier_image_identity)
-        carrier_preservation_record.update(carrier_atom_identity)
-        counterfactual_record.update(carrier_image_identity)
-        counterfactual_record.update(carrier_atom_identity)
-    final_image_content_records = {
-        "clean_image": _persisted_image_content_record(
-            clean_image_path,
-            root_path,
-        ),
-        **(
-            {
-                "carrier_only_image": _persisted_image_content_record(
-                    carrier_only_image_path,
-                    root_path,
-                )
-            }
-            if carrier_only_image is not None
-            else {}
-        ),
-        "watermarked_image": _persisted_image_content_record(
-            watermarked_image_path,
-            root_path,
-        ),
-    }
-    if config.attention_geometry_enabled:
-        observability_record = _bind_final_image_qk_to_pixels(
-            observability_record,
-            final_image_content_records,
-        )
-    resolved_metadata["final_image_attention_observability"] = (
-        observability_record
-    )
-    resolved_metadata["carrier_only_final_image_preservation"] = (
-        carrier_preservation_record or None
-    )
-    resolved_metadata["carrier_only_counterfactual"] = (
-        counterfactual_record or None
-    )
-    persisted_update_records = _read_jsonl_object_records(update_path)
-    persisted_detection_records = _read_jsonl_object_records(
-        detection_path
-    )
-    persisted_carrier_records = (
-        _read_jsonl_object_records(carrier_only_update_path)
-        if carrier_only_image is not None
-        else []
-    )
-    scientific_content_binding_record = (
-        build_scientific_content_binding_record(
-            run_id=result.run_id,
-            method_definition_digest=(
-                semantic_conditioned_latent_method_definition_digest()
-            ),
-            scientific_unit_config_digest=(
-                semantic_watermark_runtime_config_digest(config)
-            ),
-            full_update_records=persisted_update_records,
-            carrier_only_update_records=persisted_carrier_records,
-            detection_records=persisted_detection_records,
-            detection_key_plan=detection_key_plan,
-            final_image_records=final_image_content_records,
-            final_image_attention_observability=observability_record,
-            final_image_preservation=resolved_metadata.get(
-                "final_image_preservation"
-            ),
-            carrier_only_final_image_preservation=(
-                carrier_preservation_record or None
-            ),
-            carrier_only_counterfactual=(
-                counterfactual_record or None
-            ),
-            attention_geometry_enabled=config.attention_geometry_enabled,
-            image_alignment_enabled=config.image_alignment_enabled,
-            semantic_routing_enabled=config.semantic_routing_enabled,
-            null_space_enabled=config.null_space_enabled,
-            full_active_branches=_active_carrier_branch_names(config),
-            carrier_only_active_branches=(
-                _active_carrier_branch_names(
-                    replace(config, attention_geometry_enabled=False)
-                )
-                if config.attention_geometry_enabled
-                else ()
-            ),
-        )
-    )
-    resolved_metadata["scientific_content_binding_schema"] = (
-        SCIENTIFIC_CONTENT_BINDING_SCHEMA
-    )
-    resolved_metadata["scientific_content_binding_record"] = (
-        scientific_content_binding_record
-    )
-    resolved_metadata["scientific_content_binding_digest"] = (
-        scientific_content_binding_record[
-            "scientific_content_binding_digest"
-        ]
-    )
+    manifest_path = run_dir / "manifest.local.json"
     resolved_result = SemanticWatermarkRuntimeResult(
         **{
-            **resolved_result_payload,
-            "metadata": resolved_metadata,
-            "clean_image_path": clean_image_path.relative_to(root_path).as_posix(),
-            "watermarked_image_path": watermarked_image_path.relative_to(root_path).as_posix(),
-            "update_record_path": update_path.relative_to(root_path).as_posix(),
-            "detection_record_path": detection_path.relative_to(root_path).as_posix(),
-            "manifest_path": (run_dir / "manifest.local.json").relative_to(root_path).as_posix(),
+            **result.to_dict(),
+            "clean_image_path": clean_image_path.relative_to(
+                root_path
+            ).as_posix(),
+            "watermarked_image_path": watermarked_image_path.relative_to(
+                root_path
+            ).as_posix(),
+            "update_record_path": update_path.relative_to(
+                root_path
+            ).as_posix(),
+            "detection_record_path": detection_path.relative_to(
+                root_path
+            ).as_posix(),
+            "manifest_path": manifest_path.relative_to(root_path).as_posix(),
         }
     )
-    result_path.write_text(_stable_json(resolved_result.to_dict()), encoding="utf-8")
-    manifest_path = run_dir / "manifest.local.json"
-    scientific_unit_config_digest = semantic_watermark_runtime_config_digest(
-        config
+    result_path.write_text(
+        _stable_json(resolved_result.to_dict()),
+        encoding="utf-8",
+    )
+    output_paths = (
+        update_path.relative_to(root_path).as_posix(),
+        detection_path.relative_to(root_path).as_posix(),
+        result_path.relative_to(root_path).as_posix(),
+        clean_image_path.relative_to(root_path).as_posix(),
+        watermarked_image_path.relative_to(root_path).as_posix(),
+        *(
+            (carrier_only_image_path.relative_to(root_path).as_posix(),)
+            if carrier_only_image is not None
+            else ()
+        ),
+        *(
+            (carrier_only_update_path.relative_to(root_path).as_posix(),)
+            if carrier_only_image is not None
+            else ()
+        ),
+        *attacked_image_paths,
+        manifest_path.relative_to(root_path).as_posix(),
     )
     manifest = build_artifact_manifest(
         artifact_id=f"{result.run_id}_manifest",
         artifact_type="local_manifest",
         input_paths=(),
-        output_paths=(
-            update_path.relative_to(root_path).as_posix(),
-            detection_path.relative_to(root_path).as_posix(),
-            result_path.relative_to(root_path).as_posix(),
-            clean_image_path.relative_to(root_path).as_posix(),
-            watermarked_image_path.relative_to(root_path).as_posix(),
-            *(
-                (carrier_only_image_path.relative_to(root_path).as_posix(),)
-                if carrier_only_image is not None
-                else ()
-            ),
-            *(
-                (carrier_only_update_path.relative_to(root_path).as_posix(),)
-                if carrier_only_image is not None
-                else ()
-            ),
-            manifest_path.relative_to(root_path).as_posix(),
-            *attacked_image_paths,
-        ),
+        output_paths=output_paths,
         config={
-            "scientific_unit_config_digest": scientific_unit_config_digest,
-            "formal_randomization_reference": resolved_metadata[
+            "scientific_unit_config_digest": (
+                semantic_watermark_runtime_config_digest(config)
+            ),
+            "formal_randomization_reference": result.metadata[
                 "formal_randomization_reference"
             ],
         },
         code_version=resolve_code_version(root_path),
-        rebuild_command="调用 experiments.runners.semantic_watermark_runtime.write_semantic_watermark_runtime_outputs",
+        rebuild_command=(
+            "调用 experiments.runners.semantic_watermark_runtime."
+            "write_semantic_watermark_runtime_outputs"
+        ),
         metadata={
             "run_id": result.run_id,
             "protocol_decision": result.run_decision,
             "detector_input_access_mode": "image_key_public_model_only",
             "detection_key_plan": detection_key_plan,
             "supports_paper_claim": False,
-            "scientific_content_binding_schema": (
-                SCIENTIFIC_CONTENT_BINDING_SCHEMA
+            "formal_runtime_chain": (
+                "content_routing_lf_hf_qk_common_gamma_single_write"
             ),
-            "scientific_content_binding_digest": (
-                scientific_content_binding_record[
-                    "scientific_content_binding_digest"
-                ]
-            ),
-            **(
-                {
-                    "carrier_only_counterfactual_identity_digest": (
-                        observability_record[
-                            "carrier_only_counterfactual_identity_digest"
-                        ]
-                    ),
-                    "carrier_only_counterfactual_image_digest": (
-                        observability_record[
-                            "carrier_only_counterfactual_image_digest"
-                        ]
-                    ),
-                    "carrier_only_counterfactual_atom_file_sha256": (
-                        counterfactual_record[
-                            "carrier_only_counterfactual_atom_file_sha256"
-                        ]
-                    ),
-                    "carrier_only_counterfactual_atom_path": (
-                        counterfactual_record[
-                            "carrier_only_counterfactual_atom_path"
-                        ]
-                    ),
-                    "carrier_only_counterfactual_atom_content_digest": (
-                        counterfactual_record[
-                            "carrier_only_counterfactual_atom_content_digest"
-                        ]
-                    ),
-                }
-                if carrier_only_image is not None
-                else {}
+            "formal_detection_chain": (
+                "threshold_free_lf_hf_tail_measurement_pending_frozen_evidence"
             ),
         },
     ).to_dict()
     manifest_path.write_text(_stable_json(manifest), encoding="utf-8")
-    persisted_result_payload = resolved_result.to_dict()
-    if not _carrier_only_counterfactual_artifact_binding_ready(
-        persisted_result_payload,
-        manifest,
-        root_path,
-        config,
-    ) or not _scientific_content_binding_artifact_ready(
-        persisted_result_payload,
-        manifest,
-        root_path,
-        config,
-    ):
-        raise RuntimeError("持久化产物未通过总科学内容证据重建")
     output_parts = Path(config.output_dir).parts
     checkpoint_roles = {
         "image_only_dataset_runtime": "image_only_dataset_runtime",

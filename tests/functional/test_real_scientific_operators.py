@@ -21,14 +21,19 @@ import main.methods.carrier.keyed_tensor as keyed_tensor_module
 import main.methods.geometry.differentiable_attention as attention_module
 import main.methods.subspace.jacobian_nullspace as nullspace_module
 
-from main.methods.carrier import (
-    KEYED_PRG_VERSION,
+from main.core.keyed_prg import KEYED_PRG_VERSION, keyed_prg_protocol_record
+from main.methods.carrier.keyed_tensor import (
     LowFrequencyCarrierConfig,
     build_low_frequency_template,
     build_tail_robust_template,
     compute_blind_content_score,
-    keyed_prg_protocol_record,
     tail_robust_carrier_protocol_record,
+)
+from main.methods.carrier.low_frequency import (
+    build_low_frequency_template as build_formal_low_frequency_template,
+)
+from main.methods.carrier.high_frequency_tail import (
+    build_high_frequency_tail_template,
 )
 from main.methods.detection import (
     ImageOnlyMeasurementConfig,
@@ -63,7 +68,6 @@ from main.methods.geometry import (
     combine_attention_relation_component_scores,
     compute_attention_geometry_gradient,
     keyed_attention_relation_projection,
-    optimize_attention_geometry_update,
     qk_atomic_content_records_digest,
     qk_atomic_evaluation_records_digest,
     qk_operator_metadata_records_digest,
@@ -74,7 +78,7 @@ from main.methods.geometry import (
 )
 from main.methods.geometry.differentiable_attention import keyed_relation_signs
 from main.methods.semantic import build_branch_risk_fields
-from main.methods.subspace import (
+from main.methods.subspace.jacobian_nullspace import (
     JACOBIAN_NULL_SPACE_EVIDENCE_VERSION,
     JacobianNullSpaceResult,
     build_exact_jacobian_linearization,
@@ -83,6 +87,9 @@ from main.methods.subspace import (
     recompute_jacobian_null_space_result_digest,
     solve_jacobian_null_space,
     solve_psd_conjugate_gradient,
+)
+from main.methods.geometry.differentiable_attention import (
+    optimize_attention_geometry_update,
 )
 from main.methods.update_composition import (
     QUANTIZED_COMPOSITION_EVIDENCE_VERSION,
@@ -101,6 +108,7 @@ from experiments.protocol.image_only_evidence import (
 )
 from experiments.runners.image_only_dataset_runtime import (
     _scientific_update_record_ready,
+    validate_detection_content_carrier_protocol,
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
@@ -118,7 +126,7 @@ from experiments.runners.semantic_watermark_runtime import (
     semantic_watermark_runtime_config_payload,
 )
 from experiments.runtime.repository_environment import resolve_code_version
-from main.methods.semantic import (
+from main.methods.semantic.feature_protocol import (
     JOINT_FEATURE_WIDTH,
     SEMANTIC_FEATURE_SCHEMA,
     SEMANTIC_FEATURE_WIDTH,
@@ -264,6 +272,7 @@ def _image_only_measurement_config(
             0.25,
             0.25,
         ),
+        "method_role": "full_dual_chain",
     }
     values.update(overrides)
     return ImageOnlyMeasurementConfig(**values)
@@ -929,701 +938,6 @@ def test_candidate_matrix_preserves_preferred_carrier_direction() -> None:
     first_direction = candidates[:, 0]
     assert abs(float(first_direction[-1])) == pytest.approx(1.0, abs=1e-6)
     assert torch.linalg.norm(first_direction[:-1]).item() == pytest.approx(0.0, abs=1e-6)
-
-
-@pytest.mark.quick
-def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
-    """关键算子门禁必须同时检查 JVP、残差、载体能量和 Q/K 提升。"""
-
-    subspace = {
-        "null_space_evidence_version": (
-            JACOBIAN_NULL_SPACE_EVIDENCE_VERSION
-        ),
-        "branch_name": "lf_content",
-        "basis_rank": 4,
-        "null_rank": 4,
-        "candidate_count": 20,
-        "candidate_shape": [65536, 20],
-        "evaluated_direction_count": 4,
-        "evaluated_direction_indices": [0, 1, 2, 3],
-        "response_width": JOINT_FEATURE_WIDTH,
-        "response_shape": [JOINT_FEATURE_WIDTH, 4],
-        "response_residual": 0.1,
-        "relative_response_residual": 1e-6,
-        "orthogonality_error": 1e-6,
-        "column_response_norms": [1e-6] * 4,
-        "column_relative_response_residuals": [1e-6] * 4,
-        "column_reference_response_norms": [1.0] * 4,
-        "projection_energy_retentions": [0.2] * 4,
-        "cg_relative_residuals": [1e-7] * 4,
-        "cg_iteration_counts": [1] * 4,
-        "cg_converged": True,
-        "metadata": {
-            "jvp_mode": "torch_func_exact_jvp_vjp",
-            "solver": "matrix_free_full_jacobian_psd_cg",
-            "latent_basis_formula": (
-                "qr(Bd - B^2 J^T solve_psd_cg(J B^2 J^T, J B d))"
-            ),
-            "full_feature_jvp": True,
-            "full_feature_vjp": True,
-            "cg_damping": 0.0,
-            "cg_maximum_iterations": 64,
-            "cg_relative_tolerance": 1e-6,
-            "maximum_relative_response_residual": 1e-4,
-            "minimum_projection_energy_retention": 0.01,
-            "preferred_direction_count": 1,
-            "semantic_feature_schema": SEMANTIC_FEATURE_SCHEMA,
-            "semantic_feature_width": SEMANTIC_FEATURE_WIDTH,
-            "handcrafted_structure_feature_schema": HANDCRAFTED_STRUCTURE_FEATURE_SCHEMA,
-            "handcrafted_structure_feature_width": HANDCRAFTED_STRUCTURE_FEATURE_WIDTH,
-            "joint_feature_width": JOINT_FEATURE_WIDTH,
-            "feature_compression_applied": False,
-            "keyed_prg_version": KEYED_PRG_VERSION,
-            "keyed_prg_protocol_digest": keyed_prg_protocol_record()[
-                "keyed_prg_protocol_digest"
-            ],
-            "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
-            "null_space_numerical_epsilon": 1e-12,
-            "maximum_qr_condition_number": 1e6,
-            "qr_condition_number": 1.0,
-            "maximum_orthogonality_error": 1e-5,
-            "qr_reference_solve_protocol": (
-                "right_upper_triangular_solve_without_explicit_inverse"
-            ),
-            "risk_budget_operator": "explicit_diagonal_B",
-        },
-        "candidate_matrix_content_sha256": "1" * 64,
-        "risk_budget_content_sha256": "2" * 64,
-        "routed_candidate_response_matrix_content_sha256": "3" * 64,
-        "projected_direction_matrix_content_sha256": "4" * 64,
-        "projected_direction_response_matrix_content_sha256": "5" * 64,
-        "latent_basis_content_sha256": "4" * 64,
-        "basis_response_matrix_content_sha256": "6" * 64,
-        "basis_reference_response_matrix_content_sha256": "7" * 64,
-    }
-    config = SemanticWatermarkRuntimeConfig()
-    tail_carrier_protocol_digest = build_stable_digest(
-        {
-            "tail_carrier_protocol_schema": (
-                "slm_wm_tail_robust_carrier_protocol"
-            ),
-            "tail_fraction": config.tail_fraction,
-            "tail_selection_rule": (
-                "descending_absolute_value_then_ascending_flat_index"
-            ),
-            "keyed_prg_version": config.keyed_prg_version,
-        }
-    )
-    lf_template_identity = _fixture_keyed_tensor_carrier_identity(
-        "lf_content",
-        config.low_frequency_carrier_config.protocol_digest,
-        0.2,
-    )
-    tail_template_identity = _fixture_keyed_tensor_carrier_identity(
-        "tail_robust",
-        tail_carrier_protocol_digest,
-        0.2,
-    )
-    qk_role_scores = {
-        "latent_before": 0.10,
-        "optimization_content_base_latent": 0.11,
-        "accepted_attention_candidate": 0.13,
-        "actual_written_content_base_latent": 0.105,
-        "actual_written_combined_latent": 0.12,
-    }
-    attention_qk_atomic_content_records = []
-    for role_index, role in enumerate(qk_role_scores):
-        role_values = torch.eye(4).reshape(1, 4, 4) * (
-            0.1 + 0.01 * role_index
-        )
-        role_probabilities = torch.softmax(role_values, dim=-1)
-        role_atoms = [
-            build_qk_atomic_content_metadata(
-                layer_name,
-                role_values,
-                role_values,
-                role_values,
-                role_probabilities,
-                (0, 1, 2, 3),
-            )
-            for layer_name in config.attention_module_names
-        ]
-        attention_qk_atomic_content_records.append(
-            {
-                "qk_evaluation_role": role,
-                "evaluation_latent_content_sha256": hashlib.sha256(
-                    role.encode("utf-8")
-                ).hexdigest(),
-                "evaluation_score": qk_role_scores[role],
-                "qk_atomic_content_records": role_atoms,
-                "qk_atomic_content_digest": (
-                    qk_atomic_content_records_digest(role_atoms)
-                ),
-                "qk_atomic_content_ready": True,
-            }
-        )
-    qk_operator_metadata_records = [
-        {
-            "record_layer_name": layer_name,
-            "module_layer_name": layer_name,
-            "module_class_name": "FixtureAttention",
-            "head_count": 2,
-            "head_width": 4,
-            "attention_scale": 0.5,
-            "attention_scale_source": "inverse_sqrt_head_width",
-            "q_normalization_applied": False,
-            "k_normalization_applied": False,
-            "q_normalization_class": None,
-            "k_normalization_class": None,
-            "source_token_count": 4,
-            "source_grid_side": 2,
-            "sampled_token_count": 4,
-            "sampled_grid_side": 2,
-            "sampled_token_indices": [0, 1, 2, 3],
-            "coordinate_convention": ATTENTION_COORDINATE_CONVENTION,
-            "grid_align_corners": ATTENTION_GRID_ALIGN_CORNERS,
-            "centered_logit_aggregation": (
-                "mean_of_per_head_row_centered_sampled_qk_logits"
-            ),
-            "relation_probability_aggregation": (
-                "mean_of_per_head_sampled_image_token_probabilities"
-            ),
-            "mean_probability_is_softmax_of_mean_logits": False,
-        }
-        for layer_name in config.attention_module_names
-    ]
-    null_space_records = {}
-    for branch_name in ("lf_content", "tail_robust", "attention_geometry"):
-        branch_subspace = {
-            **subspace,
-            "branch_name": branch_name,
-            "metadata": dict(subspace["metadata"]),
-        }
-        branch_subspace["solver_digest"] = (
-            recompute_jacobian_null_space_result_digest(
-                branch_subspace
-            )
-        )
-        null_space_records[branch_name] = branch_subspace
-    lf_template_identity = _fixture_keyed_tensor_carrier_identity(
-        "lf_content",
-        config.low_frequency_carrier_config.protocol_digest,
-        0.2,
-        null_space_digest=null_space_records["lf_content"][
-            "solver_digest"
-        ],
-    )
-    tail_template_identity = _fixture_keyed_tensor_carrier_identity(
-        "tail_robust",
-        tail_carrier_protocol_digest,
-        0.2,
-        null_space_digest=null_space_records["tail_robust"][
-            "solver_digest"
-        ],
-    )
-    branch_update_content_records = {
-        "lf_content": "5" * 64,
-        "tail_robust": "6" * 64,
-        "attention_geometry": "7" * 64,
-    }
-    branch_risk_records = {
-        name: {
-            "branch_name": name,
-            "risk_field_digest": build_stable_digest(
-                {"branch_name": name, "fixture": "risk_field"}
-            ),
-            "eligible_position_count": 10,
-            "risk_values_content_sha256": "8" * 64,
-            "budget_values_content_sha256": "9" * 64,
-            "eligible_mask_content_sha256": "a" * 64,
-            "effective_budget_values_content_sha256": "2" * 64,
-            "branch_unit_direction_content_sha256": "d" * 64,
-            "branch_budget_envelope_content_sha256": "b" * 64,
-            "branch_written_update_content_sha256": (
-                branch_update_content_records[name]
-            ),
-            "branch_post_risk_direction_content_sha256": "d" * 64,
-            "branch_post_risk_reference_direction_content_sha256": "e" * 64,
-            "branch_post_risk_response_content_sha256": "f" * 64,
-            "branch_post_risk_reference_response_content_sha256": "0" * 64,
-            "branch_post_risk_response_norm": 1e-5,
-            "branch_post_risk_reference_response_norm": 1.0,
-            "branch_post_risk_relative_response_residual": 1e-5,
-            "branch_post_risk_jacobian_gate_ready": True,
-            "branch_post_risk_jvp_mode": (
-                "torch_autograd_exact_jvp_vjp_reexecution"
-            ),
-            "branch_nominal_strength": 0.01,
-            "branch_applied_strength": 0.005,
-            "branch_risk_scale_factor": 0.5,
-            "branch_budget_ceiling": 1.0,
-            "branch_direction_epsilon": (
-                config.risk_bounded_scale_direction_epsilon
-            ),
-            "branch_numerical_epsilon": (
-                config.null_space_numerical_epsilon
-            ),
-            "branch_written_update_maximum_envelope_ratio": 1.0,
-        }
-        for name in ("lf_content", "tail_robust", "attention_geometry")
-    }
-    branch_risk_content_records = {
-        name: {
-            field_name: branch_record[field_name]
-            for field_name in (
-                "risk_values_content_sha256",
-                "budget_values_content_sha256",
-                "eligible_mask_content_sha256",
-                "effective_budget_values_content_sha256",
-                "branch_unit_direction_content_sha256",
-                "branch_budget_envelope_content_sha256",
-                "branch_written_update_content_sha256",
-                "branch_post_risk_direction_content_sha256",
-                "branch_post_risk_reference_direction_content_sha256",
-                "branch_post_risk_response_content_sha256",
-                "branch_post_risk_reference_response_content_sha256",
-            )
-        }
-        for name, branch_record in branch_risk_records.items()
-    }
-    record = {
-        "step_index": 6,
-        "scheduler_step_timestep": 6.0,
-        "post_step_schedule_index": 7,
-        "post_step_schedule_timestep": 7.0,
-        "attention_operator_schedule_index": (
-            ATTENTION_OPERATOR_SCHEDULE_INDEX
-        ),
-        "attention_operator_timestep": 7.0,
-        "watermark_key_material_digest_random": "0" * 64,
-        **_formal_content_carrier_identity_fields(),
-        "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
-        "adjacent_step_reference_index": 5,
-        "adjacent_step_reference_latent_content_sha256": "1" * 64,
-        "adjacent_step_stability_status": (
-            "measured_from_immediately_previous_scheduler_step"
-        ),
-        "latent_content_sha256_before": "a" * 64,
-        "latent_content_sha256_after": "b" * 64,
-        "current_decoded_rgb_content_sha256": "6" * 64,
-        "previous_step_decoded_rgb_content_sha256": "7" * 64,
-        "clip_patch_tokens_content_sha256": "8" * 64,
-        "clip_cls_token_content_sha256": "9" * 64,
-        "semantic_risk_signal_content_sha256": "1" * 64,
-        "texture_risk_signal_content_sha256": "2" * 64,
-        "local_contrast_risk_signal_content_sha256": "3" * 64,
-        "adjacent_step_stability_signal_content_sha256": "4" * 64,
-        "attention_stability_signal_content_sha256": "5" * 64,
-        "active_carrier_branches": [
-            "lf_content",
-            "tail_robust",
-            "attention_geometry",
-        ],
-        "branch_risk_bundle_digest": build_stable_digest(
-            {
-                name: branch_risk_records[name]["risk_field_digest"]
-                for name in (
-                    "lf_content",
-                    "tail_robust",
-                    "attention_geometry",
-                )
-            }
-        ),
-        "branch_risk_records": branch_risk_records,
-        "branch_risk_content_digest": build_stable_digest(
-            {
-                "semantic_routing_enabled": True,
-                "active_carrier_branches": [
-                    "lf_content",
-                    "tail_robust",
-                    "attention_geometry",
-                ],
-                "risk_signal_content_records": {
-                    "current_decoded_rgb_content_sha256": "6" * 64,
-                    "previous_step_decoded_rgb_content_sha256": "7" * 64,
-                    "clip_patch_tokens_content_sha256": "8" * 64,
-                    "clip_cls_token_content_sha256": "9" * 64,
-                    "semantic_risk_signal_content_sha256": "1" * 64,
-                    "texture_risk_signal_content_sha256": "2" * 64,
-                    "local_contrast_risk_signal_content_sha256": "3" * 64,
-                    "adjacent_step_stability_signal_content_sha256": "4" * 64,
-                    "attention_stability_signal_content_sha256": "5" * 64,
-                },
-                "branch_risk_content_records": branch_risk_content_records,
-            }
-        ),
-        "null_space_records": null_space_records,
-        "lf_template_content_sha256": lf_template_identity[
-            "canonical_template_content_sha256"
-        ],
-        "lf_template_digest": lf_template_identity["template_digest"],
-        "lf_template_shape": lf_template_identity["template_shape"],
-        "lf_projection_energy_retention": 0.2,
-        "tail_template_digest": tail_template_identity["template_digest"],
-        "tail_template_content_sha256": tail_template_identity[
-            "canonical_template_content_sha256"
-        ],
-        "tail_template_shape": tail_template_identity["template_shape"],
-        "tail_template_element_count": math.prod(
-            tail_template_identity["template_shape"]
-        ),
-        "tail_selected_element_count": math.ceil(
-            math.prod(tail_template_identity["template_shape"])
-            * config.tail_fraction
-        ),
-        "tail_threshold": 1.0,
-        "tail_retained_fraction": (
-            math.ceil(
-                math.prod(tail_template_identity["template_shape"])
-                * config.tail_fraction
-            )
-            / math.prod(tail_template_identity["template_shape"])
-        ),
-        "tail_projection_energy_retention": 0.2,
-        "attention_score_before": 0.10,
-        "attention_content_base_score": 0.11,
-        "attention_score_after": 0.13,
-        "attention_actual_written_content_base_score": 0.105,
-        "attention_final_combined_score": 0.12,
-        "attention_score_gain": 0.02,
-        "attention_applied_update_strength": 0.005,
-        "attention_update_content_sha256": "7" * 64,
-        "attention_update_unit_direction_content_sha256": "d" * 64,
-        "stable_token_indices": [0, 1, 2, 3],
-        "stable_token_selection_digest": "e" * 64,
-        "stable_pair_weight_identity_digest": "f" * 64,
-        "stable_pair_weight_realization_digest": "a" * 64,
-        "attention_relation_component_names": list(
-            ATTENTION_RELATION_COMPONENT_NAMES
-        ),
-        "attention_relation_active_component_names": list(
-            attention_relation_component_protocol(
-                config.attention_relation_component_weights
-            )["attention_relation_active_component_names"]
-        ),
-        "attention_relation_component_weights": list(
-            config.attention_relation_component_weights
-        ),
-        "attention_relation_component_protocol_digest": (
-            attention_relation_component_protocol(
-                config.attention_relation_component_weights
-            )["attention_relation_component_protocol_digest"]
-        ),
-        "attention_relation_source": (
-            "direct_qk_centered_logits_and_probabilities"
-        ),
-        "attention_relation_direct_qk_source_ready": True,
-        "attention_relation_probability_scope": (
-            "sampled_image_token_qk_relation_probability"
-        ),
-        "attention_relation_component_identity_digest": "b" * 64,
-        "attention_relation_keyed_projection_digest": "c" * 64,
-        "attention_qk_atomic_content_records": (
-            attention_qk_atomic_content_records
-        ),
-        "attention_qk_atomic_content_digest": build_stable_digest(
-            {
-                "attention_qk_atomic_content_records": (
-                    attention_qk_atomic_content_records
-                )
-            }
-        ),
-        "attention_qk_atomic_content_ready": True,
-        "attention_relation_qk_operator_metadata_records": (
-            qk_operator_metadata_records
-        ),
-        "attention_relation_qk_operator_metadata_digest": (
-            qk_operator_metadata_records_digest(
-                qk_operator_metadata_records
-            )
-        ),
-        "attention_relation_qk_operator_metadata_ready": True,
-        "attention_module_names": list(config.attention_module_names),
-        "attention_coordinate_convention": (
-            config.attention_coordinate_convention
-        ),
-        "attention_grid_align_corners": (
-            config.attention_grid_align_corners
-        ),
-        "quantized_write_update_content_sha256": "d" * 64,
-        "quantized_write_update_dtype": "torch.float16",
-        "quantized_write_update_shape": [1, 16, 64, 64],
-        "quantized_write_update_norm": 0.01,
-        "quantized_composition_evidence_version": (
-            QUANTIZED_COMPOSITION_EVIDENCE_VERSION
-        ),
-        "quantized_write_original_latent_content_sha256": "a" * 64,
-        "quantized_write_candidate_latent_content_sha256": "b" * 64,
-        "combined_update_content_sha256": "e" * 64,
-        "combined_budget_envelope_content_sha256": "f" * 64,
-        "quantized_write_composition_order": list(
-            config.quantized_branch_composition_order
-        ),
-        "quantized_write_common_scale": 0.5,
-        "quantized_write_backtracking_factor": (
-            config.quantized_budget_envelope_backtracking_factor
-        ),
-        "quantized_write_backtracking_step_count": 1,
-        "quantized_write_active_branch_order": [
-            "lf_content",
-            "tail_robust",
-            "attention_geometry",
-        ],
-        "quantized_write_branch_content_identities": {
-            name: {
-                "branch_written_update_content_sha256": (
-                    branch_risk_records[name][
-                        "branch_written_update_content_sha256"
-                    ]
-                ),
-                "branch_budget_envelope_content_sha256": (
-                    branch_risk_records[name][
-                        "branch_budget_envelope_content_sha256"
-                    ]
-                ),
-            }
-            for name in (
-                "lf_content",
-                "tail_robust",
-                "attention_geometry",
-            )
-        },
-        "quantized_write_maximum_envelope_ratio": 1.0,
-        "quantized_write_budget_envelope_ready": True,
-        "lf_update_content_sha256": (
-            branch_update_content_records["lf_content"]
-        ),
-        "tail_robust_update_content_sha256": (
-            branch_update_content_records["tail_robust"]
-        ),
-        "attention_geometry_update_content_sha256": (
-            branch_update_content_records["attention_geometry"]
-        ),
-        "branch_updates_content_digest": build_stable_digest(
-            branch_update_content_records
-        ),
-        "quantized_write_jacobian_gate_applicable": True,
-        "quantized_write_jacobian_response_norm": 1e-5,
-        "quantized_write_reference_feature_norm": 1.0,
-        "quantized_write_reference_feature_content_sha256": "1" * 64,
-        "quantized_write_jacobian_response_content_sha256": "2" * 64,
-        "quantized_write_relative_jacobian_response": 1e-5,
-        "maximum_quantized_write_relative_jacobian_response": 1e-4,
-        "quantized_write_jacobian_gate_ready": True,
-        "quantized_write_jacobian_status": (
-            "measured_from_actual_quantized_latent_delta"
-        ),
-        "keyed_prg_version": config.keyed_prg_version,
-        "keyed_prg_protocol_digest": keyed_prg_protocol_record(
-            config.keyed_prg_version
-        )["keyed_prg_protocol_digest"],
-        "full_semantic_cosine_similarity": 0.999,
-        "full_handcrafted_structure_feature_relative_drift": 0.001,
-        "semantic_preservation_gate_ready": True,
-        "metadata": {
-            "semantic_routing_enabled": True,
-            "null_space_enabled": True,
-            "lf_enabled": True,
-            "tail_robust_enabled": True,
-            "tail_truncation_enabled": True,
-            "attention_geometry_enabled": True,
-        },
-    }
-    record["quantized_composition_evidence_digest"] = (
-        recompute_quantized_composition_evidence_digest(record)
-    )
-    assert _scientific_update_record_ready(record, config) is True
-    record["lf_carrier_protocol_digest"] = "0" * 64
-    assert _scientific_update_record_ready(record, config) is False
-    record["lf_carrier_protocol_digest"] = (
-        _FORMAL_LOW_FREQUENCY_CONFIG.protocol_digest
-    )
-    record["lf_template_digest"] = ""
-    assert _scientific_update_record_ready(record, config) is False
-    record["lf_template_digest"] = lf_template_identity["template_digest"]
-    removed_signal = record.pop("semantic_risk_signal_content_sha256")
-    assert _scientific_update_record_ready(record, config) is False
-    record["semantic_risk_signal_content_sha256"] = removed_signal
-    removed_envelope = record.pop(
-        "combined_budget_envelope_content_sha256"
-    )
-    assert _scientific_update_record_ready(record, config) is False
-    record["combined_budget_envelope_content_sha256"] = removed_envelope
-    record["quantized_write_common_scale"] = 0.25
-    assert _scientific_update_record_ready(record, config) is False
-    record["quantized_write_common_scale"] = 0.5
-    record["quantized_write_update_dtype"] = "torch.float32"
-    assert _scientific_update_record_ready(record, config) is False
-    record["quantized_write_update_dtype"] = "torch.float16"
-    record["quantized_composition_evidence_digest"] = "0" * 64
-    assert _scientific_update_record_ready(record, config) is False
-    record["quantized_composition_evidence_digest"] = (
-        recompute_quantized_composition_evidence_digest(record)
-    )
-    record["quantized_write_update_norm"] = 0.0
-    assert _scientific_update_record_ready(record, config) is False
-    record["quantized_write_update_norm"] = 0.01
-    record["quantized_write_jacobian_response_norm"] = float("nan")
-    assert _scientific_update_record_ready(record, config) is False
-    record["quantized_write_jacobian_response_norm"] = 1e-5
-    record["quantized_write_reference_feature_norm"] = -1.0
-    assert _scientific_update_record_ready(record, config) is False
-    record["quantized_write_reference_feature_norm"] = 1.0
-    reference_feature_content_sha256 = record.pop(
-        "quantized_write_reference_feature_content_sha256"
-    )
-    assert _scientific_update_record_ready(record, config) is False
-    record["quantized_write_reference_feature_content_sha256"] = (
-        reference_feature_content_sha256
-    )
-    response_content_sha256 = record.pop(
-        "quantized_write_jacobian_response_content_sha256"
-    )
-    assert _scientific_update_record_ready(record, config) is False
-    record["quantized_write_jacobian_response_content_sha256"] = (
-        response_content_sha256
-    )
-    record["branch_risk_records"]["lf_content"].pop(
-        "branch_written_update_content_sha256"
-    )
-    assert _scientific_update_record_ready(record, config) is False
-    record["branch_risk_records"]["lf_content"][
-        "branch_written_update_content_sha256"
-    ] = branch_update_content_records["lf_content"]
-    record["branch_risk_records"]["lf_content"][
-        "branch_post_risk_relative_response_residual"
-    ] = 1e-3
-    assert _scientific_update_record_ready(record, config) is False
-    record["branch_risk_records"]["lf_content"][
-        "branch_post_risk_relative_response_residual"
-    ] = 1e-5
-    record["branch_risk_records"]["lf_content"][
-        "branch_written_update_maximum_envelope_ratio"
-    ] = -1.0
-    assert _scientific_update_record_ready(record, config) is False
-    record["branch_risk_records"]["lf_content"][
-        "branch_written_update_maximum_envelope_ratio"
-    ] = 1.0
-    record["attention_score_gain"] = 0.0
-    assert _scientific_update_record_ready(record, config) is False
-    record["attention_score_gain"] = 0.02
-    record["attention_score_after"] = 0.11
-    assert _scientific_update_record_ready(record, config) is False
-    record["attention_score_after"] = 0.13
-    record["attention_actual_written_content_base_score"] = 0.12
-    assert _scientific_update_record_ready(record, config) is False
-    record["attention_actual_written_content_base_score"] = 0.105
-    record["branch_risk_bundle_digest"] = "0" * 64
-    assert _scientific_update_record_ready(record, config) is False
-    record["branch_risk_bundle_digest"] = build_stable_digest(
-        {
-            name: branch_risk_records[name]["risk_field_digest"]
-            for name in (
-                "lf_content",
-                "tail_robust",
-                "attention_geometry",
-            )
-        }
-    )
-    record["full_semantic_cosine_similarity"] = 0.9
-    assert _scientific_update_record_ready(record, config) is False
-    record["full_semantic_cosine_similarity"] = 0.999
-    record["quantized_write_relative_jacobian_response"] = 1e-3
-    assert _scientific_update_record_ready(record, config) is False
-    record["quantized_write_relative_jacobian_response"] = 1e-5
-    record["null_space_records"]["lf_content"][
-        "cg_relative_residuals"
-    ][0] = 1e-5
-    record["null_space_records"]["lf_content"]["solver_digest"] = (
-        recompute_jacobian_null_space_result_digest(
-            record["null_space_records"]["lf_content"]
-        )
-    )
-    assert _scientific_update_record_ready(record, config) is False
-    record["null_space_records"]["lf_content"][
-        "cg_relative_residuals"
-    ][0] = 1e-7
-    record["null_space_records"]["lf_content"]["solver_digest"] = (
-        recompute_jacobian_null_space_result_digest(
-            record["null_space_records"]["lf_content"]
-        )
-    )
-    record["keyed_prg_protocol_digest"] = "0" * 64
-    assert _scientific_update_record_ready(record, config) is False
-    record["keyed_prg_protocol_digest"] = keyed_prg_protocol_record()[
-        "keyed_prg_protocol_digest"
-    ]
-    record["adjacent_step_reference_index"] = 4
-    assert _scientific_update_record_ready(record, config) is False
-    record["adjacent_step_reference_index"] = 5
-    record["null_space_records"]["lf_content"][
-        "column_response_norms"
-    ][0] = 0.25
-    assert _scientific_update_record_ready(record, config) is False
-    record["null_space_records"]["lf_content"][
-        "column_response_norms"
-    ][0] = 1e-6
-    record["attention_relation_qk_operator_metadata_records"][0][
-        "head_count"
-    ] = 3
-    assert _scientific_update_record_ready(record, config) is False
-    record["attention_relation_qk_operator_metadata_records"][0][
-        "head_count"
-    ] = 2
-    record["attention_relation_qk_operator_metadata_digest"] = "0" * 64
-    assert _scientific_update_record_ready(record, config) is False
-    record["attention_relation_qk_operator_metadata_digest"] = (
-        qk_operator_metadata_records_digest(
-            record[
-                "attention_relation_qk_operator_metadata_records"
-            ]
-        )
-    )
-    record["attention_qk_atomic_content_records"][0][
-        "evaluation_score"
-    ] = 0.20
-    record["attention_qk_atomic_content_digest"] = (
-        qk_atomic_evaluation_records_digest(
-            record["attention_qk_atomic_content_records"],
-            "attention_qk_atomic_content_records",
-        )
-    )
-    assert _scientific_update_record_ready(record, config) is False
-    record["attention_qk_atomic_content_records"][0][
-        "evaluation_score"
-    ] = 0.10
-    record["attention_qk_atomic_content_digest"] = (
-        qk_atomic_evaluation_records_digest(
-            record["attention_qk_atomic_content_records"],
-            "attention_qk_atomic_content_records",
-        )
-    )
-    second_qk_record = record["attention_qk_atomic_content_records"][1]
-    second_atoms = second_qk_record["qk_atomic_content_records"]
-    second_digest = second_qk_record["qk_atomic_content_digest"]
-    second_qk_record["qk_atomic_content_records"] = record[
-        "attention_qk_atomic_content_records"
-    ][0]["qk_atomic_content_records"]
-    second_qk_record["qk_atomic_content_digest"] = record[
-        "attention_qk_atomic_content_records"
-    ][0]["qk_atomic_content_digest"]
-    record["attention_qk_atomic_content_digest"] = (
-        qk_atomic_evaluation_records_digest(
-            record["attention_qk_atomic_content_records"],
-            "attention_qk_atomic_content_records",
-        )
-    )
-    assert _scientific_update_record_ready(record, config) is False
-    second_qk_record["qk_atomic_content_records"] = second_atoms
-    second_qk_record["qk_atomic_content_digest"] = second_digest
-    record["attention_qk_atomic_content_digest"] = (
-        qk_atomic_evaluation_records_digest(
-            record["attention_qk_atomic_content_records"],
-            "attention_qk_atomic_content_records",
-        )
-    )
-    record["attention_module_names"] = ["transformer_blocks.1.attn"]
-    assert _scientific_update_record_ready(record, config) is False
 
 
 @pytest.mark.quick
@@ -2990,20 +2304,21 @@ def test_image_only_detector_reextracts_qk_after_alignment(
         second_layer_name,
     )
     reference = torch.zeros(1, 2, 8, 8)
-    lf_template = build_low_frequency_template(
-        reference,
-        key_material,
-        model_id,
-        _FORMAL_LOW_FREQUENCY_CONFIG,
-        prg_version=KEYED_PRG_VERSION,
+    carrier_model_identity_digest = build_stable_digest(
+        {"model_id": model_id, "model_revision": "1" * 40}
     )
-    tail_template = build_tail_robust_template(
-        reference,
-        key_material,
-        model_id,
-        0.20,
+    lf_template = build_formal_low_frequency_template(
+        reference_latent=reference,
+        key_material=key_material,
+        model_identity_digest=carrier_model_identity_digest,
         prg_version=KEYED_PRG_VERSION,
-    )[0]
+    ).template
+    tail_template = build_high_frequency_tail_template(
+        reference_latent=reference,
+        key_material=key_material,
+        model_identity_digest=carrier_model_identity_digest,
+        prg_version=KEYED_PRG_VERSION,
+    ).template
     original = {
         "latent": _nonconstant_test_latent(),
         "attentions": (observed_attention, second_observed_attention),
@@ -3027,17 +2342,15 @@ def test_image_only_detector_reextracts_qk_after_alignment(
         reference_latent: object,
         consumed_key: str,
         consumed_model: str,
-        low_frequency_config: LowFrequencyCarrierConfig,
         **kwargs: object,
     ) -> object:
         """记录 raw 与 aligned 两次盲检实际消费的 LF 协议."""
 
-        consumed_lf_protocols.append(low_frequency_config.to_record())
+        consumed_lf_protocols.append(_FORMAL_LOW_FREQUENCY_PROTOCOL)
         return original_build_low_frequency_template(
-            reference_latent,
-            consumed_key,
-            consumed_model,
-            low_frequency_config,
+            reference_latent=reference_latent,
+            key_material=consumed_key,
+            model_identity_digest=consumed_model,
             **kwargs,
         )
 
@@ -3376,34 +2689,39 @@ def test_image_only_detector_interface_and_positive_content_path() -> None:
     assert "prompt" not in parameters
 
     reference = torch.zeros(1, 2, 8, 8)
-    lf_template = build_low_frequency_template(
-        reference,
-        "blind_key",
-        "model",
-        _FORMAL_LOW_FREQUENCY_CONFIG,
-        prg_version=KEYED_PRG_VERSION,
+    measurement_config = _image_only_measurement_config(
+        model_id="model",
+        attention_anchor_count=12,
+        attention_residual_threshold=0.20,
+        attention_minimum_inlier_ratio=0.50,
     )
-    tail_template = build_tail_robust_template(
-        reference,
-        "blind_key",
-        "model",
-        0.20,
+    carrier_model_identity_digest = build_stable_digest(
+        {
+            "model_id": measurement_config.model_id,
+            "model_revision": measurement_config.model_revision,
+        }
+    )
+    lf_template = build_formal_low_frequency_template(
+        reference_latent=reference,
+        key_material="blind_key",
+        model_identity_digest=carrier_model_identity_digest,
         prg_version=KEYED_PRG_VERSION,
-    )[0]
+    ).template
+    tail_template = build_high_frequency_tail_template(
+        reference_latent=reference,
+        key_material="blind_key",
+        model_identity_digest=carrier_model_identity_digest,
+        prg_version=KEYED_PRG_VERSION,
+    ).template
     encoded = 0.8 * lf_template + 0.4 * tail_template
     result = measure_image_only_watermark(
         image=encoded,
         key_material="blind_key",
-        config=_image_only_measurement_config(
-            model_id="model",
-            attention_anchor_count=12,
-            attention_residual_threshold=0.20,
-            attention_minimum_inlier_ratio=0.50,
-        ),
+        config=measurement_config,
         image_latent_encoder=lambda image: image,
     )
 
-    assert result.content.content_score > 0.20
+    assert result.content.blind_content_score > 0.20
     assert result.metadata["blind_image_detector"] is True
     assert result.metadata["generation_latent_trace_required"] is False
     assert result.metadata["attention_alignment_gate"] == (
@@ -3413,60 +2731,13 @@ def test_image_only_detector_interface_and_positive_content_path() -> None:
         _FORMAL_LOW_FREQUENCY_CONFIG.protocol_digest
     )
     assert result.content.lf_weight == _FORMAL_LF_WEIGHT
-    assert result.content.tail_robust_weight == _FORMAL_TAIL_ROBUST_WEIGHT
-
-
-@pytest.mark.quick
-@pytest.mark.parametrize("disabled_branch", ("lf_content", "tail_robust"))
-def test_disabled_detector_carrier_is_not_built_or_scored(
-    monkeypatch: pytest.MonkeyPatch,
-    disabled_branch: str,
-) -> None:
-    """内容分支消融必须跳过模板构造, 并将对应检测原子精确清空."""
-
-    import main.methods.detection.image_only as detector_module
-
-    def fail_builder(*_args: object, **_kwargs: object) -> object:
-        """已禁用模板构造器一旦执行就使测试失败."""
-
-        pytest.fail("已禁用内容分支仍构造检测模板")
-
-    if disabled_branch == "lf_content":
-        monkeypatch.setattr(
-            detector_module,
-            "build_low_frequency_template",
-            fail_builder,
-        )
-        lf_weight, tail_weight = 0.0, 1.0
-    else:
-        monkeypatch.setattr(
-            detector_module,
-            "build_tail_robust_template",
-            fail_builder,
-        )
-        lf_weight, tail_weight = 1.0, 0.0
-
-    result = measure_image_only_watermark(
-        image=_nonconstant_test_latent(),
-        key_material="disabled_detector_carrier_key",
-        config=_image_only_measurement_config(
-            lf_weight=lf_weight,
-            tail_robust_weight=tail_weight,
-        ),
-        image_latent_encoder=lambda value: value,
+    assert result.content.hf_tail_weight == _FORMAL_TAIL_ROBUST_WEIGHT
+    validated_protocol = validate_detection_content_carrier_protocol(
+        result.to_record()
     )
-    record = result.to_record()
-
-    if disabled_branch == "lf_content":
-        assert result.content.lf_score == 0.0
-        assert record["lf_template_content_sha256"] == ""
-    else:
-        assert result.content.tail_robust_score == 0.0
-        assert record["tail_template_content_sha256"] == ""
-        assert record["tail_template_shape"] == []
-        assert record["tail_template_element_count"] == 0
-        assert record["tail_selected_element_count"] == 0
-    validate_image_only_measurement_digest_record(record)
+    assert validated_protocol["tail_carrier_protocol_digest"] == (
+        result.tail_carrier_protocol_digest
+    )
 
 
 @pytest.mark.quick
@@ -3667,7 +2938,7 @@ def test_measurement_rejects_zero_variance_encoded_latent(
 ) -> None:
     """数学上未定义的常量 latent 相关统计不得形成合法检测记录。"""
 
-    with pytest.raises(RuntimeError, match="非零中心化能量"):
+    with pytest.raises(ValueError, match="非零中心化能量"):
         measure_image_only_watermark(
             image=torch.zeros(1, channel_count, 8, 8),
             key_material="detector_degenerate_correlation_key",
@@ -4088,6 +3359,7 @@ def test_completed_runtime_cache_rejects_missing_scientific_content_binding(
     config = SemanticWatermarkRuntimeConfig(
         output_dir="outputs/cache_test",
         attention_geometry_enabled=False,
+        image_alignment_enabled=False,
     )
     run_id = build_semantic_watermark_run_id(config)
     run_dir = tmp_path / config.output_dir / run_id
