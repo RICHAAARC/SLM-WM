@@ -6,8 +6,10 @@ import argparse
 from dataclasses import replace
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
+import struct
 import sys
 import time
 from typing import Any, Mapping, Sequence
@@ -36,7 +38,11 @@ from experiments.protocol.splits import apply_split_assignments
 from experiments.runners.image_only_dataset_workload import build_method_config
 from experiments.runners.semantic_watermark_runtime import (
     semantic_watermark_runtime_config_digest,
+    run_content_runtime_smoke,
     write_semantic_watermark_runtime_outputs,
+)
+from experiments.protocol.content_routing_reference_quantile import (
+    ContentRoutingReferenceScalars,
 )
 from experiments.runtime import repository_environment
 from experiments.runtime.dependency_profiles import require_dependency_profile_ready
@@ -50,6 +56,7 @@ DEFAULT_KNOWN_ANSWER_PATH = Path(
     "configs/keyed_prg_cross_platform_known_answer.json"
 )
 DEFAULT_OUTPUT_ROOT = Path("outputs/gpu_method_qualification")
+CONTENT_RUNTIME_SMOKE_SCHEMA = "content_runtime_gpu_smoke_v1"
 
 
 def _file_sha256(path: Path) -> str:
@@ -301,7 +308,101 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--registered-budget")
     parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT))
+    parser.add_argument("--content-runtime-smoke", action="store_true")
+    parser.add_argument("--reference-gradient", type=float)
+    parser.add_argument("--reference-response", type=float)
+    parser.add_argument("--reference-sensitivity", type=float)
     return parser
+
+
+def _explicit_smoke_references(arguments: argparse.Namespace) -> tuple[
+    ContentRoutingReferenceScalars,
+    dict[str, Any],
+]:
+    """Validate required unqualified binary32 reference inputs."""
+
+    values = {
+        "reference_gradient": arguments.reference_gradient,
+        "reference_response": arguments.reference_response,
+        "reference_sensitivity": arguments.reference_sensitivity,
+    }
+    bits: dict[str, str] = {}
+    for name, value in values.items():
+        if type(value) is not float or not math.isfinite(value) or not value > 0.0:
+            raise ValueError(f"--{name.replace('_', '-')} must be explicit and positive")
+        try:
+            encoded = struct.pack(">f", value)
+            decoded = struct.unpack(">f", encoded)[0]
+        except (OverflowError, struct.error) as exc:
+            raise ValueError(f"{name} must be exact binary32") from exc
+        if decoded != value:
+            raise ValueError(f"{name} must be exact binary32")
+        bits[name] = encoded.hex()
+    identity = {
+        "reference_input_role": "explicit_smoke_only_unqualified",
+        "reference_values": values,
+        "reference_binary32_hex": bits,
+        "supports_paper_claim": False,
+    }
+    return ContentRoutingReferenceScalars(**values), {
+        **identity,
+        "reference_input_digest": build_stable_digest(identity),
+    }
+
+
+def _write_content_runtime_smoke(
+    *,
+    root: Path,
+    output_root: Path,
+    config: Any,
+    prompt_record: Any,
+    execution_lock: Mapping[str, Any],
+    references: ContentRoutingReferenceScalars,
+    reference_identity: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Run and persist one real image plus its non-claim smoke diagnostic."""
+
+    image, diagnostic = run_content_runtime_smoke(
+        config,
+        references,
+        verified_formal_execution_lock=execution_lock,
+        repository_root=root,
+    )
+    report_dir = output_root / "content_runtime_smoke" / prompt_record.prompt_id
+    report_dir.mkdir(parents=True, exist_ok=False)
+    image_path = report_dir / "watermarked.png"
+    image.save(image_path)
+    report = {
+        "report_schema": CONTENT_RUNTIME_SMOKE_SCHEMA,
+        "schema_version": 1,
+        "smoke_scope": "one_prompt_one_image_one_key_real_sd35_cuda",
+        "prompt_id": prompt_record.prompt_id,
+        "prompt_digest": prompt_record.prompt_digest,
+        "key_material_digest": build_stable_digest(
+            {"key_material": config.key_material}
+        ),
+        "reference_input": dict(reference_identity),
+        "runtime_diagnostic": diagnostic,
+        "image_path": image_path.relative_to(root).as_posix(),
+        "image_sha256": _file_sha256(image_path),
+        "content_runtime_smoke_ready": True,
+        "supports_paper_claim": False,
+    }
+    report["content_runtime_smoke_digest"] = build_stable_digest(report)
+    report_path = report_dir / "content_runtime_smoke.json"
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "report_schema": "content_runtime_smoke_invocation_v1",
+        "schema_version": 1,
+        "content_runtime_smoke_report_path": report_path.relative_to(root).as_posix(),
+        "content_runtime_smoke_report_sha256": _file_sha256(report_path),
+        "content_runtime_smoke_digest": report["content_runtime_smoke_digest"],
+        "content_runtime_smoke_ready": True,
+        "supports_paper_claim": False,
+    }
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -339,10 +440,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         diffusion_attacks_enabled=False,
         output_dir=(output_root / "runtime_runs").relative_to(root).as_posix(),
     )
+    if args.content_runtime_smoke:
+        key_material = os.environ.get("SLM_WM_KEY_MATERIAL")
+        if type(key_material) is not str or not key_material:
+            raise RuntimeError("content runtime smoke requires SLM_WM_KEY_MATERIAL")
+        config = replace(config, key_material=key_material)
     import torch
 
     if not torch.cuda.is_available() or not config.device_name.startswith("cuda"):
         raise RuntimeError("GPU 方法资格化禁止在 CPU 或伪 CUDA 环境运行")
+    if args.content_runtime_smoke:
+        references, reference_identity = _explicit_smoke_references(args)
+        invocation = _write_content_runtime_smoke(
+            root=root,
+            output_root=output_root,
+            config=config,
+            prompt_record=prompt_record,
+            execution_lock=execution_lock,
+            references=references,
+            reference_identity=reference_identity,
+        )
+        print(json.dumps(invocation, ensure_ascii=False, sort_keys=True))
+        return 0
     torch_func_compatibility = _evaluate_torch_func_compatibility(
         torch,
         config.device_name,

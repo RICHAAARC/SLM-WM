@@ -167,3 +167,30 @@ def test_execute_records_bootstrap_and_verified_orchestrator_environment(
     assert result["workflow_environment"] == {
         "persistent_output_dir": "/persistent"
     }
+
+
+@pytest.mark.quick
+def test_content_runtime_smoke_is_a_named_orchestrator_operation() -> None:
+    """The smoke operation carries all three explicit references through parsing."""
+
+    arguments = entry.build_parser().parse_args(
+        [
+            "content_runtime_smoke",
+            "--root", "/repository",
+            "--repository-commit", "a" * 40,
+            "--paper-run-name", "probe_paper",
+            "--result-path", "outputs/smoke.json",
+            "--orchestrator-profile-id", "workflow_orchestrator",
+            "--orchestrator-python-version", "3.12.13",
+            "--orchestrator-lock-digest", "b" * 64,
+            "--orchestrator-python-executable", "/managed/python",
+            "--orchestrator-python-executable-sha256", "c" * 64,
+            "--prompt-id", "probe_prompt_0001",
+            "--reference-gradient", "1.0",
+            "--reference-response", "0.5",
+            "--reference-sensitivity", "0.25",
+        ]
+    )
+    assert arguments.operation == "content_runtime_smoke"
+    assert arguments.reference_gradient == 1.0
+    assert arguments.smoke_output_root == "outputs/content_runtime_smoke"

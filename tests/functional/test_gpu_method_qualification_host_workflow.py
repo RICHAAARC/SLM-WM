@@ -232,6 +232,197 @@ def test_formal_host_builds_qualification_child_command() -> None:
 
 
 @pytest.mark.quick
+def test_formal_host_builds_reproducible_content_runtime_smoke_command() -> None:
+    """The real smoke has a named clean-detached host route, not python -c."""
+
+    arguments = host.build_parser().parse_args(
+        [
+            "--repository-commit",
+            "a" * 40,
+            "content_runtime_smoke",
+            "--paper-run-name",
+            "probe_paper",
+            "--prompt-id",
+            "probe_prompt_0001",
+            "--reference-gradient",
+            "1.0",
+            "--reference-response",
+            "0.5",
+            "--reference-sensitivity",
+            "0.25",
+            "--result-path",
+            "outputs/host/content_runtime_smoke.json",
+        ]
+    )
+    command = host.build_child_command(
+        arguments,
+        Path("/managed/python"),
+        Path("/repository"),
+        {
+            "profile_id": "workflow_orchestrator",
+            "python_version": "3.12.13",
+            "complete_hash_lock_digest": "b" * 64,
+            "python_executable": "/managed/python",
+            "python_executable_sha256": "c" * 64,
+        },
+    )
+    assert command[2] == "/repository/scripts/formal_workflow_entry.py"
+    assert command[3] == "content_runtime_smoke"
+    assert "-c" not in command
+    assert command[command.index("--reference-gradient") + 1] == "1.0"
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        None,
+        "lf_zero",
+        "hf_zero",
+        "geometry_zero",
+        "current_decode_count",
+        "probe_decode_count",
+        "capture_count",
+        "callback_count",
+        "write_count",
+        "combined_budget",
+        "strict_score",
+        "image_missing",
+        "image_sha",
+    ),
+)
+def test_content_runtime_smoke_host_revalidates_clean_detached_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str | None,
+) -> None:
+    """Smoke success requires the same before/after lock evidence as qualification."""
+
+    root = tmp_path / "repository"
+    report_dir = root / "outputs/content_runtime_smoke/content_runtime_smoke/prompt"
+    report_dir.mkdir(parents=True)
+    image_path = report_dir / "watermarked.png"
+    image_path.write_bytes(b"real-image-bytes")
+    diagnostic = {
+        "method_role": "full_dual_chain",
+        "captured_previous_index": 9,
+        "captured_previous_count": 1,
+        "callback_write_index": 10,
+        "callback_write_count": 1,
+        "current_image_decode_count": 1,
+        "public_probe_additional_decode_count": 1,
+        "actual_dtype_single_write_count": 1,
+        "common_gamma": 0.5,
+        "lf_effective_l2": 0.001,
+        "hf_tail_effective_l2": 0.001,
+        "geometry_effective_l2": 0.001,
+        "combined_effective_l2": 0.004,
+        "combined_effective_l2_limit": 0.005,
+        "combined_effective_l2_ready": True,
+        "actual_dtype_single_write_digest": "a" * 64,
+        "content_only_postwrite_qk_score": 0.1,
+        "final_postwrite_qk_score": 0.2,
+        "post_write_qk_strict_ready": True,
+        "legacy_semantic_feature_operator_present": False,
+    }
+    if mutation == "lf_zero":
+        diagnostic["lf_effective_l2"] = 0.0
+    elif mutation == "hf_zero":
+        diagnostic["hf_tail_effective_l2"] = 0.0
+    elif mutation == "geometry_zero":
+        diagnostic["geometry_effective_l2"] = 0.0
+    elif mutation == "current_decode_count":
+        diagnostic["current_image_decode_count"] = 2
+    elif mutation == "probe_decode_count":
+        diagnostic["public_probe_additional_decode_count"] = 2
+    elif mutation == "capture_count":
+        diagnostic["captured_previous_count"] = 2
+    elif mutation == "callback_count":
+        diagnostic["callback_write_count"] = 2
+    elif mutation == "write_count":
+        diagnostic["actual_dtype_single_write_count"] = 2
+    elif mutation == "combined_budget":
+        diagnostic["combined_effective_l2"] = 0.006
+    elif mutation == "strict_score":
+        diagnostic["final_postwrite_qk_score"] = 0.1
+    report = {
+        "report_schema": "content_runtime_gpu_smoke_v1",
+        "schema_version": 1,
+        "content_runtime_smoke_ready": True,
+        "runtime_diagnostic": diagnostic,
+        "image_path": image_path.relative_to(root).as_posix(),
+        "image_sha256": _sha256(image_path),
+        "supports_paper_claim": False,
+    }
+    if mutation == "image_sha":
+        report["image_sha256"] = "0" * 64
+    report["content_runtime_smoke_digest"] = build_stable_digest(report)
+    report_path = report_dir / "content_runtime_smoke.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    invocation = {
+        "report_schema": workflow.CONTENT_RUNTIME_SMOKE_INVOCATION_SCHEMA,
+        "schema_version": 1,
+        "content_runtime_smoke_report_path": report_path.relative_to(root).as_posix(),
+        "content_runtime_smoke_report_sha256": _sha256(report_path),
+        "content_runtime_smoke_digest": report["content_runtime_smoke_digest"],
+        "content_runtime_smoke_ready": True,
+        "supports_paper_claim": False,
+    }
+    repository_commit = "a" * 40
+
+    def fake_execute(_profile: str, _argv: list[str], *, execution_report_path: Path, repository_root: Path):
+        isolated = {
+            "report_schema": "isolated_scientific_execution_report",
+            "schema_version": 1,
+            "profile_id": workflow.SCIENTIFIC_PROFILE_ID,
+            "profile_digest": "b" * 64,
+            "direct_requirements_digest": "c" * 64,
+            "complete_hash_lock_digest": "d" * 64,
+            "complete_hash_lock_dependency_count": 1,
+            "dependency_environment_report_valid": True,
+            "dependency_environment_report_digest": "e" * 64,
+            "python_executable_sha256": "f" * 64,
+            "formal_execution_commit": repository_commit,
+            "formal_execution_lock_ready": True,
+            "formal_execution_lock_revalidated_before_child": True,
+            "formal_execution_lock_revalidated_after_child": True,
+            "python_executable_revalidated_before_child": True,
+            "python_executable_revalidated_after_child": True,
+            "dependency_environment_report_revalidated_before_child": True,
+            "dependency_environment_report_revalidated_after_child": True,
+            "execution": {"return_code": 0, "stdout": json.dumps(invocation), "stderr": ""},
+            "decision": "pass",
+            "supports_paper_claim": False,
+        }
+        path = Path(execution_report_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(isolated), encoding="utf-8")
+        return isolated, path
+
+    monkeypatch.setattr(workflow, "execute_isolated_scientific_command", fake_execute)
+    if mutation == "image_missing":
+        image_path.unlink()
+    call = lambda: workflow.run_content_runtime_smoke_host_workflow(
+        root=root,
+        repository_commit=repository_commit,
+        paper_run_name="probe_paper",
+        prompt_id="prompt",
+        result_path="outputs/host/smoke.json",
+        smoke_output_root="outputs/content_runtime_smoke",
+        reference_gradient=1.0,
+        reference_response=0.5,
+        reference_sensitivity=0.25,
+    )
+    if mutation is None:
+        result = call()
+        assert result["decision"] == "pass"
+        assert result["workflow_summary"]["content_runtime_smoke_ready"] is True
+    else:
+        with pytest.raises(ValueError):
+            call()
+
+
+@pytest.mark.quick
 @pytest.mark.parametrize("operator_ready", (False, True))
 def test_formal_entry_propagates_qualification_decision(
     tmp_path: Path,

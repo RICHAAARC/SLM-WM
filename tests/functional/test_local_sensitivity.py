@@ -50,6 +50,17 @@ def _identity() -> dict[str, Any]:
     }
 
 
+def test_public_probe_identity_builder_matches_the_frozen_q_input() -> None:
+    """Runtime integration must not rebuild the public probe identity ad hoc."""
+
+    identity = local_sensitivity_module.build_public_probe_identity(
+        _DOMAIN_FIELDS["model_revision"]
+    )
+    assert identity == _identity()
+    with pytest.raises(ValueError):
+        local_sensitivity_module.build_public_probe_identity("")
+
+
 def _stable_global_rms(value: torch.Tensor) -> torch.Tensor:
     scale = torch.amax(torch.abs(value))
     safe_scale = torch.where(scale > 0.0, scale, torch.ones_like(scale))

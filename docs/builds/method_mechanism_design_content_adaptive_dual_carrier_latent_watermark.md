@@ -406,11 +406,17 @@ def compose_dual_chain_update_once(
     hf_tail_update: Any,
     geometry_update: Any,
     budget: DualChainWriteBudget,
+    *,
+    method_role: str,
 ) -> DualChainWriteResult:
     """在 float32 中组合三分支，并执行一次实际 dtype latent 写回。"""
 ```
 
 `DualChainWriteBudget` 只允许精确值 `0.0025/0.0015/0.0010/0.0050`、共同回溯因子 `0.5` 和最多24次缩小；配置解析器必须拒绝其他值，并将全部字段绑定到 `budget_identity_digest` 与方法定义摘要。该结构只消除隐式 `Any`，不允许外层为样本、攻击或 profile 改写预算。函数必须按 `method_role` 记录共同缩放后每个登记活动分支的实际有效 L2、组合有效 L2、理论更新与实际写回摘要；禁用分支的 effective L2 精确为0且不作为写回失败。
+
+共同回溯固定按 `j=0..24` 令 `gamma=2^-j`，在 `float32` 中以 `LF -> HF-tail -> geometry` 顺序合成；活动职责只由精确 `method_role` 决定，不得通过更新张量是否全零猜测。`full_dual_chain` 与 `uniform_content_routing` 登记 LF/HF-tail/geometry 三分支，`lf_only_content` 登记 LF/geometry，`hf_tail_only_content` 登记 HF-tail/geometry，`content_chain_only` 与 `geometry_recovery_without_embedded_sync` 登记 LF/HF-tail。登记活动分支在 theoretical float32 及 actual dtype 中都必须产生非零增量；登记禁用分支的理论更新与 effective L2 必须精确为0，非零输入失败关闭。组合 actual-dtype 增量必须非零且满足 `||Delta_actual||_2 <= 0.0050||float32(z_10)||_2`。首个满足上述门禁的候选只执行一次 actual-dtype latent 写回。写回后必须使用几何梯度阶段的同一稳定 pair 评分模板，对同 `gamma` 的 content-only baseline 与最终 latent 分别执行直接 Q/K 求值；最终分数不严格提高时样本失败，不得继续缩小 `gamma`。
+
+单样本正式 smoke 是当前新链的可执行入口而非资格化结论：callback 只在索引9捕获 `z_9`，只在索引10执行一次 `z_10` 内容观测、载体构造、几何同步、共同回溯和写回；`x_10` 只解码一次并由 T/S/Q 复用，Q 只允许一次额外扰动 VAE decode。smoke 必须从调用方显式接收三个 exact binary32 reference，记录为 `explicit_smoke_only_unqualified` 且 `supports_paper_claim=false`，不得加载固定 registry、现场重算 reference 或宣称真实总体资格化。该入口只装配 SD3.5、冻结 Q/K 层与正式 Prompt-saliency 双塔，不得创建旧716维语义特征运行时、旧 JVP/VJP/PSD-CG 路径或其 operator identity；旧公开 runtime 在真实 smoke 通过并完成独立复审前保持原行为。
 
 ### 3.7 仅图像测量与救回
 

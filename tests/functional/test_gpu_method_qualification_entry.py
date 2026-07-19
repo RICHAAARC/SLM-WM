@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import sys
+import struct
 
 import pytest
 
@@ -24,6 +25,41 @@ from scripts import run_gpu_method_qualification as entry
 
 
 pytestmark = pytest.mark.quick
+
+
+def test_content_smoke_requires_explicit_binary32_references() -> None:
+    """Smoke references have no defaults and cannot masquerade as qualified values."""
+
+    parser = entry.build_parser()
+    arguments = parser.parse_args(
+        [
+            "--prompt-id",
+            "probe_prompt_0001",
+            "--content-runtime-smoke",
+            "--reference-gradient",
+            "1.0",
+            "--reference-response",
+            "0.5",
+            "--reference-sensitivity",
+            str(struct.unpack(">f", bytes.fromhex("3f000001"))[0]),
+        ]
+    )
+    references, identity = entry._explicit_smoke_references(arguments)
+    assert references.reference_gradient == 1.0
+    assert identity["reference_input_role"] == "explicit_smoke_only_unqualified"
+    assert identity["supports_paper_claim"] is False
+    arguments.reference_gradient = 1.1
+    with pytest.raises(ValueError, match="binary32"):
+        entry._explicit_smoke_references(arguments)
+
+
+def test_content_smoke_parser_does_not_default_reference_values() -> None:
+    arguments = entry.build_parser().parse_args(
+        ["--prompt-id", "probe_prompt_0001", "--content-runtime-smoke"]
+    )
+    assert arguments.reference_gradient is None
+    assert arguments.reference_response is None
+    assert arguments.reference_sensitivity is None
 
 
 def test_gpu_qualification_revalidates_registered_and_wrong_key_identity() -> None:

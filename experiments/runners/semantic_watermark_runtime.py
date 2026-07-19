@@ -39,6 +39,12 @@ from experiments.protocol.image_only_evidence import (
     validate_frozen_evidence_protocol_integrity,
 )
 from experiments.runtime.diffusion.semantic_model_loader import load_clip_vision_model
+from experiments.runtime.diffusion.prompt_saliency_model_loader import (
+    load_prompt_saliency_clip_runtime,
+)
+from experiments.protocol.content_routing_reference_quantile import (
+    ContentRoutingReferenceScalars,
+)
 from experiments.protocol.attacks import (
     attack_config_digest,
     default_attack_configs,
@@ -141,6 +147,21 @@ from main.methods.update_composition import (
     build_risk_bounded_update,
     iter_quantized_composition_candidates,
     rescale_risk_bounded_update,
+    compose_dual_chain_update_once,
+    formal_dual_chain_write_budget,
+)
+from main.methods.carrier.low_frequency import (
+    build_low_frequency_template as build_formal_low_frequency_template,
+)
+from main.methods.carrier.high_frequency_tail import (
+    build_high_frequency_tail_template,
+)
+from main.methods.carrier.content_update import build_content_carrier_update
+from main.methods.content.local_sensitivity import build_public_probe_identity
+from main.methods.content.runtime_adapter import build_content_observation_routing
+from main.methods.geometry.sync_update import (
+    _build_attention_geometry_sync_update_with_evidence,
+    _evaluate_post_write_geometry_relation,
 )
 
 
@@ -714,6 +735,387 @@ def load_semantic_watermark_runtime_context(
         runtime_versions=runtime_versions,
         diffusion_attack_runtime=diffusion_attack_runtime,
     )
+
+
+@dataclass(frozen=True)
+class _ContentRuntimeSmokeComponents:
+    """Minimal real components for the new content/QK smoke path."""
+
+    pipeline: Any
+    prompt_saliency_runtime: Any
+    attention_modules: tuple[tuple[str, Any], ...]
+    unconditional_prompt: Any
+    unconditional_pooled: Any
+    runtime_versions: dict[str, Any]
+
+
+def _load_content_runtime_smoke_components(
+    config: SemanticWatermarkRuntimeConfig,
+    *,
+    verified_formal_execution_lock: Mapping[str, Any],
+    repository_root: str | Path,
+) -> _ContentRuntimeSmokeComponents:
+    """Load only SD3.5, formal Q/K layers, and the Prompt-saliency towers."""
+
+    pipeline, runtime_versions = load_pipeline(config)
+    from diffusers.models.attention_processor import AttnProcessor
+
+    pipeline.vae.set_attn_processor(AttnProcessor())
+    for parameter in pipeline.transformer.parameters():
+        parameter.requires_grad_(False)
+    attention_modules = _attention_modules(pipeline, config.attention_module_names)
+    unconditional_prompt, unconditional_pooled = _unconditional_embeddings(
+        pipeline,
+        pipeline._execution_device,
+        config.public_detection_conditioning_protocol,
+        config.public_detection_condition_text,
+    )
+    prompt_saliency_runtime = load_prompt_saliency_clip_runtime(
+        "openai/clip-vit-base-patch32",
+        "3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268",
+        config.device_name,
+        local_files_only=True,
+        verified_formal_execution_lock=verified_formal_execution_lock,
+        repository_root=repository_root,
+    )
+    runtime_versions = {
+        **runtime_versions,
+        "content_runtime_operator": "formal_content_qk_single_write_v1",
+        "prompt_saliency_model_identity_digest": (
+            prompt_saliency_runtime.model_identity_digest
+        ),
+        "attention_module_names": list(config.attention_module_names),
+    }
+    if "semantic_feature_operator_contract" in json.dumps(
+        runtime_versions,
+        ensure_ascii=False,
+        sort_keys=True,
+    ):
+        raise RuntimeError("content smoke must not contain the legacy semantic operator")
+    return _ContentRuntimeSmokeComponents(
+        pipeline=pipeline,
+        prompt_saliency_runtime=prompt_saliency_runtime,
+        attention_modules=attention_modules,
+        unconditional_prompt=unconditional_prompt,
+        unconditional_pooled=unconditional_pooled,
+        runtime_versions=runtime_versions,
+    )
+
+
+def _decode_content_runtime_latent(pipeline: Any, latent: Any) -> Any:
+    """Decode one SD3.5 scheduler latent to an RGB [0,1] Tensor."""
+
+    import torch
+
+    vae_dtype = next(pipeline.vae.parameters()).dtype
+    scaled = latent.to(dtype=vae_dtype) / pipeline.vae.config.scaling_factor
+    scaled = scaled + pipeline.vae.config.shift_factor
+    decoded = pipeline.vae.decode(scaled, return_dict=False)[0]
+    image = pipeline.image_processor.postprocess(decoded, output_type="pt")
+    if not isinstance(image, torch.Tensor):
+        raise RuntimeError("SD3.5 VAE postprocess must return an RGB Tensor")
+    return image.to(device=latent.device, dtype=torch.float32)
+
+
+def _content_runtime_prompt_embeddings(
+    pipeline: Any,
+    prompt: str,
+) -> tuple[Any, Any]:
+    """Build the actual Prompt condition used by the Q/K geometry forward."""
+
+    prompt_embeds, _, pooled_prompt_embeds, _ = pipeline.encode_prompt(
+        prompt=prompt,
+        prompt_2=prompt,
+        prompt_3=prompt,
+        device=pipeline._execution_device,
+        num_images_per_prompt=1,
+        do_classifier_free_guidance=False,
+    )
+    return prompt_embeds, pooled_prompt_embeds
+
+
+def run_content_runtime_smoke(
+    config: SemanticWatermarkRuntimeConfig,
+    references: ContentRoutingReferenceScalars,
+    *,
+    verified_formal_execution_lock: Mapping[str, Any],
+    repository_root: str | Path,
+) -> tuple[Any, dict[str, Any]]:
+    """Run one real index-10 content/QK single-write generation sample."""
+
+    import torch
+
+    if type(config) is not SemanticWatermarkRuntimeConfig:
+        raise TypeError("config must be an exact SemanticWatermarkRuntimeConfig")
+    if type(references) is not ContentRoutingReferenceScalars:
+        raise TypeError("references must be exact ContentRoutingReferenceScalars")
+    if type(config.key_material) is not str or not config.key_material:
+        raise ValueError("content smoke requires explicit non-empty key material")
+    components = _load_content_runtime_smoke_components(
+        config,
+        verified_formal_execution_lock=verified_formal_execution_lock,
+        repository_root=repository_root,
+    )
+    pipeline = components.pipeline
+    base_latent_shape = (
+        1,
+        int(pipeline.transformer.config.in_channels),
+        int(config.height) // int(pipeline.vae_scale_factor),
+        int(config.width) // int(pipeline.vae_scale_factor),
+    )
+    base_latent, base_identity = build_canonical_sd35_base_latent(
+        shape=base_latent_shape,
+        generation_seed_random=int(config.seed),
+        model_id=config.model_id,
+        model_revision=config.model_revision,
+        device=pipeline._execution_device,
+        dtype=pipeline.transformer.dtype,
+    )
+    prompt_embeds, pooled_prompt_embeds = _content_runtime_prompt_embeddings(
+        pipeline,
+        config.prompt,
+    )
+    model_identity_digest = build_stable_digest(
+        {
+            "model_id": config.model_id,
+            "model_revision": config.model_revision,
+            "sd35_operator_identity": components.runtime_versions.get(
+                "sd35_operator_identity"
+            ),
+        }
+    )
+    public_probe_identity = build_public_probe_identity(config.model_revision)
+    captured_z9: Any | None = None
+    captured_z9_count = 0
+    callback_count = 0
+    current_image_decode_count = 0
+    public_probe_additional_decode_count = 0
+    actual_dtype_single_write_count = 0
+    diagnostic: dict[str, Any] = {}
+
+    def callback(
+        pipe: Any,
+        step_index: int,
+        timestep: Any,
+        callback_kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
+        nonlocal captured_z9, captured_z9_count, callback_count
+        nonlocal current_image_decode_count, public_probe_additional_decode_count
+        nonlocal actual_dtype_single_write_count, diagnostic
+        latent = callback_kwargs.get("latents")
+        if latent is None:
+            raise RuntimeError("content smoke callback requires latents")
+        if step_index == 9:
+            captured_z9_count += 1
+            if captured_z9_count != 1:
+                raise RuntimeError("content smoke must capture index 9 exactly once")
+            captured_z9 = latent.detach().clone()
+            return callback_kwargs
+        if step_index != 10:
+            return callback_kwargs
+        if captured_z9 is None:
+            raise RuntimeError("index-10 content smoke requires captured z9")
+        if captured_z9_count != 1:
+            raise RuntimeError("index-10 content smoke requires one index-9 capture")
+        callback_count += 1
+        if callback_count != 1:
+            raise RuntimeError("index-10 content smoke callback must execute once")
+        z10 = latent
+        current_image_decode_count += 1
+        if current_image_decode_count != 1:
+            raise RuntimeError("content smoke must decode current x10 exactly once")
+        decoded_x10 = _decode_content_runtime_latent(pipe, z10)
+
+        def vae_decoder(candidate: Any) -> Any:
+            nonlocal public_probe_additional_decode_count
+            public_probe_additional_decode_count += 1
+            if public_probe_additional_decode_count != 1:
+                raise RuntimeError("public probe must perform one additional VAE decode")
+            return _decode_content_runtime_latent(pipe, candidate)
+
+        observations = build_content_observation_routing(
+            previous_scheduler_latent=captured_z9,
+            current_scheduler_latent=z10,
+            decoded_current_image=decoded_x10,
+            prompt=config.prompt,
+            saliency_runtime=components.prompt_saliency_runtime,
+            vae_decoder=vae_decoder,
+            public_probe_identity=public_probe_identity,
+            reference_gradient=references.reference_gradient,
+            reference_response=references.reference_response,
+            reference_sensitivity=references.reference_sensitivity,
+        )
+        if public_probe_additional_decode_count != 1:
+            raise RuntimeError("public probe must perform one additional VAE decode")
+        lf_template = build_formal_low_frequency_template(
+            z10,
+            config.key_material,
+            model_identity_digest,
+            prg_version=KEYED_PRG_VERSION,
+        )
+        hf_template = build_high_frequency_tail_template(
+            z10,
+            config.key_material,
+            model_identity_digest,
+            prg_version=KEYED_PRG_VERSION,
+        )
+        content_update = build_content_carrier_update(
+            current_scheduler_latent=z10,
+            routing=observations.routing,
+            lf_template=lf_template,
+            hf_tail_template=hf_template,
+            method_role="full_dual_chain",
+        )
+        transformer_forward = _transformer_forward_function(
+            pipe,
+            timestep,
+            prompt_embeds,
+            pooled_prompt_embeds,
+        )
+        recorder = DifferentiableAttentionRecorder(
+            components.attention_modules,
+            max_tokens=config.max_attention_tokens,
+        )
+        try:
+            geometry, geometry_evidence = (
+                _build_attention_geometry_sync_update_with_evidence(
+                    current_scheduler_latent=z10,
+                    content_update=content_update,
+                    transformer_forward=transformer_forward,
+                    recorder=recorder,
+                    key_material=config.key_material,
+                    prg_version=KEYED_PRG_VERSION,
+                )
+            )
+            write_budget = formal_dual_chain_write_budget()
+            write_result = compose_dual_chain_update_once(
+                z10,
+                content_update.lf_update,
+                content_update.hf_tail_update,
+                geometry.geometry_update,
+                write_budget,
+                method_role=content_update.method_role,
+            )
+            same_gamma_content = (
+                z10.detach().float()
+                + content_update.lf_update * write_result.accepted_common_scale
+            )
+            same_gamma_content = (
+                same_gamma_content
+                + content_update.hf_tail_update
+                * write_result.accepted_common_scale
+            ).to(dtype=z10.dtype)
+            content_score, content_qk_digest = (
+                _evaluate_post_write_geometry_relation(
+                    written_latent=same_gamma_content,
+                    transformer_forward=transformer_forward,
+                    recorder=recorder,
+                    key_material=config.key_material,
+                    runtime_evidence=geometry_evidence,
+                )
+            )
+            final_score, final_qk_digest = _evaluate_post_write_geometry_relation(
+                written_latent=write_result.written_latent,
+                transformer_forward=transformer_forward,
+                recorder=recorder,
+                key_material=config.key_material,
+                runtime_evidence=geometry_evidence,
+            )
+        finally:
+            recorder.close()
+        if not final_score > content_score:
+            raise RuntimeError("post-write Q/K gate did not strictly improve")
+        z10_float32 = z10.detach().float()
+        latent_l2 = torch.linalg.vector_norm(z10_float32.reshape(-1))
+        combined_limit = latent_l2 * z10_float32.new_tensor(
+            write_budget.combined_relative_l2_limit
+        )
+        if not all(
+            value > 0.0
+            for value in (
+                write_result.lf_effective_l2,
+                write_result.hf_tail_effective_l2,
+                write_result.geometry_effective_l2,
+                write_result.combined_effective_l2,
+            )
+        ):
+            raise RuntimeError("full_dual_chain smoke requires three effective branches")
+        combined_ready = (
+            math.isfinite(write_result.combined_effective_l2)
+            and bool(
+                z10_float32.new_tensor(write_result.combined_effective_l2)
+                <= combined_limit
+            )
+        )
+        if not combined_ready:
+            raise RuntimeError("content smoke combined actual write exceeds its budget")
+        callback_kwargs["latents"] = write_result.written_latent
+        actual_dtype_single_write_count += 1
+        if actual_dtype_single_write_count != 1:
+            raise RuntimeError("content smoke must write actual dtype exactly once")
+        diagnostic = {
+            "method_role": content_update.method_role,
+            "callback_write_index": 10,
+            "callback_write_count": callback_count,
+            "captured_previous_index": 9,
+            "captured_previous_count": captured_z9_count,
+            "current_image_decode_count": current_image_decode_count,
+            "public_probe_additional_decode_count": (
+                public_probe_additional_decode_count
+            ),
+            "actual_dtype_single_write_count": actual_dtype_single_write_count,
+            "common_gamma": write_result.accepted_common_scale,
+            "lf_effective_l2": write_result.lf_effective_l2,
+            "hf_tail_effective_l2": write_result.hf_tail_effective_l2,
+            "geometry_effective_l2": write_result.geometry_effective_l2,
+            "combined_effective_l2": write_result.combined_effective_l2,
+            "combined_effective_l2_limit": float(combined_limit.item()),
+            "combined_effective_l2_ready": combined_ready,
+            "actual_dtype_single_write_digest": (
+                write_result.actual_dtype_write_digest
+            ),
+            "content_only_postwrite_qk_score": content_score,
+            "final_postwrite_qk_score": final_score,
+            "post_write_qk_strict_ready": True,
+            "content_only_postwrite_qk_digest": content_qk_digest,
+            "final_postwrite_qk_digest": final_qk_digest,
+            "routing_identity_digest": observations.routing.routing_identity_digest,
+            "geometry_update_digest": geometry.geometry_update_digest,
+        }
+        return callback_kwargs
+
+    output = pipeline(
+        prompt=config.prompt,
+        negative_prompt=config.negative_prompt,
+        width=config.width,
+        height=config.height,
+        num_inference_steps=config.inference_steps,
+        guidance_scale=config.guidance_scale,
+        latents=base_latent,
+        output_type="pil",
+        callback_on_step_end=callback,
+        callback_on_step_end_tensor_inputs=["latents"],
+    )
+    if (
+        captured_z9_count != 1
+        or callback_count != 1
+        or current_image_decode_count != 1
+        or public_probe_additional_decode_count != 1
+        or actual_dtype_single_write_count != 1
+        or not diagnostic
+    ):
+        raise RuntimeError("content smoke did not execute the unique index-10 write")
+    return output.images[0], {
+        **diagnostic,
+        "base_latent_identity_digest_random": base_identity[
+            "base_latent_identity_digest_random"
+        ],
+        "runtime_versions": components.runtime_versions,
+        "prompt_saliency_model_identity_digest": (
+            components.prompt_saliency_runtime.model_identity_digest
+        ),
+        "legacy_semantic_feature_operator_present": False,
+    }
 
 
 def _stable_json(value: Any) -> str:

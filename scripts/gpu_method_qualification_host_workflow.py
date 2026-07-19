@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -23,6 +24,8 @@ QUALIFICATION_WORKFLOW_NAME = "gpu_method_qualification"
 QUALIFICATION_INVOCATION_RESULT_SCHEMA = (
     GPU_METHOD_QUALIFICATION_INVOCATION_RESULT_SCHEMA
 )
+CONTENT_RUNTIME_SMOKE_WORKFLOW_NAME = "content_runtime_smoke"
+CONTENT_RUNTIME_SMOKE_INVOCATION_SCHEMA = "content_runtime_smoke_invocation_v1"
 
 
 def _file_sha256(path: Path) -> str:
@@ -42,6 +45,16 @@ def _is_sha256(value: Any) -> bool:
         isinstance(value, str)
         and len(value) == 64
         and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _finite_report_float(value: Any, *, positive: bool = False) -> bool:
+    """Accept only exact finite JSON floats, optionally requiring positivity."""
+
+    return (
+        type(value) is float
+        and math.isfinite(value)
+        and (not positive or value > 0.0)
     )
 
 
@@ -390,9 +403,242 @@ def run_gpu_method_qualification_host_workflow(
     }
 
 
+def run_content_runtime_smoke_host_workflow(
+    *,
+    root: str | Path,
+    repository_commit: str,
+    paper_run_name: str,
+    prompt_id: str,
+    result_path: str | Path,
+    smoke_output_root: str | Path,
+    reference_gradient: float,
+    reference_response: float,
+    reference_sensitivity: float,
+) -> dict[str, Any]:
+    """Run the reproducible clean-detached content runtime GPU smoke."""
+
+    root_path = Path(root).resolve()
+    resolved_result_path = _resolve_under_outputs(root_path, result_path, "result_path")
+    resolved_output_root = _resolve_under_outputs(
+        root_path,
+        smoke_output_root,
+        "smoke_output_root",
+    )
+    execution_report_path = resolved_result_path.with_name(
+        resolved_result_path.stem + "_content_runtime_smoke_execution.json"
+    )
+    child_argv = [
+        str(root_path / "scripts/run_gpu_method_qualification.py"),
+        "--root",
+        str(root_path),
+        "--paper-run-name",
+        paper_run_name,
+        "--prompt-id",
+        prompt_id,
+        "--output-root",
+        str(resolved_output_root),
+        "--content-runtime-smoke",
+        "--reference-gradient",
+        repr(reference_gradient),
+        "--reference-response",
+        repr(reference_response),
+        "--reference-sensitivity",
+        repr(reference_sensitivity),
+    ]
+    isolated_report, persisted_path = execute_isolated_scientific_command(
+        SCIENTIFIC_PROFILE_ID,
+        child_argv,
+        execution_report_path=execution_report_path,
+        repository_root=root_path,
+    )
+    persisted_path = Path(persisted_path).resolve()
+    if not persisted_path.is_file() or _read_json_mapping(persisted_path) != isolated_report:
+        raise ValueError("content runtime smoke execution report identity mismatch")
+    execution = isolated_report.get("execution")
+    if not isinstance(execution, Mapping):
+        raise ValueError("content runtime smoke execution is missing")
+    if not all(
+        (
+            isolated_report.get("report_schema")
+            == "isolated_scientific_execution_report",
+            isolated_report.get("schema_version") == 1,
+            isolated_report.get("profile_id") == SCIENTIFIC_PROFILE_ID,
+            _is_sha256(isolated_report.get("profile_digest")),
+            _is_sha256(isolated_report.get("direct_requirements_digest")),
+            _is_sha256(isolated_report.get("complete_hash_lock_digest")),
+            isinstance(
+                isolated_report.get("complete_hash_lock_dependency_count"),
+                int,
+            ),
+            isolated_report.get("complete_hash_lock_dependency_count", 0) > 0,
+            isolated_report.get("dependency_environment_report_valid") is True,
+            _is_sha256(
+                isolated_report.get("dependency_environment_report_digest")
+            ),
+            _is_sha256(isolated_report.get("python_executable_sha256")),
+            isolated_report.get("formal_execution_commit") == repository_commit,
+            isolated_report.get("formal_execution_lock_ready") is True,
+            isolated_report.get("formal_execution_lock_revalidated_before_child")
+            is True,
+            isolated_report.get("formal_execution_lock_revalidated_after_child")
+            is True,
+            isolated_report.get("python_executable_revalidated_before_child") is True,
+            isolated_report.get("python_executable_revalidated_after_child") is True,
+            isolated_report.get(
+                "dependency_environment_report_revalidated_before_child"
+            )
+            is True,
+            isolated_report.get(
+                "dependency_environment_report_revalidated_after_child"
+            )
+            is True,
+            isolated_report.get("supports_paper_claim") is False,
+        )
+    ):
+        raise ValueError("content runtime smoke isolated environment identity is invalid")
+    invocation = _invocation_record(str(execution.get("stdout", "")))
+    if invocation is None:
+        raise ValueError(
+            "content runtime smoke did not produce an invocation: "
+            + _scientific_child_failure_diagnostic(execution)
+        )
+    expected = {
+        "report_schema",
+        "schema_version",
+        "content_runtime_smoke_report_path",
+        "content_runtime_smoke_report_sha256",
+        "content_runtime_smoke_digest",
+        "content_runtime_smoke_ready",
+        "supports_paper_claim",
+    }
+    if set(invocation) != expected or not all(
+        (
+            invocation.get("report_schema") == CONTENT_RUNTIME_SMOKE_INVOCATION_SCHEMA,
+            invocation.get("schema_version") == 1,
+            invocation.get("content_runtime_smoke_ready") is True,
+            invocation.get("supports_paper_claim") is False,
+            _is_sha256(invocation.get("content_runtime_smoke_report_sha256")),
+            _is_sha256(invocation.get("content_runtime_smoke_digest")),
+            execution.get("return_code") == 0,
+            isolated_report.get("decision") == "pass",
+            isolated_report.get("formal_execution_commit") == repository_commit,
+        )
+    ):
+        raise ValueError("content runtime smoke invocation or isolated identity is invalid")
+    report_path = _resolve_under_outputs(
+        root_path,
+        invocation["content_runtime_smoke_report_path"],
+        "content_runtime_smoke_report_path",
+    )
+    try:
+        report_path.relative_to(resolved_output_root)
+    except ValueError as exc:
+        raise ValueError("content runtime smoke report escaped its output root") from exc
+    if not report_path.is_file() or _file_sha256(report_path) != invocation[
+        "content_runtime_smoke_report_sha256"
+    ]:
+        raise ValueError("content runtime smoke report file identity mismatch")
+    report = _read_json_mapping(report_path)
+    digest_input = dict(report)
+    digest = digest_input.pop("content_runtime_smoke_digest", None)
+    serialized = json.dumps(report, ensure_ascii=False, sort_keys=True)
+    diagnostic = report.get("runtime_diagnostic")
+    if type(diagnostic) is not dict:
+        raise ValueError("content runtime smoke diagnostic is missing")
+    branch_l2_fields = (
+        "lf_effective_l2",
+        "hf_tail_effective_l2",
+        "geometry_effective_l2",
+    )
+    combined_l2 = diagnostic.get("combined_effective_l2")
+    combined_limit = diagnostic.get("combined_effective_l2_limit")
+    score_before = diagnostic.get("content_only_postwrite_qk_score")
+    score_after = diagnostic.get("final_postwrite_qk_score")
+    combined_ready = (
+        _finite_report_float(combined_l2, positive=True)
+        and _finite_report_float(combined_limit, positive=True)
+        and combined_l2 <= combined_limit
+    )
+    score_ready = (
+        _finite_report_float(score_before)
+        and _finite_report_float(score_after)
+        and score_after > score_before
+    )
+    gamma = diagnostic.get("common_gamma")
+    gamma_ready = _finite_report_float(gamma, positive=True) and gamma <= 1.0
+    if not all(
+        (
+            digest == invocation["content_runtime_smoke_digest"],
+            build_stable_digest(digest_input) == digest,
+            report.get("content_runtime_smoke_ready") is True,
+            report.get("supports_paper_claim") is False,
+            diagnostic.get("method_role") == "full_dual_chain",
+            diagnostic.get("captured_previous_index") == 9,
+            diagnostic.get("captured_previous_count") == 1,
+            diagnostic.get("callback_write_index") == 10,
+            diagnostic.get("callback_write_count") == 1,
+            diagnostic.get("current_image_decode_count") == 1,
+            diagnostic.get("public_probe_additional_decode_count") == 1,
+            diagnostic.get("actual_dtype_single_write_count") == 1,
+            all(
+                _finite_report_float(diagnostic.get(field), positive=True)
+                for field in branch_l2_fields
+            ),
+            combined_ready,
+            diagnostic.get("combined_effective_l2_ready") is True,
+            gamma_ready,
+            _is_sha256(diagnostic.get("actual_dtype_single_write_digest")),
+            score_ready,
+            diagnostic.get("post_write_qk_strict_ready") is True,
+            "semantic_feature_operator_contract" not in serialized,
+            "COMPLETE_FEATURE_WIDTH" not in serialized,
+        )
+    ):
+        raise ValueError("content runtime smoke report did not close the new-chain boundary")
+    image_path_value = report.get("image_path")
+    image_sha256 = report.get("image_sha256")
+    if type(image_path_value) is not str or not _is_sha256(image_sha256):
+        raise ValueError("content runtime smoke image identity is missing")
+    image_path = _resolve_under_outputs(
+        root_path,
+        image_path_value,
+        "content_runtime_smoke_image_path",
+    )
+    try:
+        image_path.relative_to(resolved_output_root)
+    except ValueError as exc:
+        raise ValueError("content runtime smoke image escaped its output root") from exc
+    if not image_path.is_file() or _file_sha256(image_path) != image_sha256:
+        raise ValueError("content runtime smoke image file identity mismatch")
+    return {
+        "workflow_summary": {
+            "workflow_name": CONTENT_RUNTIME_SMOKE_WORKFLOW_NAME,
+            "paper_run_name": paper_run_name,
+            "prompt_id": prompt_id,
+            "content_runtime_smoke_report_path": report_path.relative_to(root_path).as_posix(),
+            "content_runtime_smoke_report_sha256": invocation[
+                "content_runtime_smoke_report_sha256"
+            ],
+            "content_runtime_smoke_digest": digest,
+            "content_runtime_smoke_ready": True,
+            "workflow_completion_state": "content_runtime_smoke_ready",
+            "supports_paper_claim": False,
+        },
+        "workflow_environment": _workflow_environment(isolated_report, persisted_path),
+        "archive_record": None,
+        "return_code": 0,
+        "decision": "pass",
+        "failure_reasons": [],
+        "supports_paper_claim": False,
+    }
+
+
 __all__ = [
+    "CONTENT_RUNTIME_SMOKE_INVOCATION_SCHEMA",
+    "CONTENT_RUNTIME_SMOKE_WORKFLOW_NAME",
     "QUALIFICATION_INVOCATION_RESULT_SCHEMA",
     "QUALIFICATION_WORKFLOW_NAME",
     "SCIENTIFIC_PROFILE_ID",
     "run_gpu_method_qualification_host_workflow",
+    "run_content_runtime_smoke_host_workflow",
 ]

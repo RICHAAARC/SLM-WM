@@ -711,7 +711,17 @@ class GeometrySyncUpdate:
     geometry_update_digest: str
 
 
-def build_attention_geometry_sync_update(
+@dataclass(frozen=True)
+class _GeometrySyncRuntimeEvidence:
+    """Carry the exact scoring template needed by the post-write gate."""
+
+    gradient_evidence: AttentionGeometryGradient
+    stable_pair_weights: StableAttentionPairWeights
+    relation_template_identity_digest: str
+    prg_version: str
+
+
+def _build_attention_geometry_sync_update_with_evidence(
     *,
     current_scheduler_latent: Any,
     content_update: ContentCarrierUpdateResult,
@@ -719,7 +729,7 @@ def build_attention_geometry_sync_update(
     recorder: DifferentiableAttentionRecorder,
     key_material: str,
     prg_version: str,
-) -> GeometrySyncUpdate:
+) -> tuple[GeometrySyncUpdate, _GeometrySyncRuntimeEvidence]:
     """在正式content-only基底构造单调改善的直接Q/K几何更新。"""
 
     torch = _torch()
@@ -896,7 +906,7 @@ def build_attention_geometry_sync_update(
     }
     if set(update_payload) != _GEOMETRY_UPDATE_DIGEST_KEYS:
         raise RuntimeError("geometry update digest payload 字段集合漂移")
-    return GeometrySyncUpdate(
+    result = GeometrySyncUpdate(
         geometry_update=geometry_update,
         accepted_scale=float(scale_tensor.item()),
         backtracking_index=backtracking_index,
@@ -908,3 +918,78 @@ def build_attention_geometry_sync_update(
         relation_template_identity_digest=relation_template_digest,
         geometry_update_digest=build_stable_digest(update_payload),
     )
+    return result, _GeometrySyncRuntimeEvidence(
+        gradient_evidence=evidence,
+        stable_pair_weights=pair_weights,
+        relation_template_identity_digest=relation_template_digest,
+        prg_version=prg_version,
+    )
+
+
+def _evaluate_post_write_geometry_relation(
+    *,
+    written_latent: Any,
+    transformer_forward: Callable[[Any], Any],
+    recorder: DifferentiableAttentionRecorder,
+    key_material: str,
+    runtime_evidence: _GeometrySyncRuntimeEvidence,
+) -> tuple[float, str]:
+    """Evaluate the final single-write latent with the same Q/K template."""
+
+    if type(runtime_evidence) is not _GeometrySyncRuntimeEvidence:
+        raise TypeError("runtime_evidence must be exact geometry evidence")
+    evidence = runtime_evidence.gradient_evidence
+    pair_weights = _validate_pair_weights(
+        evidence,
+        runtime_evidence.stable_pair_weights,
+    )
+    score, identity = _evaluate_actual_dtype_relation(
+        written_latent,
+        transformer_forward,
+        recorder,
+        key_material,
+        runtime_evidence.prg_version,
+        evidence,
+        pair_weights,
+    )
+    if runtime_evidence.relation_template_identity_digest != _relation_template_digest(
+        evidence,
+        runtime_evidence.prg_version,
+    ):
+        raise ValueError("post-write relation template identity drifted")
+    return score, build_stable_digest(
+        {
+            "evaluation_role": "post_common_gamma_actual_dtype_write",
+            "evaluation_latent_content_sha256": tensor_content_sha256(
+                written_latent.detach().float()
+            ),
+            "evaluation_score": score,
+            "qk_atomic_content_digest": identity.qk_atomic_content_digest,
+            "relation_template_identity_digest": (
+                runtime_evidence.relation_template_identity_digest
+            ),
+            "prg_version": runtime_evidence.prg_version,
+        }
+    )
+
+
+def build_attention_geometry_sync_update(
+    *,
+    current_scheduler_latent: Any,
+    content_update: ContentCarrierUpdateResult,
+    transformer_forward: Callable[[Any], Any],
+    recorder: DifferentiableAttentionRecorder,
+    key_material: str,
+    prg_version: str,
+) -> GeometrySyncUpdate:
+    """Build the public geometry update while keeping runtime evidence private."""
+
+    result, _evidence = _build_attention_geometry_sync_update_with_evidence(
+        current_scheduler_latent=current_scheduler_latent,
+        content_update=content_update,
+        transformer_forward=transformer_forward,
+        recorder=recorder,
+        key_material=key_material,
+        prg_version=prg_version,
+    )
+    return result

@@ -788,6 +788,37 @@ def test_evaluation_record_extra_field_is_rejected(
         _build(z10, content)
 
 
+def test_private_runtime_evidence_reuses_same_pair_for_postwrite_gate() -> None:
+    """The integration gate must score final actual dtype with the same pair object."""
+
+    z10, content = _content_update(torch.float16)
+    recorder, forward, _ = _runtime(z10.dtype)
+    try:
+        result, evidence = sync_module._build_attention_geometry_sync_update_with_evidence(
+            current_scheduler_latent=z10,
+            content_update=content,
+            transformer_forward=forward,
+            recorder=recorder,
+            key_material=_KEY,
+            prg_version=KEYED_PRG_VERSION,
+        )
+        candidate = (content.content_only_latent_float32 + result.geometry_update).to(
+            dtype=z10.dtype
+        )
+        score, digest = sync_module._evaluate_post_write_geometry_relation(
+            written_latent=candidate,
+            transformer_forward=forward,
+            recorder=recorder,
+            key_material=_KEY,
+            runtime_evidence=evidence,
+        )
+    finally:
+        recorder.close()
+    assert score == pytest.approx(result.relation_score_after)
+    assert len(digest) == 64
+    assert evidence.stable_pair_weights is evidence.gradient_evidence.stable_pair_weights
+
+
 def test_source_has_no_legacy_geometry_or_gpu_dependencies() -> None:
     """新核不得回退旧投影/组合路径或引入模型与CUDA执行。"""
 

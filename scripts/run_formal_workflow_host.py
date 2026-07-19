@@ -424,6 +424,21 @@ def build_child_command(
             command.extend(
                 ["--registered-budget", arguments.registered_budget]
             )
+    elif arguments.operation == "content_runtime_smoke":
+        command.extend(
+            [
+                "--prompt-id",
+                arguments.prompt_id,
+                "--smoke-output-root",
+                arguments.smoke_output_root,
+                "--reference-gradient",
+                repr(arguments.reference_gradient),
+                "--reference-response",
+                repr(arguments.reference_response),
+                "--reference-sensitivity",
+                repr(arguments.reference_sensitivity),
+            ]
+        )
     else:
         raise FormalWorkflowHostError("未知的正式宿主操作")
     return command
@@ -517,6 +532,21 @@ def build_parser() -> argparse.ArgumentParser:
         default="outputs/gpu_method_qualification",
     )
     qualification.add_argument("--result-path", required=True)
+    smoke = subparsers.add_parser("content_runtime_smoke")
+    smoke.add_argument(
+        "--paper-run-name",
+        required=True,
+        choices=("probe_paper", "pilot_paper", "full_paper"),
+    )
+    smoke.add_argument("--prompt-id", required=True)
+    smoke.add_argument("--reference-gradient", required=True, type=float)
+    smoke.add_argument("--reference-response", required=True, type=float)
+    smoke.add_argument("--reference-sensitivity", required=True, type=float)
+    smoke.add_argument(
+        "--smoke-output-root",
+        default="outputs/content_runtime_smoke",
+    )
+    smoke.add_argument("--result-path", required=True)
     return parser
 
 

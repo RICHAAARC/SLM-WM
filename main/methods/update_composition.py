@@ -13,6 +13,230 @@ from main.core.digest import (
 )
 
 
+_DUAL_CHAIN_LF_RELATIVE_STRENGTH = 0.0025
+_DUAL_CHAIN_HF_RELATIVE_STRENGTH = 0.0015
+_DUAL_CHAIN_GEOMETRY_RELATIVE_STRENGTH = 0.0010
+_DUAL_CHAIN_COMBINED_RELATIVE_L2_LIMIT = 0.0050
+_DUAL_CHAIN_BACKTRACKING_FACTOR = 0.5
+_DUAL_CHAIN_MAXIMUM_STEPS = 24
+_DUAL_CHAIN_METHOD_ROLE_ACTIVITY = {
+    "full_dual_chain": (True, True, True),
+    "uniform_content_routing": (True, True, True),
+    "lf_only_content": (True, False, True),
+    "hf_tail_only_content": (False, True, True),
+    "content_chain_only": (True, True, False),
+    "geometry_recovery_without_embedded_sync": (True, True, False),
+}
+
+
+def _dual_chain_budget_payload() -> dict[str, Any]:
+    """Return the single formal common-backtracking budget identity."""
+
+    return {
+        "lf_relative_strength": _DUAL_CHAIN_LF_RELATIVE_STRENGTH,
+        "hf_tail_relative_strength": _DUAL_CHAIN_HF_RELATIVE_STRENGTH,
+        "geometry_relative_strength": _DUAL_CHAIN_GEOMETRY_RELATIVE_STRENGTH,
+        "combined_relative_l2_limit": _DUAL_CHAIN_COMBINED_RELATIVE_L2_LIMIT,
+        "common_backtracking_factor": _DUAL_CHAIN_BACKTRACKING_FACTOR,
+        "common_backtracking_maximum_steps": _DUAL_CHAIN_MAXIMUM_STEPS,
+    }
+
+
+@dataclass(frozen=True)
+class DualChainWriteBudget:
+    """Hold the fixed three-branch common-backtracking budget."""
+
+    lf_relative_strength: float
+    hf_tail_relative_strength: float
+    geometry_relative_strength: float
+    combined_relative_l2_limit: float
+    common_backtracking_factor: float
+    common_backtracking_maximum_steps: int
+    budget_identity_digest: str
+
+    def __post_init__(self) -> None:
+        expected = _dual_chain_budget_payload()
+        actual = {
+            key: getattr(self, key)
+            for key in expected
+        }
+        if any(type(value) is not type(expected[key]) for key, value in actual.items()):
+            raise TypeError("dual-chain budget fields must use exact governed types")
+        if actual != expected:
+            raise ValueError("dual-chain budget fields must equal the formal constants")
+        if self.budget_identity_digest != build_stable_digest(expected):
+            raise ValueError("budget_identity_digest does not bind the formal budget")
+
+
+@dataclass(frozen=True)
+class DualChainWriteResult:
+    """Hold the first quantization-safe common-scale single write."""
+
+    written_latent: Any
+    lf_update_digest: str
+    hf_tail_update_digest: str
+    geometry_update_digest: str
+    lf_effective_l2: float
+    hf_tail_effective_l2: float
+    geometry_effective_l2: float
+    combined_update_digest: str
+    combined_effective_l2: float
+    accepted_common_scale: float
+    actual_dtype_write_digest: str
+    write_identity_digest: str
+
+
+def formal_dual_chain_write_budget() -> DualChainWriteBudget:
+    """Construct the only formal three-branch write budget."""
+
+    payload = _dual_chain_budget_payload()
+    return DualChainWriteBudget(
+        **payload,
+        budget_identity_digest=build_stable_digest(payload),
+    )
+
+
+def _formal_branch_activity(method_role: Any) -> tuple[bool, bool, bool]:
+    """Resolve the exact LF/HF/geometry activity registered by the method role."""
+
+    if (
+        type(method_role) is not str
+        or method_role not in _DUAL_CHAIN_METHOD_ROLE_ACTIVITY
+    ):
+        raise ValueError("method_role must be an exact formal method role")
+    return _DUAL_CHAIN_METHOD_ROLE_ACTIVITY[method_role]
+
+
+def compose_dual_chain_update_once(
+    latent: Any,
+    lf_update: Any,
+    hf_tail_update: Any,
+    geometry_update: Any,
+    budget: DualChainWriteBudget,
+    *,
+    method_role: str,
+) -> DualChainWriteResult:
+    """Backtrack all active branches together and cast/write exactly once."""
+
+    active = _formal_branch_activity(method_role)
+    torch = _torch()
+    if type(budget) is not DualChainWriteBudget:
+        raise TypeError("budget must be an exact DualChainWriteBudget")
+    # Re-run the frozen constructor invariant for forged dataclass instances.
+    budget.__post_init__()
+    if not torch.is_tensor(latent) or not latent.dtype.is_floating_point:
+        raise TypeError("latent must be a real floating Tensor")
+    if latent.ndim != 4 or latent.shape[0] != 1 or latent.numel() == 0:
+        raise ValueError("latent must have non-empty [1,C,H,W] shape")
+    if latent.device.type == "meta":
+        raise ValueError("latent must be materialized")
+    shape = tuple(latent.shape)
+    for label, update in (
+        ("lf_update", lf_update),
+        ("hf_tail_update", hf_tail_update),
+        ("geometry_update", geometry_update),
+    ):
+        if (
+            not torch.is_tensor(update)
+            or update.dtype != torch.float32
+            or tuple(update.shape) != shape
+            or update.device != latent.device
+        ):
+            raise ValueError(f"{label} must be same-shape/device float32")
+    latent_float32 = latent.detach().float()
+    if not bool(torch.isfinite(latent_float32).all()):
+        raise ValueError("latent must be finite")
+    updates = (lf_update.detach(), hf_tail_update.detach(), geometry_update.detach())
+    if any(not bool(torch.isfinite(update).all()) for update in updates):
+        raise ValueError("branch updates must be finite")
+    if any(
+        not enabled and bool(torch.count_nonzero(update).item())
+        for enabled, update in zip(active, updates)
+    ):
+        raise ValueError("disabled formal branches must be exact zero tensors")
+    latent_l2 = torch.linalg.vector_norm(latent_float32.reshape(-1))
+    if not bool(torch.isfinite(latent_l2)) or bool(latent_l2 <= 0.0):
+        raise ValueError("latent float32 L2 must be positive and finite")
+    combined_limit = latent_l2 * latent_float32.new_tensor(
+        budget.combined_relative_l2_limit
+    )
+
+    accepted: tuple[Any, ...] | None = None
+    for step in range(budget.common_backtracking_maximum_steps + 1):
+        scale = latent_float32.new_tensor(
+            budget.common_backtracking_factor
+        ).pow(step)
+        scaled = tuple(update * scale for update in updates)
+        # These casts are branch quantization gates only; the accepted latent is
+        # still produced by the single combined cast below.
+        effective = tuple(
+            (latent_float32 + branch).to(dtype=latent.dtype).detach().float()
+            - latent_float32
+            for branch in scaled
+        )
+        effective_l2 = tuple(
+            torch.linalg.vector_norm(branch.reshape(-1)) for branch in effective
+        )
+        if any(
+            enabled
+            and (
+                not bool(torch.isfinite(norm))
+                or float(norm.item()) <= 0.0
+            )
+            for enabled, norm in zip(active, effective_l2)
+        ):
+            continue
+        combined = scaled[0] + scaled[1]
+        combined = combined + scaled[2]
+        candidate = (latent_float32 + combined).to(dtype=latent.dtype)
+        actual_delta = candidate.detach().float() - latent_float32
+        actual_l2 = torch.linalg.vector_norm(actual_delta.reshape(-1))
+        if (
+            not bool(torch.isfinite(candidate).all())
+            or not bool(torch.isfinite(actual_delta).all())
+            or not bool(torch.isfinite(actual_l2))
+            or float(actual_l2.item()) <= 0.0
+            or bool(actual_l2 > combined_limit)
+        ):
+            continue
+        accepted = (scale, scaled, effective_l2, combined, candidate, actual_delta, actual_l2)
+        break
+    if accepted is None:
+        raise ValueError("common gamma did not produce a quantization-safe single write")
+
+    scale, scaled, effective_l2, combined, candidate, actual_delta, actual_l2 = accepted
+    branch_digests = tuple(tensor_content_sha256(value) for value in scaled)
+    combined_digest = tensor_content_sha256(combined)
+    write_digest = tensor_content_sha256(actual_delta)
+    identity = {
+        "method_role": method_role,
+        "formal_branch_activity": active,
+        "budget_identity_digest": budget.budget_identity_digest,
+        "original_latent_content_sha256": tensor_content_sha256(latent_float32),
+        "branch_update_content_sha256": branch_digests,
+        "combined_update_content_sha256": combined_digest,
+        "actual_dtype_write_content_sha256": write_digest,
+        "accepted_common_scale": float(scale.item()),
+        "combined_effective_l2": float(actual_l2.item()),
+        "write_dtype": str(latent.dtype),
+        "write_shape": list(shape),
+    }
+    return DualChainWriteResult(
+        written_latent=candidate,
+        lf_update_digest=branch_digests[0],
+        hf_tail_update_digest=branch_digests[1],
+        geometry_update_digest=branch_digests[2],
+        lf_effective_l2=float(effective_l2[0].item()) if active[0] else 0.0,
+        hf_tail_effective_l2=float(effective_l2[1].item()) if active[1] else 0.0,
+        geometry_effective_l2=float(effective_l2[2].item()) if active[2] else 0.0,
+        combined_update_digest=combined_digest,
+        combined_effective_l2=float(actual_l2.item()),
+        accepted_common_scale=float(scale.item()),
+        actual_dtype_write_digest=write_digest,
+        write_identity_digest=build_stable_digest(identity),
+    )
+
+
 QUANTIZED_COMPOSITION_ORDER = (
     "lf_content",
     "tail_robust",
@@ -853,14 +1077,18 @@ def iter_quantized_composition_candidates(
 
 
 __all__ = [
+    "DualChainWriteBudget",
+    "DualChainWriteResult",
     "QUANTIZED_COMPOSITION_EVIDENCE_VERSION",
     "QUANTIZED_COMPOSITION_ORDER",
     "QuantizedCompositionCandidate",
     "RiskBoundedUpdate",
     "build_quantized_composition_candidate",
     "build_risk_bounded_update",
+    "compose_dual_chain_update_once",
     "compose_ordered_float32_update_once",
     "iter_quantized_composition_candidates",
+    "formal_dual_chain_write_budget",
     "recompute_quantized_composition_evidence_digest",
     "rescale_risk_bounded_update",
 ]

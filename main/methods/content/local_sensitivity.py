@@ -41,6 +41,22 @@ _LOCAL_SENSITIVITY_FORMULA_PROTOCOL = {
 }
 
 
+def build_public_probe_identity(model_revision: str) -> dict[str, Any]:
+    """Build the single public-probe identity consumed by the Q observation."""
+
+    if type(model_revision) is not str or not model_revision:
+        raise ValueError("model_revision must be a non-empty exact string")
+    return {
+        "prg_version": KEYED_PRG_VERSION,
+        "key_material": _PUBLIC_PROBE_KEY_MATERIAL,
+        "domain_fields": {
+            "purpose": _PUBLIC_PROBE_PURPOSE,
+            "model_revision": model_revision,
+            "probe_version": _PUBLIC_PROBE_VERSION,
+        },
+    }
+
+
 @dataclass(frozen=True)
 class LocalSensitivityResult:
     """保存公开探针局部敏感性及其输入、探针和输出身份。"""

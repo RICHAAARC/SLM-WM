@@ -419,3 +419,20 @@ def test_host_main_requires_python_isolated_mode(monkeypatch: pytest.MonkeyPatch
             "outputs/result.json",
         ]
     ) == 2
+
+
+@pytest.mark.quick
+def test_host_parser_exposes_content_runtime_smoke_without_defaults() -> None:
+    """The host route requires Prompt and three caller-supplied reference values."""
+
+    parser = host_launcher.build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            [
+                "--repository-commit", "a" * 40,
+                "content_runtime_smoke",
+                "--paper-run-name", "probe_paper",
+                "--prompt-id", "probe_prompt_0001",
+                "--result-path", "outputs/smoke.json",
+            ]
+        )

@@ -36,7 +36,9 @@ from scripts.run_gpu_server_workflow import (  # noqa: E402
     run_workflow,
 )
 from scripts.gpu_method_qualification_host_workflow import (  # noqa: E402
+    CONTENT_RUNTIME_SMOKE_WORKFLOW_NAME,
     QUALIFICATION_WORKFLOW_NAME,
+    run_content_runtime_smoke_host_workflow,
     run_gpu_method_qualification_host_workflow,
 )
 
@@ -177,7 +179,7 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
         archive_record = result
         randomization_scope = "active_repeat_component"
         resolved_repeat_id = paper_run.randomization_repeat_id
-    else:
+    elif arguments.operation == "qualification":
         orchestrator_environment = _require_workflow_orchestrator_environment(root)
         os.environ["SLM_WM_PAPER_RUN_NAME"] = arguments.paper_run_name
         result = run_gpu_method_qualification_host_workflow(
@@ -208,6 +210,37 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             or result.get("supports_paper_claim") is not False
         ):
             raise RuntimeError("GPU 方法资格化宿主结果身份无效")
+    else:
+        orchestrator_environment = _require_workflow_orchestrator_environment(root)
+        os.environ["SLM_WM_PAPER_RUN_NAME"] = arguments.paper_run_name
+        result = run_content_runtime_smoke_host_workflow(
+            root=root,
+            repository_commit=arguments.repository_commit,
+            paper_run_name=arguments.paper_run_name,
+            prompt_id=arguments.prompt_id,
+            result_path=arguments.result_path,
+            smoke_output_root=arguments.smoke_output_root,
+            reference_gradient=arguments.reference_gradient,
+            reference_response=arguments.reference_response,
+            reference_sensitivity=arguments.reference_sensitivity,
+        )
+        workflow_name = CONTENT_RUNTIME_SMOKE_WORKFLOW_NAME
+        workflow_summary = result.get("workflow_summary", {})
+        workflow_environment = result.get("workflow_environment", {})
+        archive_record = None
+        randomization_scope = "single_sample_unqualified_gpu_smoke"
+        resolved_repeat_id = ""
+        decision = str(result.get("decision", "fail"))
+        raw_failure_reasons = result.get("failure_reasons", [])
+        failure_reasons = (
+            [str(reason) for reason in raw_failure_reasons]
+            if isinstance(raw_failure_reasons, list)
+            else ["content_runtime_smoke_failure_reasons_invalid"]
+        )
+        if decision not in {"pass", "fail"} or result.get(
+            "supports_paper_claim"
+        ) is not False:
+            raise RuntimeError("content runtime smoke host result identity invalid")
     if (
         orchestrator_environment.get("profile_id")
         != bootstrap_identity["profile_id"]
@@ -257,7 +290,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "operation",
-        choices=("gpu", "repeat_evidence", "qualification"),
+        choices=("gpu", "repeat_evidence", "qualification", "content_runtime_smoke"),
     )
     parser.add_argument("--root", required=True)
     parser.add_argument("--repository-commit", required=True)
@@ -282,6 +315,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--qualification-output-root",
         default="outputs/gpu_method_qualification",
     )
+    parser.add_argument("--smoke-output-root", default="outputs/content_runtime_smoke")
+    parser.add_argument("--reference-gradient", type=float)
+    parser.add_argument("--reference-response", type=float)
+    parser.add_argument("--reference-sensitivity", type=float)
     return parser
 
 
@@ -314,6 +351,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ValueError("单 repeat 证据入口缺少 package 搜索目录或 repeat ID")
         if arguments.operation == "qualification" and not arguments.prompt_id:
             raise ValueError("GPU 方法资格化入口必须提供 Prompt ID")
+        if arguments.operation == "content_runtime_smoke" and (
+            not arguments.prompt_id
+            or any(
+                value is None
+                for value in (
+                    arguments.reference_gradient,
+                    arguments.reference_response,
+                    arguments.reference_sensitivity,
+                )
+            )
+        ):
+            raise ValueError("content runtime smoke requires Prompt and three references")
         payload = execute(arguments)
         result_path = _write_result(root, arguments.result_path, payload)
         print(
@@ -352,7 +401,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 or (
                     QUALIFICATION_WORKFLOW_NAME
                     if arguments.operation == "qualification"
-                    else "randomization_repeat_evidence"
+                    else (
+                        CONTENT_RUNTIME_SMOKE_WORKFLOW_NAME
+                        if arguments.operation == "content_runtime_smoke"
+                        else "randomization_repeat_evidence"
+                    )
                 )
             ),
             "paper_run_name": arguments.paper_run_name,

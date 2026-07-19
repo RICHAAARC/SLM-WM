@@ -21,12 +21,16 @@ from main.methods.carrier.keyed_tensor import (
     project_canonical_template,
 )
 from main.methods.update_composition import (
+    DualChainWriteBudget,
+    DualChainWriteResult,
     QUANTIZED_COMPOSITION_EVIDENCE_VERSION,
     QUANTIZED_COMPOSITION_ORDER,
     build_quantized_composition_candidate,
     build_risk_bounded_update,
+    compose_dual_chain_update_once,
     compose_ordered_float32_update_once,
     iter_quantized_composition_candidates,
+    formal_dual_chain_write_budget,
     recompute_quantized_composition_evidence_digest,
     rescale_risk_bounded_update,
 )
@@ -1014,3 +1018,154 @@ def test_quantized_overshoot_requires_common_backtracking_candidate() -> None:
     assert candidates[1].common_scale == pytest.approx(0.5)
     assert candidates[1].envelope_ready is True
     assert torch.count_nonzero(candidates[1].written_update).item() == 0
+
+
+@pytest.mark.quick
+def test_formal_dual_chain_write_uses_common_gamma_and_one_actual_cast() -> None:
+    """LF/HF/geometry must share gamma and produce one bounded actual write."""
+
+    latent = torch.ones((1, 2, 2, 2), dtype=torch.float16)
+    lf = torch.full_like(latent, 2.0e-3, dtype=torch.float32)
+    hf = torch.full_like(latent, -8.0e-4, dtype=torch.float32)
+    geometry = torch.full_like(latent, 6.0e-4, dtype=torch.float32)
+    budget = formal_dual_chain_write_budget()
+    result = compose_dual_chain_update_once(
+        latent,
+        lf,
+        hf,
+        geometry,
+        budget,
+        method_role="full_dual_chain",
+    )
+
+    assert type(result) is DualChainWriteResult
+    assert type(budget) is DualChainWriteBudget
+    assert result.accepted_common_scale in {0.5**index for index in range(25)}
+    actual = result.written_latent.float() - latent.float()
+    limit = 0.005 * torch.linalg.vector_norm(latent.float().reshape(-1))
+    assert 0.0 < float(actual.norm().item()) <= float(limit.item())
+    assert result.lf_effective_l2 > 0.0
+    assert result.hf_tail_effective_l2 > 0.0
+    assert result.geometry_effective_l2 > 0.0
+
+
+@pytest.mark.quick
+def test_formal_dual_chain_write_rejects_budget_drift_and_quantized_zero() -> None:
+    """The fixed budget and active-branch nonzero actual delta are fail-closed."""
+
+    budget = formal_dual_chain_write_budget()
+    with pytest.raises(ValueError):
+        DualChainWriteBudget(
+            **{
+                **{field.name: getattr(budget, field.name) for field in fields(budget)},
+                "combined_relative_l2_limit": 0.006,
+            }
+        )
+    latent = torch.ones((1, 1, 1, 1), dtype=torch.float16)
+    too_small = torch.full_like(latent, 1.0e-12, dtype=torch.float32)
+    with pytest.raises(ValueError, match="common gamma"):
+        compose_dual_chain_update_once(
+            latent,
+            too_small,
+            torch.zeros_like(too_small),
+            torch.zeros_like(too_small),
+            budget,
+            method_role="full_dual_chain",
+        )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("method_role", "expected_activity"),
+    (
+        ("full_dual_chain", (True, True, True)),
+        ("uniform_content_routing", (True, True, True)),
+        ("lf_only_content", (True, False, True)),
+        ("hf_tail_only_content", (False, True, True)),
+        ("content_chain_only", (True, True, False)),
+        ("geometry_recovery_without_embedded_sync", (True, True, False)),
+    ),
+)
+def test_formal_dual_chain_write_uses_registered_role_activity(
+    method_role: str,
+    expected_activity: tuple[bool, bool, bool],
+) -> None:
+    """All six roles must decide activity without inspecting numerical zeros."""
+
+    latent = torch.ones((1, 2, 2, 2), dtype=torch.float16)
+    enabled_values = (2.0e-3, 1.0e-3, 5.0e-4)
+    updates = tuple(
+        torch.full_like(latent, value, dtype=torch.float32)
+        if enabled
+        else torch.zeros_like(latent, dtype=torch.float32)
+        for enabled, value in zip(expected_activity, enabled_values)
+    )
+    result = compose_dual_chain_update_once(
+        latent,
+        *updates,
+        formal_dual_chain_write_budget(),
+        method_role=method_role,
+    )
+    effective = (
+        result.lf_effective_l2,
+        result.hf_tail_effective_l2,
+        result.geometry_effective_l2,
+    )
+    assert tuple(value > 0.0 for value in effective) == expected_activity
+    assert all(value == 0.0 for enabled, value in zip(expected_activity, effective) if not enabled)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("zero_branch", (0, 1, 2))
+def test_full_dual_chain_rejects_any_registered_zero_branch(zero_branch: int) -> None:
+    """The main method cannot silently lose LF, HF-tail, or geometry."""
+
+    latent = torch.ones((1, 2, 2, 2), dtype=torch.float16)
+    updates = [
+        torch.full_like(latent, value, dtype=torch.float32)
+        for value in (2.0e-3, 1.0e-3, 5.0e-4)
+    ]
+    updates[zero_branch] = torch.zeros_like(updates[zero_branch])
+    with pytest.raises(ValueError, match="common gamma"):
+        compose_dual_chain_update_once(
+            latent,
+            *updates,
+            formal_dual_chain_write_budget(),
+            method_role="full_dual_chain",
+        )
+
+
+@pytest.mark.quick
+def test_formal_dual_chain_write_rejects_role_and_disabled_branch_conflicts() -> None:
+    """Unsupported roles and nonzero disabled updates are fail-closed."""
+
+    latent = torch.ones((1, 2, 2, 2), dtype=torch.float16)
+    update = torch.full_like(latent, 1.0e-3, dtype=torch.float32)
+    budget = formal_dual_chain_write_budget()
+    with pytest.raises(ValueError, match="method_role"):
+        compose_dual_chain_update_once(
+            latent,
+            update,
+            update,
+            update,
+            budget,
+            method_role="unsupported",
+        )
+    with pytest.raises(ValueError, match="disabled formal branches"):
+        compose_dual_chain_update_once(
+            latent,
+            update,
+            update,
+            update,
+            budget,
+            method_role="content_chain_only",
+        )
+    with pytest.raises(ValueError, match="disabled formal branches"):
+        compose_dual_chain_update_once(
+            latent,
+            update,
+            update,
+            update,
+            budget,
+            method_role="hf_tail_only_content",
+        )
