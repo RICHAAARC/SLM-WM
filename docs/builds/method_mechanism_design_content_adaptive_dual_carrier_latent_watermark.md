@@ -201,9 +201,27 @@ def route_content_carriers(
     local_sensitivity_map: Any,
 ) -> ContentRoutingResult:
     """按冻结几何平均公式构造 LF 与 HF-tail 的互补路由和局部强度。"""
+
+
+def build_content_observation_routing(
+    *,
+    previous_scheduler_latent: Any,
+    current_scheduler_latent: Any,
+    decoded_current_image: Any,
+    prompt: str,
+    saliency_runtime: Any,
+    vae_decoder: Callable[[Any], Any],
+    public_probe_identity: Any,
+    reference_gradient: float,
+    reference_response: float,
+    reference_sensitivity: float,
+) -> ContentObservationRuntimeResult:
+    """复用已解码 x10，以固定 R→T→S→Q 顺序构造 latent 内容路由。"""
 ```
 
 `build_texture_complexity_map()` 必须使用 `[0,1]` RGB、`Y=0.299R+0.587G+0.114B`、冻结3×3 Sobel 核和 replicate padding。`build_adjacent_latent_response_map()` 不允许额外执行 Transformer 前向或用 Prompt/密钥摘要替代真实 latent。`build_public_probe_local_sensitivity_map()` 必须使用 `sha256_counter_normal_icdf_table20_float32`、公开 `key_material=semantic_saliency_dual_chain_public_probe_v1` 和 `purpose=local_sensitivity_public_probe`，不得依赖水印密钥、Prompt、样本 ID、生成 seed 或攻击标签，且只允许增加一次 VAE 解码。`route_content_carriers()` 必须精确实现 $A=((1-S)(1-R)(1-Q))^{1/3}$、$M_{\mathrm{LF}}=A\odot(1-T)$、$M_{\mathrm{HF-tail}}=A\odot T$，分别输出代码字段 `lf_mask` 与 `hf_tail_mask`，并且不得在掩码作用后对整个分支重新单位化。
+
+`ContentObservationRuntimeResult` 是 frozen 进程内组合结果，精确包含 `semantic_saliency`、`texture`、`latent_response`、`local_sensitivity` 和 `routing` 五项；各项分别直接复用本节已经登记的 `SemanticSaliencyResult`、`TextureResult`、`LatentResponseResult`、`LocalSensitivityResult` 与 `ContentRoutingResult`，不形成新的持久化记录字段。`build_content_observation_routing()` 是四项内容观测进入 latent 路由前的唯一运行编排接口。调用者必须传入 callback 索引9和10的真实 `z_9/z_10`、已经从 `z_10` 解码且仍保持 `[0,1]` RGB Tensor 身份的 `x_10`、原始 Prompt、冻结显著性 runtime、VAE decoder、公开探针身份和三个共享 reference 标量。该接口固定按 `R -> T -> S -> Q -> latent routing` 调用每项原语一次；`T/S/Q` 必须共同消费同一 `x_10` 对象，接口不得再次解码 `z_10`，只有 `Q` 可以通过注入的 decoder 增加一次扰动 latent 解码。返回结构只组合现有五类 result，不新增摘要或记录协议。本接口不构造 LF/HF-tail 模板、不生成载体更新、不执行 latent 写回，也不表示真实 CLIP、VAE、SD3.5 或 CUDA qualification 已通过。
 
 ### 3.4 内容载体
 
