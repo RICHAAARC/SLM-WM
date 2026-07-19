@@ -48,6 +48,9 @@ def test_gpu_entry_delegates_to_independent_server_workflow(
         persistent_output_dir="",
         repository_commit="a" * 40,
         randomization_repeat_id="seed_00_key_00",
+        calibration_only=False,
+        expected_reference_registry_digest="1" * 64,
+        expected_reference_registry_file_sha256="2" * 64,
     )
     result = entry._gpu_result(arguments, tmp_path)
 
@@ -59,7 +62,10 @@ def test_gpu_entry_delegates_to_independent_server_workflow(
         None,
     )
     assert captured["run_keywords"] == {
-        "randomization_repeat_id": "seed_00_key_00"
+        "randomization_repeat_id": "seed_00_key_00",
+        "calibration_only": False,
+        "expected_reference_registry_digest": "1" * 64,
+        "expected_reference_registry_file_sha256": "2" * 64,
     }
     assert result["workflow_summary"] == {"run_decision": "pass"}
 

@@ -112,10 +112,13 @@ def _artifact_state(paper_run_name: str) -> dict[str, Any]:
         ROOT / "outputs" / "formal_branch_risk_sensitivity" / paper_run_name
     )
     runtime_progress_path = runtime_dir / "dataset_runtime_progress.json"
+    calibration_summary_path = runtime_dir / "calibration_protocol_summary.json"
     ablation_progress_path = ablation_dir / "runtime_rerun_progress.json"
     return {
         "runtime_progress_present": runtime_progress_path.is_file(),
         "runtime_progress_path": runtime_progress_path.relative_to(ROOT).as_posix(),
+        "calibration_summary_present": calibration_summary_path.is_file(),
+        "calibration_summary_path": calibration_summary_path.relative_to(ROOT).as_posix(),
         "runtime_summary_path": (
             runtime_dir / "dataset_runtime_summary.json"
         ).relative_to(ROOT).as_posix(),
@@ -242,6 +245,19 @@ def run_scientific_commands(*, run_formal_ablation: bool) -> dict[str, Any]:
 
         state = _artifact_state(paper_run_name)
         report["artifact_state"] = state
+        if state["calibration_summary_present"]:
+            calibration_summary = _read_json(
+                ROOT / state["calibration_summary_path"]
+            )
+            if calibration_summary.get("protocol_decision") != "calibration_complete":
+                raise RuntimeError("calibration protocol intermediate identity invalid")
+            report["decision"] = "pass"
+            report["session_execution_decision"] = "pass"
+            report["workflow_completion_state"] = "calibration_complete"
+            report["paper_run_closed"] = False
+            report["result_closure_ready"] = False
+            _write_dispatch_report(report_path, report)
+            return report
         if state["runtime_progress_present"]:
             report["decision"] = "pass"
             report["session_execution_decision"] = "pass"

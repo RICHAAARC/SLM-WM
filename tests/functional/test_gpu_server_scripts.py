@@ -88,6 +88,17 @@ def _repeat_id(workflow_name: str) -> str | None:
     )
 
 
+def _reference_kwargs(workflow_name: str) -> dict[str, str]:
+    return (
+        {
+            "expected_reference_registry_digest": "5" * 64,
+            "expected_reference_registry_file_sha256": "6" * 64,
+        }
+        if workflow_name == "image_only_dataset"
+        else {}
+    )
+
+
 def _patch_formal_lock(monkeypatch: pytest.MonkeyPatch) -> Mapping[str, Any]:
     """用轻量执行锁替代真实 detached Git 查询并模拟统一发布 API."""
 
@@ -295,7 +306,11 @@ def test_server_cli_accepts_external_persistent_output_directory() -> None:
 @pytest.mark.quick
 @pytest.mark.parametrize(
     "workflow_name",
-    tuple(sorted(workflow.ACTIVE_REPEAT_GPU_WORKFLOW_NAMES)),
+    tuple(
+        sorted(
+            workflow.ACTIVE_REPEAT_GPU_WORKFLOW_NAMES - {"image_only_dataset"}
+        )
+    ),
 )
 def test_active_repeat_routes_reject_explicit_persistent_override(
     workflow_name: str,
@@ -426,6 +441,7 @@ def test_orchestrator_gate_rejects_mismatched_environment_before_dispatch(
             COMMIT,
             tmp_path,
             randomization_repeat_id="seed_00_key_00",
+            **_reference_kwargs("image_only_dataset"),
         )
 
 
@@ -465,6 +481,7 @@ def test_all_nine_routes_emit_one_output_schema(
             COMMIT,
             tmp_path,
             randomization_repeat_id=_repeat_id(name),
+            **_reference_kwargs(name),
         )
         for name in PUBLIC_WORKFLOW_EXPECTATIONS
     ]
@@ -520,6 +537,7 @@ def test_server_rejects_incomplete_internal_route_output(
             COMMIT,
             tmp_path,
             randomization_repeat_id="seed_00_key_00",
+            **_reference_kwargs("image_only_dataset"),
         )
 
 
@@ -599,6 +617,7 @@ def test_main_method_routes_use_isolated_scientific_command(
         COMMIT,
         tmp_path,
         randomization_repeat_id="seed_00_key_00",
+        **_reference_kwargs(workflow_name),
     )
 
     assert captured["root"] == tmp_path.resolve()
@@ -627,6 +646,13 @@ def test_main_method_routes_use_isolated_scientific_command(
     assert result["workflow_environment"]["persistent_output_dir"] == str(
         TEST_PERSISTENT_ROOT
     )
+    if workflow_name == "image_only_dataset":
+        assert result["workflow_environment"][
+            "content_routing_reference_registry_digest"
+        ] == "5" * 64
+        assert result["workflow_environment"][
+            "content_routing_reference_registry_file_sha256"
+        ] == "6" * 64
     assert result["orchestrator_dependency_environment"] == ORCHESTRATOR_EVIDENCE
     assert result["scientific_profile_id"] == workflow.MAIN_METHOD_PROFILE_ID
     assert result["child_argv_tail"] == list(expected_tail)
@@ -672,6 +698,73 @@ def test_main_method_route_maps_persistent_archives_and_resume_checkpoint(
         persistent_root / "semantic_watermark_resume_checkpoint"
     )
     assert result["workflow_summary"]["workflow_decision"] == "complete"
+
+
+@pytest.mark.quick
+def test_image_only_persistent_root_rejects_relative_and_symlink(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="absolute"):
+        workflow._require_absolute_symlink_free_path("relative/path")
+
+    real_root = tmp_path / "real"
+    real_root.mkdir()
+    linked_root = tmp_path / "linked"
+    linked_root.symlink_to(real_root, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlink-free"):
+        workflow._require_absolute_symlink_free_path(linked_root / "run")
+
+
+@pytest.mark.quick
+def test_image_only_registry_sha_rejects_uppercase_before_orchestrator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        workflow,
+        "_require_workflow_orchestrator_environment",
+        lambda _root: (_ for _ in ()).throw(
+            AssertionError("invalid SHA must fail before orchestrator setup")
+        ),
+    )
+    with pytest.raises(ValueError, match="dual SHA"):
+        workflow.run_workflow(
+            "image_only_dataset",
+            "probe_paper",
+            COMMIT,
+            root=tmp_path,
+            persistent_output_dir=tmp_path / "persistent",
+            randomization_repeat_id="seed_00_key_00",
+            expected_reference_registry_digest="A" * 64,
+            expected_reference_registry_file_sha256="2" * 64,
+        )
+
+
+@pytest.mark.quick
+def test_non_image_only_workflow_rejects_registry_identity_before_orchestrator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        workflow,
+        "_require_workflow_orchestrator_environment",
+        lambda _root: (_ for _ in ()).throw(
+            AssertionError("registry identity must fail before orchestrator setup")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="only for image_only_dataset"):
+        workflow.run_workflow(
+            "external_baseline_tree_ring",
+            "probe_paper",
+            COMMIT,
+            root=tmp_path,
+            randomization_repeat_id="seed_00_key_00",
+            expected_reference_registry_digest="1" * 64,
+            expected_reference_registry_file_sha256="2" * 64,
+        )
+
+    assert not (tmp_path / "outputs").exists()
 
 
 @pytest.mark.quick

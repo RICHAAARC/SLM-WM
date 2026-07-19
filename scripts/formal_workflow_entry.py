@@ -36,8 +36,10 @@ from scripts.run_gpu_server_workflow import (  # noqa: E402
     run_workflow,
 )
 from scripts.gpu_method_qualification_host_workflow import (  # noqa: E402
+    CONTENT_ROUTING_REFERENCE_WORKFLOW_NAME,
     CONTENT_RUNTIME_SMOKE_WORKFLOW_NAME,
     QUALIFICATION_WORKFLOW_NAME,
+    run_content_routing_reference_host_workflow,
     run_content_runtime_smoke_host_workflow,
     run_gpu_method_qualification_host_workflow,
 )
@@ -122,6 +124,13 @@ def _gpu_result(arguments: argparse.Namespace, root: Path) -> dict[str, Any]:
         root,
         arguments.persistent_output_dir or None,
         randomization_repeat_id=(arguments.randomization_repeat_id or None),
+        calibration_only=arguments.calibration_only,
+        expected_reference_registry_digest=(
+            arguments.expected_reference_registry_digest
+        ),
+        expected_reference_registry_file_sha256=(
+            arguments.expected_reference_registry_file_sha256
+        ),
     )
 
 
@@ -191,9 +200,12 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             known_answer=arguments.known_answer,
             qualification_output_root=arguments.qualification_output_root,
             frozen_evidence_protocol=arguments.frozen_evidence_protocol,
-            reference_gradient=arguments.reference_gradient,
-            reference_response=arguments.reference_response,
-            reference_sensitivity=arguments.reference_sensitivity,
+            expected_reference_registry_digest=(
+                arguments.expected_reference_registry_digest
+            ),
+            expected_reference_registry_file_sha256=(
+                arguments.expected_reference_registry_file_sha256
+            ),
             registered_budget=(arguments.registered_budget or None),
         )
         workflow_name = QUALIFICATION_WORKFLOW_NAME
@@ -214,7 +226,7 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             or result.get("supports_paper_claim") is not False
         ):
             raise RuntimeError("GPU 方法资格化宿主结果身份无效")
-    else:
+    elif arguments.operation == "content_runtime_smoke":
         orchestrator_environment = _require_workflow_orchestrator_environment(root)
         os.environ["SLM_WM_PAPER_RUN_NAME"] = arguments.paper_run_name
         result = run_content_runtime_smoke_host_workflow(
@@ -245,6 +257,25 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             "supports_paper_claim"
         ) is not False:
             raise RuntimeError("content runtime smoke host result identity invalid")
+    else:
+        orchestrator_environment = _require_workflow_orchestrator_environment(root)
+        os.environ["SLM_WM_PAPER_RUN_NAME"] = arguments.paper_run_name
+        result = run_content_routing_reference_host_workflow(
+            root=root,
+            repository_commit=arguments.repository_commit,
+            result_path=arguments.result_path,
+            output_root=arguments.reference_output_root,
+        )
+        workflow_name = CONTENT_ROUTING_REFERENCE_WORKFLOW_NAME
+        workflow_summary = result.get("workflow_summary", {})
+        workflow_environment = result.get("workflow_environment", {})
+        archive_record = None
+        randomization_scope = "method_parameter_dev_partition"
+        resolved_repeat_id = ""
+        decision = str(result.get("decision", "fail"))
+        failure_reasons = list(result.get("failure_reasons", []))
+        if decision != "pass" or result.get("supports_paper_claim") is not False:
+            raise RuntimeError("content routing reference host result identity invalid")
     if (
         orchestrator_environment.get("profile_id")
         != bootstrap_identity["profile_id"]
@@ -294,7 +325,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "operation",
-        choices=("gpu", "repeat_evidence", "qualification", "content_runtime_smoke"),
+        choices=(
+            "gpu",
+            "repeat_evidence",
+            "qualification",
+            "content_runtime_smoke",
+            "content_routing_reference",
+        ),
     )
     parser.add_argument("--root", required=True)
     parser.add_argument("--repository-commit", required=True)
@@ -307,6 +344,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--orchestrator-python-executable-sha256", required=True)
     parser.add_argument("--workflow", choices=tuple(WORKFLOW_ROUTES))
     parser.add_argument("--persistent-output-dir", default="")
+    parser.add_argument("--calibration-only", action="store_true")
     parser.add_argument("--package-search-root", default="")
     parser.add_argument("--randomization-repeat-id", default="")
     parser.add_argument("--prompt-id", default="")
@@ -324,6 +362,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reference-gradient", type=float)
     parser.add_argument("--reference-response", type=float)
     parser.add_argument("--reference-sensitivity", type=float)
+    parser.add_argument("--expected-reference-registry-digest", default="")
+    parser.add_argument("--expected-reference-registry-file-sha256", default="")
+    parser.add_argument(
+        "--reference-output-root",
+        default="outputs/content_routing_reference_runtime",
+    )
     return parser
 
 
@@ -357,8 +401,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if arguments.operation == "qualification" and (
             not arguments.prompt_id
             or not arguments.frozen_evidence_protocol
+            or not arguments.expected_reference_registry_digest
+            or not arguments.expected_reference_registry_file_sha256
             or any(
-                value is None
+                value is not None
                 for value in (
                     arguments.reference_gradient,
                     arguments.reference_response,
@@ -367,7 +413,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         ):
             raise ValueError(
-                "GPU 方法资格化入口必须提供 Prompt、冻结协议和三个 reference"
+                "GPU 方法资格化入口必须提供 Prompt、冻结协议和fixed registry双摘要"
             )
         if arguments.operation == "content_runtime_smoke" and (
             not arguments.prompt_id

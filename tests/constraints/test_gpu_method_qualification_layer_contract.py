@@ -97,5 +97,7 @@ def test_content_runtime_smoke_has_real_entry_and_no_legacy_precondition() -> No
     assert "_evaluate_torch_func_compatibility" not in entry_source
     assert "torch.func.linearize" not in entry_source
     assert "torch.func.vjp" not in entry_source
-    assert "load_content_routing_reference_registry" not in entry_source
+    assert "load_content_routing_reference_registry(" in entry_source
+    fixed_loader = entry_source.index("_fixed_registry_references(args)", smoke_branch)
+    assert smoke_branch < fixed_loader < formal_writer
     assert "explicit_smoke_only_unqualified" in entry_source

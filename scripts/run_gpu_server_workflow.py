@@ -57,6 +57,28 @@ RESULT_SCHEMA_VERSION = 1
 RESULT_OPERATION_KIND = "isolated_gpu_workflow_orchestration"
 
 
+def _is_sha256(value: Any) -> bool:
+    return (
+        type(value) is str
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _require_absolute_symlink_free_path(value: str | Path) -> Path:
+    requested = Path(value).expanduser()
+    if not requested.is_absolute() or ".." in requested.parts:
+        raise ValueError("image_only_dataset persistent root must be absolute")
+    cursor = Path(requested.anchor)
+    for part in requested.parts[1:]:
+        cursor = cursor / part
+        if cursor.is_symlink():
+            raise ValueError(
+                "image_only_dataset persistent root must be symlink-free"
+            )
+    return requested
+
+
 @dataclass(frozen=True)
 class WorkflowRoute:
     """描述一个公开服务器选项如何进入唯一隔离科学执行边界."""
@@ -303,6 +325,7 @@ def _configure_workflow_execution_environment(
 
     if (
         workflow_name in ACTIVE_REPEAT_GPU_WORKFLOW_NAMES
+        and workflow_name != "image_only_dataset"
         and persistent_output_dir is not None
         and str(persistent_output_dir).strip()
     ):
@@ -325,6 +348,10 @@ def _configure_workflow_execution_environment(
         resolved_persistent_output = os.environ.get(environment_key, "")
     if not resolved_persistent_output:
         raise RuntimeError("正式 GPU workflow 缺少持久化输出目录")
+    if workflow_name == "image_only_dataset":
+        resolved_persistent_output = str(
+            _require_absolute_symlink_free_path(resolved_persistent_output)
+        )
     os.environ[environment_key] = str(resolved_persistent_output)
     environment_record = {
         **dict(environment_record),
@@ -358,6 +385,9 @@ def _run_main_method_route(
     paper_run_name: str,
     root_path: Path,
     persistent_output_dir: Optional[str | Path] = None,
+    calibration_only: bool = False,
+    expected_reference_registry_digest: str = "",
+    expected_reference_registry_file_sha256: str = "",
 ) -> Dict[str, Any]:
     """调用可脱离 Notebook 的完整主方法绑定与打包会话."""
 
@@ -378,12 +408,42 @@ def _run_main_method_route(
                 persistent_root / "runtime_rerun_ablation"
             )
         resume_checkpoint_dir = persistent_root / "semantic_watermark_resume_checkpoint"
-    session = run_semantic_watermark_image_only_session(
-        root_path,
-        run_formal_ablation=workflow_name == "mechanism_ablation",
-        archive_destination_dirs=archive_destination_dirs,
-        resume_checkpoint_dir=resume_checkpoint_dir,
+    previous_calibration_only = os.environ.get("SLM_WM_CALIBRATION_ONLY")
+    previous_registry_digest = os.environ.get(
+        "SLM_WM_CONTENT_ROUTING_REFERENCE_REGISTRY_DIGEST"
     )
+    previous_registry_file_sha256 = os.environ.get(
+        "SLM_WM_CONTENT_ROUTING_REFERENCE_REGISTRY_FILE_SHA256"
+    )
+    try:
+        if calibration_only:
+            os.environ["SLM_WM_CALIBRATION_ONLY"] = "1"
+        else:
+            os.environ.pop("SLM_WM_CALIBRATION_ONLY", None)
+        os.environ["SLM_WM_CONTENT_ROUTING_REFERENCE_REGISTRY_DIGEST"] = (
+            expected_reference_registry_digest
+        )
+        os.environ["SLM_WM_CONTENT_ROUTING_REFERENCE_REGISTRY_FILE_SHA256"] = (
+            expected_reference_registry_file_sha256
+        )
+        session = run_semantic_watermark_image_only_session(
+            root_path,
+            run_formal_ablation=workflow_name == "mechanism_ablation",
+            archive_destination_dirs=archive_destination_dirs,
+            resume_checkpoint_dir=resume_checkpoint_dir,
+        )
+    finally:
+        _restore_environment_value(
+            "SLM_WM_CALIBRATION_ONLY", previous_calibration_only
+        )
+        _restore_environment_value(
+            "SLM_WM_CONTENT_ROUTING_REFERENCE_REGISTRY_DIGEST",
+            previous_registry_digest,
+        )
+        _restore_environment_value(
+            "SLM_WM_CONTENT_ROUTING_REFERENCE_REGISTRY_FILE_SHA256",
+            previous_registry_file_sha256,
+        )
     return {
         "workflow_summary": session,
         "archive_record": None,
@@ -580,6 +640,9 @@ def run_workflow(
     persistent_output_dir: Optional[str | Path] = None,
     *,
     randomization_repeat_id: str | None = None,
+    calibration_only: bool = False,
+    expected_reference_registry_digest: str = "",
+    expected_reference_registry_file_sha256: str = "",
 ) -> Dict[str, Any]:
     """在 CPU 父入口中发布执行身份并调度一个隔离 GPU 工作流."""
 
@@ -592,7 +655,11 @@ def run_workflow(
         resolved_repeat_id = resolve_formal_randomization_repeat(
             randomization_repeat_id
         ).randomization_repeat_id
-        if persistent_output_dir is not None and str(persistent_output_dir).strip():
+        if (
+            persistent_output_dir is not None
+            and str(persistent_output_dir).strip()
+            and workflow_name != "image_only_dataset"
+        ):
             raise ValueError(
                 "活动随机化 GPU workflow 的持久化根必须由受治理 repeat 配置生成, "
                 "不得显式覆盖"
@@ -601,6 +668,23 @@ def run_workflow(
         if randomization_repeat_id:
             raise ValueError("跨 repeat 不变 GPU workflow 不得绑定活动 repeat ID")
         resolved_repeat_id = None
+    if type(calibration_only) is not bool:
+        raise TypeError("calibration_only must be an exact bool")
+    if calibration_only and workflow_name != "image_only_dataset":
+        raise ValueError("calibration-only is valid only for image_only_dataset")
+    if workflow_name != "image_only_dataset" and (
+        expected_reference_registry_digest
+        or expected_reference_registry_file_sha256
+    ):
+        raise ValueError(
+            "fixed content-routing registry identity is valid only for "
+            "image_only_dataset"
+        )
+    if workflow_name == "image_only_dataset" and (
+        not _is_sha256(expected_reference_registry_digest)
+        or not _is_sha256(expected_reference_registry_file_sha256)
+    ):
+        raise ValueError("image_only_dataset requires fixed registry dual SHA")
     route = WORKFLOW_ROUTES[workflow_name]
     root_path = Path(root).resolve()
     orchestrator_environment = _require_workflow_orchestrator_environment(
@@ -634,6 +718,13 @@ def run_workflow(
                 else "cross_repeat_invariant"
             ),
             "randomization_repeat_id": resolved_repeat_id or "",
+            "calibration_only": calibration_only,
+            "content_routing_reference_registry_digest": (
+                expected_reference_registry_digest
+            ),
+            "content_routing_reference_registry_file_sha256": (
+                expected_reference_registry_file_sha256
+            ),
         }
         route_result = (
             _run_main_method_route(
@@ -642,6 +733,13 @@ def run_workflow(
                 paper_run_name=paper_run_name,
                 root_path=root_path,
                 persistent_output_dir=resolved_persistent_output_dir,
+                calibration_only=calibration_only,
+                expected_reference_registry_digest=(
+                    expected_reference_registry_digest
+                ),
+                expected_reference_registry_file_sha256=(
+                    expected_reference_registry_file_sha256
+                ),
             )
             if route.uses_scientific_command
             else _run_shared_route(
@@ -696,6 +794,11 @@ def build_parser() -> argparse.ArgumentParser:
             "使用受治理配置派生的隔离目录."
         ),
     )
+    parser.add_argument("--calibration-only", action="store_true")
+    parser.add_argument("--expected-reference-registry-digest", default="")
+    parser.add_argument(
+        "--expected-reference-registry-file-sha256", default=""
+    )
     return parser
 
 
@@ -713,6 +816,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 args.persistent_output_dir,
                 randomization_repeat_id=(
                     args.randomization_repeat_id or None
+                ),
+                calibration_only=args.calibration_only,
+                expected_reference_registry_digest=(
+                    args.expected_reference_registry_digest
+                ),
+                expected_reference_registry_file_sha256=(
+                    args.expected_reference_registry_file_sha256
                 ),
             ),
             ensure_ascii=False,

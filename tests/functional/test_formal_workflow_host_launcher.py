@@ -130,6 +130,9 @@ def test_child_command_covers_gpu_and_cpu_closure_routes(tmp_path: Path) -> None
         "package_search_root": "",
         "complete_output_dir": "",
         "dry_run": False,
+        "calibration_only": False,
+        "expected_reference_registry_digest": "1" * 64,
+        "expected_reference_registry_file_sha256": "2" * 64,
     }
     bootstrap_identity = {
         "profile_id": "workflow_orchestrator",
@@ -199,6 +202,9 @@ def test_child_command_rejects_missing_or_misplaced_repeat_identity(
         "package_search_root": "",
         "complete_output_dir": "",
         "dry_run": False,
+        "calibration_only": False,
+        "expected_reference_registry_digest": "1" * 64,
+        "expected_reference_registry_file_sha256": "2" * 64,
     }
     bootstrap_identity = {
         "profile_id": "workflow_orchestrator",
@@ -210,7 +216,7 @@ def test_child_command_rejects_missing_or_misplaced_repeat_identity(
     missing_repeat = argparse.Namespace(
         **{**common, "randomization_repeat_id": ""},
         operation="gpu",
-        workflow="image_only_dataset",
+        workflow="mechanism_ablation",
     )
     with pytest.raises(
         host_launcher.FormalWorkflowHostError,
@@ -246,7 +252,7 @@ def test_child_command_rejects_missing_or_misplaced_repeat_identity(
             "persistent_output_dir": "/shared/across_repeats",
         },
         operation="gpu",
-        workflow="image_only_dataset",
+        workflow="mechanism_ablation",
     )
     with pytest.raises(
         host_launcher.FormalWorkflowHostError,
@@ -435,4 +441,23 @@ def test_host_parser_exposes_content_runtime_smoke_without_defaults() -> None:
                 "--prompt-id", "probe_prompt_0001",
                 "--result-path", "outputs/smoke.json",
             ]
+        )
+
+
+@pytest.mark.quick
+def test_formal_host_rejects_relative_and_symlinked_image_only_persistent_root(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(host_launcher.FormalWorkflowHostError, match="absolute"):
+        host_launcher._require_absolute_symlink_free_persistent_root(
+            "relative/path"
+        )
+
+    real_root = tmp_path / "real"
+    real_root.mkdir()
+    linked_root = tmp_path / "linked"
+    linked_root.symlink_to(real_root, target_is_directory=True)
+    with pytest.raises(host_launcher.FormalWorkflowHostError, match="symlink-free"):
+        host_launcher._require_absolute_symlink_free_persistent_root(
+            linked_root / "run"
         )

@@ -7,9 +7,10 @@ not load, validate, write, or identify a persisted reference registry.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import torch
+if TYPE_CHECKING:
+    import torch
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,8 @@ def _positive_population(
     *,
     label: str,
 ) -> torch.Tensor:
+    import torch
+
     positive_members: list[torch.Tensor] = []
     for member_index, member in enumerate(observations):
         member_label = f"{label}[{member_index}]"
@@ -68,6 +71,8 @@ def _positive_population(
 
 
 def _nearest_rank_p95(positive_values: torch.Tensor) -> float:
+    import torch
+
     n = int(positive_values.numel())
     if n == 0:
         raise ValueError("nearest-rank population must not be empty")

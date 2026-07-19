@@ -186,7 +186,19 @@ def _qualification_binding_ready(
         )
         and float(reference_values.get("reference_sensitivity")) > 0.0
         and reference_identity.get("reference_input_role")
-        == "explicit_smoke_only_unqualified"
+        == "fixed_content_routing_reference_registry"
+        and all(
+            type(reference_identity.get(field_name)) is str
+            and len(reference_identity[field_name]) == 64
+            and all(
+                character in "0123456789abcdef"
+                for character in reference_identity[field_name]
+            )
+            for field_name in (
+                "content_routing_reference_registry_digest",
+                "content_routing_reference_registry_file_sha256",
+            )
+        )
         and reference_identity.get("supports_paper_claim") is False
         and input_summary.get("prompt_id") == config.prompt_id
         and input_summary.get("prompt_digest")

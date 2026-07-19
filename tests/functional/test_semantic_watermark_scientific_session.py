@@ -65,6 +65,51 @@ def test_runtime_progress_prevents_formal_ablation_command(
     assert report["artifact_state"]["runtime_progress_present"] is True
 
 
+def test_calibration_complete_stops_before_quality_and_ablation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """校准协议形成后应返回中间成功, 不得伪装重复单元闭合."""
+
+    run_name = "probe_paper"
+    _write_json(
+        tmp_path
+        / "outputs"
+        / "image_only_dataset_runtime"
+        / run_name
+        / "calibration_protocol_summary.json",
+        {
+            "protocol_decision": "calibration_complete",
+            "supports_paper_claim": False,
+        },
+    )
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(dispatcher, "ROOT", tmp_path)
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", run_name)
+    _select_probe_run(monkeypatch)
+
+    def run_child(command_tail: tuple[str, ...]) -> dict[str, object]:
+        calls.append(command_tail)
+        return {
+            "argv": list(command_tail),
+            "return_code": 0,
+            "stdout": "",
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(dispatcher, "_run_child", run_child)
+
+    report = dispatcher.run_scientific_commands(run_formal_ablation=True)
+
+    assert calls == [("-m", "experiments.runners.image_only_dataset_workload")]
+    assert report["decision"] == "pass"
+    assert report["session_execution_decision"] == "pass"
+    assert report["workflow_completion_state"] == "calibration_complete"
+    assert report["paper_run_closed"] is False
+    assert report["result_closure_ready"] is False
+    assert report["supports_paper_claim"] is False
+
+
 def test_closed_main_runs_requested_formal_analysis_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

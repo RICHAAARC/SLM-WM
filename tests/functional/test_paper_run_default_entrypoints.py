@@ -15,6 +15,10 @@ from paper_experiments.runners.external_baseline_method_faithful import (
 )
 from paper_experiments.runners import t2smark_formal_reproduction as t2smark
 from scripts import semantic_watermark_scientific_workflow as scientific_workflow
+from experiments.runners import image_only_dataset_workload as image_workload
+from experiments.protocol.content_routing_reference_quantile import (
+    ContentRoutingReferenceScalars,
+)
 
 
 pytestmark = pytest.mark.quick
@@ -78,6 +82,91 @@ def test_scientific_dispatcher_uses_probe_default_without_environment(
     assert report["artifact_state"]["runtime_progress_path"].endswith(
         "probe_paper/dataset_runtime_progress.json"
     )
+
+
+def test_dispatcher_accepts_calibration_complete_as_intermediate_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    summary_path = (
+        tmp_path
+        / "outputs/image_only_dataset_runtime/probe_paper/calibration_protocol_summary.json"
+    )
+    summary_path.parent.mkdir(parents=True)
+    summary_path.write_text(
+        json.dumps({"protocol_decision": "calibration_complete"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dispatcher, "ROOT", tmp_path)
+    monkeypatch.setattr(
+        dispatcher,
+        "_run_child",
+        lambda _tail: {"return_code": 0, "stdout": "", "stderr": ""},
+    )
+
+    report = dispatcher.run_scientific_commands(run_formal_ablation=False)
+
+    assert report["decision"] == "pass"
+    assert report["workflow_completion_state"] == "calibration_complete"
+    assert report["paper_run_closed"] is False
+    assert report["result_closure_ready"] is False
+
+
+def test_image_only_workload_loads_fixed_registry_before_calibration_only_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, object] = {}
+    references = ContentRoutingReferenceScalars(1.0, 0.5, 0.25)
+    monkeypatch.setenv("SLM_WM_KEY_MATERIAL", "registered-root-key")
+    monkeypatch.setenv(
+        "SLM_WM_CONTENT_ROUTING_REFERENCE_REGISTRY_DIGEST", "1" * 64
+    )
+    monkeypatch.setenv(
+        "SLM_WM_CONTENT_ROUTING_REFERENCE_REGISTRY_FILE_SHA256", "2" * 64
+    )
+    monkeypatch.setenv("SLM_WM_CALIBRATION_ONLY", "1")
+
+    def load(**kwargs: object) -> ContentRoutingReferenceScalars:
+        calls["loader"] = kwargs
+        return references
+
+    monkeypatch.setattr(image_workload, "load_content_routing_reference_registry", load)
+    monkeypatch.setattr(
+        image_workload,
+        "build_paper_run_config",
+        lambda _root: SimpleNamespace(run_name="probe_paper"),
+    )
+    monkeypatch.setattr(image_workload, "build_method_config", lambda _root: object())
+
+    def run(*_args: object, **kwargs: object) -> dict[str, object]:
+        calls["runtime"] = kwargs
+        return {"protocol_decision": "calibration_complete"}
+
+    monkeypatch.setattr(image_workload, "run_image_only_dataset_runtime", run)
+    monkeypatch.setattr(
+        image_workload,
+        "write_dataset_level_quality_outputs",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("calibration-only must not execute quality analysis")
+        ),
+    )
+
+    result = image_workload.run_image_only_dataset_workload(tmp_path)
+
+    assert calls["loader"] == {
+        "expected_registry_digest": "1" * 64,
+        "expected_file_sha256": "2" * 64,
+    }
+    runtime_kwargs = calls["runtime"]
+    assert runtime_kwargs["content_routing_references"] is references
+    assert runtime_kwargs["calibration_only"] is True
+    assert runtime_kwargs["content_routing_reference_registry_digest"] == "1" * 64
+    assert (
+        runtime_kwargs["content_routing_reference_registry_file_sha256"]
+        == "2" * 64
+    )
+    assert result["summary"]["protocol_decision"] == "calibration_complete"
 
 
 def test_outer_scientific_entry_uses_resolved_config_for_recovery(

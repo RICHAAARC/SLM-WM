@@ -187,7 +187,9 @@ def test_gpu_qualification_binding_covers_commit_models_dependency_and_prompt() 
             ),
         },
         "content_routing_reference_identity": {
-            "reference_input_role": "explicit_smoke_only_unqualified",
+            "reference_input_role": "fixed_content_routing_reference_registry",
+            "content_routing_reference_registry_digest": "e" * 64,
+            "content_routing_reference_registry_file_sha256": "f" * 64,
             "supports_paper_claim": False,
             "reference_values": {
                 "reference_gradient": 1.0,
@@ -300,6 +302,11 @@ def test_gpu_qualification_entry_uses_real_writer_and_operator_exit_gate(
     )
     monkeypatch.setattr(
         entry,
+        "load_content_routing_reference_registry",
+        lambda **_kwargs: entry.ContentRoutingReferenceScalars(1.0, 0.5, 0.25),
+    )
+    monkeypatch.setattr(
+        entry,
         "apply_frozen_evidence_protocol",
         lambda rows, protocol: tuple(rows),
     )
@@ -354,12 +361,10 @@ def test_gpu_qualification_entry_uses_real_writer_and_operator_exit_gate(
             "outputs/gpu_method_qualification",
             "--frozen-evidence-protocol",
             str(frozen_protocol_path),
-            "--reference-gradient",
-            "1.0",
-            "--reference-response",
-            "0.5",
-            "--reference-sensitivity",
-            "0.25",
+            "--expected-reference-registry-digest",
+            "e" * 64,
+            "--expected-reference-registry-file-sha256",
+            "f" * 64,
         )
     )
 
@@ -443,12 +448,10 @@ def test_formal_qualification_requires_protocol_before_writer(
                 "probe_paper",
                 "--prompt-id",
                 prompt.prompt_id,
-                "--reference-gradient",
-                "1.0",
-                "--reference-response",
-                "0.5",
-                "--reference-sensitivity",
-                "0.25",
+                "--expected-reference-registry-digest",
+                "e" * 64,
+                "--expected-reference-registry-file-sha256",
+                "f" * 64,
             )
         )
 

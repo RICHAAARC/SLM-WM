@@ -636,6 +636,26 @@ def run_semantic_watermark_image_only_session(
     )
 
     runtime_progress_path = runtime_output_dir / "dataset_runtime_progress.json"
+    calibration_summary_path = runtime_output_dir / "calibration_protocol_summary.json"
+    if calibration_summary_path.is_file():
+        calibration_summary = _read_json(calibration_summary_path)
+        if calibration_summary.get("protocol_decision") != "calibration_complete":
+            raise RuntimeError("calibration-only intermediate result is invalid")
+        return {
+            "workflow_decision": "calibration_complete",
+            "workflow_completion_state": "calibration_complete",
+            "session_execution_decision": "pass",
+            "paper_run_closed": False,
+            "result_closure_ready": False,
+            "paper_run_name": paper_run_name,
+            "active_workflow": "image_only_dataset_runtime",
+            "calibration_protocol_summary": calibration_summary,
+            "formal_ablation_requested": run_formal_ablation,
+            "closed_archive_recovery_ready": False,
+            "closed_archive_recovery": closed_archive_recovery,
+            "supports_paper_claim": False,
+            **evidence,
+        }
     if runtime_progress_path.is_file():
         return {
             "workflow_decision": "resume_required",

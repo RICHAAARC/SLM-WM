@@ -27,10 +27,64 @@ from scripts import run_formal_workflow_host as host
 from tests.helpers.formal_detection_record import bind_formal_detection_record
 
 
+_REAL_LOAD_FIXED_REFERENCE_IDENTITY = workflow._load_fixed_reference_identity
+
+
 def _sha256(path: Path) -> str:
     """计算测试资格化报告的真实文件摘要."""
 
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _fixed_reference_identity() -> dict[str, object]:
+    return {
+        "reference_input_role": "fixed_content_routing_reference_registry",
+        "content_routing_reference_registry_digest": "1" * 64,
+        "content_routing_reference_registry_file_sha256": "2" * 64,
+        "reference_values": {
+            "reference_gradient": 1.0,
+            "reference_response": 0.5,
+            "reference_sensitivity": 0.25,
+        },
+        "supports_paper_claim": False,
+    }
+
+
+@pytest.fixture(autouse=True)
+def _host_fixed_reference_loader(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        workflow,
+        "_load_fixed_reference_identity",
+        lambda **_kwargs: _fixed_reference_identity(),
+    )
+
+
+def test_host_fixed_loader_binds_exact_dual_sha_and_scalars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from experiments.protocol import content_routing_reference_registry as registry
+
+    calls: dict[str, object] = {}
+
+    def load(**kwargs: object) -> SimpleNamespace:
+        calls.update(kwargs)
+        return SimpleNamespace(
+            reference_gradient=1.0,
+            reference_response=0.5,
+            reference_sensitivity=0.25,
+        )
+
+    monkeypatch.setattr(registry, "load_content_routing_reference_registry", load)
+    identity = _REAL_LOAD_FIXED_REFERENCE_IDENTITY(
+        expected_registry_digest="1" * 64,
+        expected_file_sha256="2" * 64,
+    )
+
+    assert calls == {
+        "expected_registry_digest": "1" * 64,
+        "expected_file_sha256": "2" * 64,
+    }
+    assert identity == _fixed_reference_identity()
 
 
 def _qualification_report(
@@ -56,6 +110,7 @@ def _qualification_report(
                 "paper_run_name": paper_run_name,
                 "prompt_id": prompt_id,
             },
+            "content_routing_reference_identity": _fixed_reference_identity(),
             "frozen_evidence_protocol_identity": {
                 "source_path": protocol_path.as_posix(),
                 "source_file_sha256": _sha256(protocol_path),
@@ -262,9 +317,8 @@ def test_host_workflow_uses_exact_sd35_child_and_operator_gate(
         known_answer="configs/keyed_prg_cross_platform_known_answer.json",
         qualification_output_root="outputs/gpu_method_qualification",
         frozen_evidence_protocol=protocol_path,
-        reference_gradient=1.0,
-        reference_response=0.5,
-        reference_sensitivity=0.25,
+        expected_reference_registry_digest="1" * 64,
+        expected_reference_registry_file_sha256="2" * 64,
     )
 
     assert captured["profile_id"] == "sd35_method_runtime_gpu"
@@ -277,7 +331,7 @@ def test_host_workflow_uses_exact_sd35_child_and_operator_gate(
     assert child_argv[child_argv.index("--frozen-evidence-protocol") + 1] == str(
         protocol_path
     )
-    assert child_argv[child_argv.index("--reference-gradient") + 1] == "1.0"
+    assert child_argv[child_argv.index("--expected-reference-registry-digest") + 1] == "1" * 64
     assert result["decision"] == ("pass" if operator_ready else "fail")
     assert result["return_code"] == (0 if operator_ready else 1)
     assert result["workflow_summary"]["gpu_resource_budget_ready"] is False
@@ -295,6 +349,8 @@ def test_host_workflow_uses_exact_sd35_child_and_operator_gate(
         "invocation_threshold_digest",
         "report_protocol_threshold_digest",
         "formal_record_threshold_digest",
+        "reference_scalar",
+        "reference_digest",
     ),
 )
 def test_host_rejects_formal_detection_and_protocol_identity_drift(
@@ -396,6 +452,14 @@ def test_host_rejects_formal_detection_and_protocol_identity_drift(
         report["qualification_binding"]["formal_detection_records_identity"][
             "file_sha256"
         ] = changed_sha
+    elif mutation == "reference_scalar":
+        report["qualification_binding"]["content_routing_reference_identity"][
+            "reference_values"
+        ]["reference_gradient"] = 0.75
+    elif mutation == "reference_digest":
+        report["qualification_binding"]["content_routing_reference_identity"][
+            "content_routing_reference_registry_digest"
+        ] = "9" * 64
     persist_report()
     isolated_report = {
         "report_schema": "isolated_scientific_execution_report",
@@ -437,6 +501,7 @@ def test_host_rejects_formal_detection_and_protocol_identity_drift(
             isolated_report=isolated_report,
             frozen_evidence_protocol=protocol,
             frozen_evidence_protocol_path=protocol_path,
+            expected_reference_identity=_fixed_reference_identity(),
         )
 
 
@@ -455,12 +520,10 @@ def test_formal_host_builds_qualification_child_command() -> None:
             "probe_prompt_0001",
             "--frozen-evidence-protocol",
             "inputs/frozen_evidence_protocol.json",
-            "--reference-gradient",
-            "1.0",
-            "--reference-response",
-            "0.5",
-            "--reference-sensitivity",
-            "0.25",
+            "--expected-reference-registry-digest",
+            "1" * 64,
+            "--expected-reference-registry-file-sha256",
+            "2" * 64,
             "--registered-budget",
             "configs/gpu_budget.json",
             "--result-path",
@@ -494,9 +557,8 @@ def test_formal_host_builds_qualification_child_command() -> None:
     assert command[command.index("--frozen-evidence-protocol") + 1] == (
         "inputs/frozen_evidence_protocol.json"
     )
-    assert command[command.index("--reference-gradient") + 1] == "1.0"
-    assert command[command.index("--reference-response") + 1] == "0.5"
-    assert command[command.index("--reference-sensitivity") + 1] == "0.25"
+    assert command[command.index("--expected-reference-registry-digest") + 1] == "1" * 64
+    assert command[command.index("--expected-reference-registry-file-sha256") + 1] == "2" * 64
     assert "--workflow" not in command
     assert "--randomization-repeat-id" not in command
 
@@ -506,9 +568,8 @@ def test_formal_host_builds_qualification_child_command() -> None:
     "missing_option",
     (
         "--frozen-evidence-protocol",
-        "--reference-gradient",
-        "--reference-response",
-        "--reference-sensitivity",
+        "--expected-reference-registry-digest",
+        "--expected-reference-registry-file-sha256",
     ),
 )
 def test_formal_host_requires_protocol_and_three_references(
@@ -526,12 +587,10 @@ def test_formal_host_requires_protocol_and_three_references(
         "probe_prompt_0001",
         "--frozen-evidence-protocol",
         "inputs/frozen_evidence_protocol.json",
-        "--reference-gradient",
-        "1.0",
-        "--reference-response",
-        "0.5",
-        "--reference-sensitivity",
-        "0.25",
+        "--expected-reference-registry-digest",
+        "1" * 64,
+        "--expected-reference-registry-file-sha256",
+        "2" * 64,
         "--result-path",
         "outputs/host/qualification_result.json",
     ]
@@ -822,9 +881,8 @@ def test_formal_entry_propagates_qualification_decision(
         registered_budget="",
         qualification_output_root="outputs/gpu_method_qualification",
         frozen_evidence_protocol="inputs/frozen_evidence_protocol.json",
-        reference_gradient=1.0,
-        reference_response=0.5,
-        reference_sensitivity=0.25,
+        expected_reference_registry_digest="1" * 64,
+        expected_reference_registry_file_sha256="2" * 64,
     )
 
     payload = formal_workflow_entry.execute(arguments)
@@ -837,9 +895,8 @@ def test_formal_entry_propagates_qualification_decision(
     assert captured_qualification["frozen_evidence_protocol"] == (
         "inputs/frozen_evidence_protocol.json"
     )
-    assert captured_qualification["reference_gradient"] == 1.0
-    assert captured_qualification["reference_response"] == 0.5
-    assert captured_qualification["reference_sensitivity"] == 0.25
+    assert captured_qualification["expected_reference_registry_digest"] == "1" * 64
+    assert captured_qualification["expected_reference_registry_file_sha256"] == "2" * 64
 
 
 @pytest.mark.quick
@@ -942,9 +999,8 @@ def test_host_workflow_rejects_report_digest_mismatch(
             known_answer="configs/keyed_prg_cross_platform_known_answer.json",
             qualification_output_root="outputs/gpu_method_qualification",
             frozen_evidence_protocol=protocol_path,
-            reference_gradient=1.0,
-            reference_response=0.5,
-            reference_sensitivity=0.25,
+            expected_reference_registry_digest="1" * 64,
+            expected_reference_registry_file_sha256="2" * 64,
         )
 
 
@@ -1000,6 +1056,7 @@ def test_host_reports_scientific_child_exception_before_invocation_exists() -> N
                 image_only_measurement_config_digest="2" * 64,
             ),
             frozen_evidence_protocol_path=Path.cwd() / "protocol.json",
+            expected_reference_identity=_fixed_reference_identity(),
         )
 
 
@@ -1057,12 +1114,10 @@ def test_formal_entry_main_returns_nonzero_for_operator_failure(
             "probe_prompt_0001",
             "--frozen-evidence-protocol",
             "inputs/frozen_evidence_protocol.json",
-            "--reference-gradient",
-            "1.0",
-            "--reference-response",
-            "0.5",
-            "--reference-sensitivity",
-            "0.25",
+            "--expected-reference-registry-digest",
+            "1" * 64,
+            "--expected-reference-registry-file-sha256",
+            "2" * 64,
         ]
     )
 

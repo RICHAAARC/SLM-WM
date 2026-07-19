@@ -101,9 +101,13 @@
 - `r_ref`：拼接全部成员在 latent 分辨率产生的所有有限且严格为正的 `d_R` 标量，不执行逐图像汇总。
 - `q_ref`：拼接全部成员在 RGB 原始分辨率、映射到 latent 之前产生的所有有限且严格为正的 `d_Q` 标量，不执行逐图像汇总。
 
-三者分别在自己的拼接总体上采用 nearest-rank 95分位数：对 `n` 个有限正标量升序排列，取索引 `ceil(0.95*n)-1`。任一总体为空时参数物化失败关闭；不得以0、epsilon、逐图像统计或预制默认值回退。
+三者分别在自己的拼接总体上采用 nearest-rank 95分位数：对 `n` 个有限正标量升序排列，取索引 `(19*n+19)//20-1`。任一总体为空时参数物化失败关闭；不得以0、epsilon、逐图像统计或预制默认值回退。
 
 该登记文件必须绑定 `registry_schema`、方法参数划分 ID、Prompt 清单摘要、seed 清单摘要、样本数量、模型与预处理身份摘要、原始观测成员摘要、分位数算法、分位数值以及三个精确标量。登记文件未物化或任一摘要不一致时，正式 GPU 运行必须失败关闭。三个标量不得在单张图像、论文 profile、calibration split 或 test split 上重算。
+
+真实 reference 候选只允许由与 calibration/test 隔离的 `probe_paper` dev 参数划分产生：同一正式生成身份必须独立重放两次，逐成员复算原始 `G/d_R/d_Q`，并要求候选规范字节、总体身份和三个标量逐字一致。隔离 scientific child 只能把候选及复验报告写入 `outputs/`；它不得改写或读取固定登记路径。只有外层独立复验通过后，才允许把候选原始字节逐字晋升到固定登记文件，禁止 JSON 重序列化、默认值或单图现场重算。
+
+正式 calibration 与 qualification 必须通过固定登记文件的 semantic digest 和 exact file SHA-256 双身份取得三个标量；单样本 smoke 的显式未资格化标量仍是独立入口，不能进入正式 qualification。`probe_paper` 的 calibration-only 执行在33个 calibration Prompt 完成后立即持久化并重建 `FrozenEvidenceProtocol`，随后返回 `calibration_complete` 中间状态；该路径不得执行 test Prompt、攻击、FID/KID，也不得把 repeat 或 paper 标记为完成。
 
 同源 CLIP cosine 只用于单 Prompt GPU 算子资格化，不能承担论文的独立视觉内容保持主张，也不能作为正式运行中删除低质量样本的依据。手工结构描述符可以保留为 `experiments/` 层诊断，但不属于算法原语、核心门禁或水印阳性公式。
 

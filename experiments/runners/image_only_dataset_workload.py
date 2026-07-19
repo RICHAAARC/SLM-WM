@@ -31,6 +31,9 @@ from experiments.runners.image_only_dataset_runtime import (
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
 )
+from experiments.protocol.content_routing_reference_registry import (
+    load_content_routing_reference_registry,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -145,6 +148,19 @@ def run_image_only_dataset_workload(
     """运行生成、盲检、攻击和正式 FID/KID, 并返回可序列化结果."""
 
     root_path = Path(root).resolve()
+    key_material = os.environ.get("SLM_WM_KEY_MATERIAL")
+    if type(key_material) is not str or not key_material:
+        raise RuntimeError("image_only_dataset requires explicit SLM_WM_KEY_MATERIAL")
+    expected_registry_digest = os.environ.get(
+        "SLM_WM_CONTENT_ROUTING_REFERENCE_REGISTRY_DIGEST", ""
+    )
+    expected_registry_file_sha256 = os.environ.get(
+        "SLM_WM_CONTENT_ROUTING_REFERENCE_REGISTRY_FILE_SHA256", ""
+    )
+    references = load_content_routing_reference_registry(
+        expected_registry_digest=expected_registry_digest,
+        expected_file_sha256=expected_registry_file_sha256,
+    )
     paper_run = build_paper_run_config(root_path)
     summary = run_image_only_dataset_runtime(
         build_method_config(root_path),
@@ -153,8 +169,17 @@ def run_image_only_dataset_workload(
         max_new_prompts_per_session=int(
             os.environ.get("SLM_WM_MAX_NEW_PROMPTS_PER_SESSION", "0")
         ),
+        content_routing_references=references,
+        calibration_only=(os.environ.get("SLM_WM_CALIBRATION_ONLY") == "1"),
+        content_routing_reference_registry_digest=expected_registry_digest,
+        content_routing_reference_registry_file_sha256=(
+            expected_registry_file_sha256
+        ),
     )
-    if summary.get("protocol_decision") == "resume_required":
+    if summary.get("protocol_decision") in {
+        "resume_required",
+        "calibration_complete",
+    }:
         return {"summary": summary}
 
     # 主方法模型已经离开调用作用域, 先回收显存再加载正式 Inception 模型.

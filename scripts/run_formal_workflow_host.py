@@ -42,6 +42,7 @@ from experiments.runtime.dependency_profiles import (  # noqa: E402
 WORKFLOW_ORCHESTRATOR_PROFILE_ID = "workflow_orchestrator"
 EXPECTED_ORCHESTRATOR_PYTHON_VERSION = "3.12.13"
 FORMAL_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 GPU_WORKFLOW_NAMES = (
     "image_only_dataset",
     "mechanism_ablation",
@@ -73,6 +74,22 @@ _SANITIZED_ENVIRONMENT_NAMES = frozenset(
 
 class FormalWorkflowHostError(RuntimeError):
     """表示宿主引导或精确父环境门禁失败."""
+
+
+def _require_absolute_symlink_free_persistent_root(value: str | Path) -> Path:
+    requested = Path(value).expanduser()
+    if not requested.is_absolute() or ".." in requested.parts:
+        raise FormalWorkflowHostError(
+            "image_only_dataset persistent root must be absolute"
+        )
+    cursor = Path(requested.anchor)
+    for part in requested.parts[1:]:
+        cursor = cursor / part
+        if cursor.is_symlink():
+            raise FormalWorkflowHostError(
+                "image_only_dataset persistent root must be symlink-free"
+            )
+    return requested
 
 
 def _normalized_machine(value: str) -> str:
@@ -383,7 +400,10 @@ def build_child_command(
                 raise FormalWorkflowHostError(
                     "活动随机化 GPU workflow 必须显式指定 repeat ID"
                 )
-            if arguments.persistent_output_dir:
+            if (
+                arguments.persistent_output_dir
+                and arguments.workflow != "image_only_dataset"
+            ):
                 raise FormalWorkflowHostError(
                     "活动随机化 GPU workflow 的持久化根必须由受治理 repeat "
                     "配置生成, 不得显式覆盖"
@@ -399,7 +419,39 @@ def build_child_command(
                 "跨 repeat 不变 GPU workflow 不得绑定活动 repeat ID"
             )
         if arguments.persistent_output_dir:
+            if arguments.workflow == "image_only_dataset":
+                _require_absolute_symlink_free_persistent_root(
+                    arguments.persistent_output_dir
+                )
             command.extend(["--persistent-output-dir", arguments.persistent_output_dir])
+        if arguments.workflow == "image_only_dataset":
+            if (
+                SHA256_PATTERN.fullmatch(
+                    arguments.expected_reference_registry_digest
+                )
+                is None
+                or SHA256_PATTERN.fullmatch(
+                    arguments.expected_reference_registry_file_sha256
+                )
+                is None
+            ):
+                raise FormalWorkflowHostError(
+                    "image_only_dataset requires fixed registry dual SHA"
+                )
+            command.extend(
+                [
+                    "--expected-reference-registry-digest",
+                    arguments.expected_reference_registry_digest,
+                    "--expected-reference-registry-file-sha256",
+                    arguments.expected_reference_registry_file_sha256,
+                ]
+            )
+        if arguments.calibration_only:
+            if arguments.workflow != "image_only_dataset":
+                raise FormalWorkflowHostError(
+                    "calibration-only is valid only for image_only_dataset"
+                )
+            command.append("--calibration-only")
     elif arguments.operation == "repeat_evidence":
         command.extend(
             [
@@ -420,12 +472,10 @@ def build_child_command(
                 arguments.qualification_output_root,
                 "--frozen-evidence-protocol",
                 arguments.frozen_evidence_protocol,
-                "--reference-gradient",
-                repr(arguments.reference_gradient),
-                "--reference-response",
-                repr(arguments.reference_response),
-                "--reference-sensitivity",
-                repr(arguments.reference_sensitivity),
+                "--expected-reference-registry-digest",
+                arguments.expected_reference_registry_digest,
+                "--expected-reference-registry-file-sha256",
+                arguments.expected_reference_registry_file_sha256,
             ]
         )
         if arguments.registered_budget:
@@ -445,6 +495,13 @@ def build_child_command(
                 repr(arguments.reference_response),
                 "--reference-sensitivity",
                 repr(arguments.reference_sensitivity),
+            ]
+        )
+    elif arguments.operation == "content_routing_reference":
+        command.extend(
+            [
+                "--reference-output-root",
+                arguments.reference_output_root,
             ]
         )
     else:
@@ -514,6 +571,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     gpu.add_argument("--randomization-repeat-id", default="")
+    gpu.add_argument("--calibration-only", action="store_true")
+    gpu.add_argument("--expected-reference-registry-digest", default="")
+    gpu.add_argument(
+        "--expected-reference-registry-file-sha256", default=""
+    )
     gpu.add_argument("--result-path", required=True)
     repeat_evidence = subparsers.add_parser("repeat_evidence")
     repeat_evidence.add_argument(
@@ -532,9 +594,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     qualification.add_argument("--prompt-id", required=True)
     qualification.add_argument("--frozen-evidence-protocol", required=True)
-    qualification.add_argument("--reference-gradient", required=True, type=float)
-    qualification.add_argument("--reference-response", required=True, type=float)
-    qualification.add_argument("--reference-sensitivity", required=True, type=float)
+    qualification.add_argument("--expected-reference-registry-digest", required=True)
+    qualification.add_argument(
+        "--expected-reference-registry-file-sha256", required=True
+    )
     qualification.set_defaults(
         known_answer="configs/keyed_prg_cross_platform_known_answer.json"
     )
@@ -559,6 +622,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="outputs/content_runtime_smoke",
     )
     smoke.add_argument("--result-path", required=True)
+    reference = subparsers.add_parser("content_routing_reference")
+    reference.add_argument(
+        "--paper-run-name",
+        required=True,
+        choices=("probe_paper",),
+    )
+    reference.add_argument(
+        "--reference-output-root",
+        default="outputs/content_routing_reference_runtime",
+    )
+    reference.add_argument("--result-path", required=True)
     return parser
 
 

@@ -50,6 +50,9 @@ from experiments.runners.semantic_watermark_runtime import (
 from experiments.protocol.content_routing_reference_quantile import (
     ContentRoutingReferenceScalars,
 )
+from experiments.protocol.content_routing_reference_registry import (
+    load_content_routing_reference_registry,
+)
 from experiments.runtime import repository_environment
 from experiments.runtime.dependency_profiles import require_dependency_profile_ready
 from experiments.runtime.scientific_unit_provenance import (
@@ -287,6 +290,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reference-gradient", type=float)
     parser.add_argument("--reference-response", type=float)
     parser.add_argument("--reference-sensitivity", type=float)
+    parser.add_argument("--expected-reference-registry-digest")
+    parser.add_argument("--expected-reference-registry-file-sha256")
     return parser
 
 
@@ -323,6 +328,41 @@ def _explicit_smoke_references(arguments: argparse.Namespace) -> tuple[
         **identity,
         "reference_input_digest": build_stable_digest(identity),
     }
+
+
+def _fixed_registry_references(arguments: argparse.Namespace) -> tuple[
+    ContentRoutingReferenceScalars,
+    dict[str, Any],
+]:
+    """Load the unique promoted registry for formal qualification only."""
+
+    if any(
+        value is not None
+        for value in (
+            arguments.reference_gradient,
+            arguments.reference_response,
+            arguments.reference_sensitivity,
+        )
+    ):
+        raise ValueError("formal qualification must not accept explicit smoke references")
+    semantic_digest = arguments.expected_reference_registry_digest
+    file_sha256 = arguments.expected_reference_registry_file_sha256
+    references = load_content_routing_reference_registry(
+        expected_registry_digest=semantic_digest,
+        expected_file_sha256=file_sha256,
+    )
+    identity = {
+        "reference_input_role": "fixed_content_routing_reference_registry",
+        "content_routing_reference_registry_digest": semantic_digest,
+        "content_routing_reference_registry_file_sha256": file_sha256,
+        "reference_values": {
+            "reference_gradient": references.reference_gradient,
+            "reference_response": references.reference_response,
+            "reference_sensitivity": references.reference_sensitivity,
+        },
+        "supports_paper_claim": False,
+    }
+    return references, identity
 
 
 def _write_content_runtime_smoke(
@@ -420,11 +460,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise RuntimeError("formal runtime requires SLM_WM_KEY_MATERIAL")
     config = replace(config, key_material=key_material)
     if args.content_runtime_smoke:
-        if args.frozen_evidence_protocol is not None:
+        if (
+            args.frozen_evidence_protocol is not None
+            or args.expected_reference_registry_digest is not None
+            or args.expected_reference_registry_file_sha256 is not None
+        ):
             raise ValueError("content runtime smoke 必须保持threshold-free")
         frozen_evidence_protocol = None
         frozen_evidence_protocol_path = None
     else:
+        if (
+            args.expected_reference_registry_digest is None
+            or args.expected_reference_registry_file_sha256 is None
+        ):
+            raise ValueError("正式GPU资格化必须提供fixed registry双摘要")
         (
             frozen_evidence_protocol,
             frozen_evidence_protocol_path,
@@ -453,7 +502,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(json.dumps(invocation, ensure_ascii=False, sort_keys=True))
         return 0
-    references, reference_identity = _explicit_smoke_references(args)
+    references, reference_identity = _fixed_registry_references(args)
     torch.cuda.reset_peak_memory_stats()
     started_at = time.perf_counter()
     result = write_semantic_watermark_runtime_outputs(

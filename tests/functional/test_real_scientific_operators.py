@@ -107,6 +107,7 @@ from experiments.protocol.image_only_evidence import (
     partition_calibration_clean_negatives,
 )
 from experiments.runners.image_only_dataset_runtime import (
+    _write_calibration_protocol_boundary,
     _scientific_update_record_ready,
     validate_detection_content_carrier_protocol,
 )
@@ -171,6 +172,111 @@ _FORMAL_TAIL_CARRIER_PROTOCOL = tail_robust_carrier_protocol_record(
     _FORMAL_TAIL_FRACTION,
     prg_version=KEYED_PRG_VERSION,
 )
+
+
+@pytest.mark.quick
+def test_calibration_only_boundary_persists_and_rebuilds_before_test_workload(
+    tmp_path: Path,
+) -> None:
+    records = tuple(
+        bind_formal_detection_record(
+            {
+                "prompt_id": f"calibration-{index:02d}",
+                "split": "calibration",
+                "sample_role": "clean_negative",
+                "detection_key_role": "registered_watermark_key",
+                "attack_id": "",
+                "content_score": float(index + 1) / 100.0,
+                "aligned_content_score": float(index + 1) / 100.0,
+                "attention_geometry_score": 0.0,
+                "registration_confidence": 0.0,
+                "attention_sync_score": 0.0,
+                "geometry_reliable": False,
+                "alignment": {"registration_geometry_reliable": False},
+            }
+        )
+        for index in range(33)
+    )
+    output_dir = tmp_path / "outputs/image_only_dataset_runtime/probe_paper"
+    output_dir.mkdir(parents=True)
+
+    summary = _write_calibration_protocol_boundary(
+        root_path=tmp_path,
+        output_dir=output_dir,
+        paper_run=SimpleNamespace(run_name="probe_paper", target_fpr=0.1),
+        calibration_negatives=records,
+        content_routing_reference_registry_digest="1" * 64,
+        content_routing_reference_registry_file_sha256="2" * 64,
+    )
+
+    assert summary["protocol_decision"] == "calibration_complete"
+    assert summary["calibration_detection_record_count"] == 33
+    assert summary["test_prompt_execution_count"] == 0
+    assert summary["attack_execution_count"] == 0
+    assert summary["fid_kid_execution_count"] == 0
+    assert summary["content_routing_reference_registry_digest"] == "1" * 64
+    assert (
+        summary["content_routing_reference_registry_file_sha256"] == "2" * 64
+    )
+    assert summary["paper_run_closed"] is False
+    assert summary["repeat_component_ready"] is False
+    persisted = tuple(
+        json.loads(line)
+        for line in (
+            output_dir / "calibration_detection_records.jsonl"
+        ).read_text(encoding="utf-8").splitlines()
+    )
+    protocol = calibrate_complete_evidence_protocol(persisted, 0.1)
+    stored = json.loads(
+        (output_dir / "frozen_evidence_protocol.json").read_text(encoding="utf-8")
+    )
+    assert stored == protocol.to_dict()
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("field_name", ("semantic", "file"))
+def test_dataset_runtime_rejects_missing_registry_identity_before_formal_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field_name: str,
+) -> None:
+    from experiments.protocol.content_routing_reference_quantile import (
+        ContentRoutingReferenceScalars,
+    )
+    from experiments.runners import image_only_dataset_runtime as dataset_runtime
+
+    calls = {"formal_lock": 0}
+
+    def formal_lock(_root: Path) -> dict[str, object]:
+        calls["formal_lock"] += 1
+        return {}
+
+    monkeypatch.setattr(
+        dataset_runtime.repository_environment,
+        "require_published_formal_execution_lock",
+        formal_lock,
+    )
+    kwargs = {
+        "content_routing_reference_registry_digest": "1" * 64,
+        "content_routing_reference_registry_file_sha256": "2" * 64,
+    }
+    kwargs[
+        "content_routing_reference_registry_digest"
+        if field_name == "semantic"
+        else "content_routing_reference_registry_file_sha256"
+    ] = ""
+
+    with pytest.raises(ValueError, match="lowercase SHA-256"):
+        dataset_runtime.run_image_only_dataset_runtime(
+            object(),
+            root=tmp_path,
+            content_routing_references=ContentRoutingReferenceScalars(
+                1.0, 0.5, 0.25
+            ),
+            **kwargs,
+        )
+
+    assert calls["formal_lock"] == 0
 
 
 def _formal_content_carrier_identity_fields() -> dict[str, object]:

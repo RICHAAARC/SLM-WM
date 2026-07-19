@@ -30,6 +30,10 @@ QUALIFICATION_INVOCATION_RESULT_SCHEMA = (
 )
 CONTENT_RUNTIME_SMOKE_WORKFLOW_NAME = "content_runtime_smoke"
 CONTENT_RUNTIME_SMOKE_INVOCATION_SCHEMA = "content_runtime_smoke_invocation_v1"
+CONTENT_ROUTING_REFERENCE_WORKFLOW_NAME = "content_routing_reference_runtime"
+CONTENT_ROUTING_REFERENCE_INVOCATION_SCHEMA = (
+    "content_routing_reference_runtime_invocation_v1"
+)
 
 
 def _file_sha256(path: Path) -> str:
@@ -50,6 +54,38 @@ def _is_sha256(value: Any) -> bool:
         and len(value) == 64
         and all(character in "0123456789abcdef" for character in value)
     )
+
+
+def _load_fixed_reference_identity(
+    *,
+    expected_registry_digest: str,
+    expected_file_sha256: str,
+) -> dict[str, Any]:
+    """Load the fixed registry in the host and retain its exact input identity."""
+
+    if not _is_sha256(expected_registry_digest) or not _is_sha256(
+        expected_file_sha256
+    ):
+        raise ValueError("fixed content-routing reference identity is invalid")
+    from experiments.protocol.content_routing_reference_registry import (
+        load_content_routing_reference_registry,
+    )
+
+    references = load_content_routing_reference_registry(
+        expected_registry_digest=expected_registry_digest,
+        expected_file_sha256=expected_file_sha256,
+    )
+    return {
+        "reference_input_role": "fixed_content_routing_reference_registry",
+        "content_routing_reference_registry_digest": expected_registry_digest,
+        "content_routing_reference_registry_file_sha256": expected_file_sha256,
+        "reference_values": {
+            "reference_gradient": references.reference_gradient,
+            "reference_response": references.reference_response,
+            "reference_sensitivity": references.reference_sensitivity,
+        },
+        "supports_paper_claim": False,
+    }
 
 
 def _finite_report_float(value: Any, *, positive: bool = False) -> bool:
@@ -170,6 +206,7 @@ def _validate_qualification_evidence(
     isolated_report: Mapping[str, Any],
     frozen_evidence_protocol: FrozenEvidenceProtocol,
     frozen_evidence_protocol_path: Path,
+    expected_reference_identity: Mapping[str, Any],
 ) -> tuple[dict[str, Any], Path, dict[str, Any]]:
     """交叉复验子进程索引、资格化报告和隔离执行进程证据."""
 
@@ -302,6 +339,11 @@ def _validate_qualification_evidence(
     binding_input = (
         binding.get("input_summary") if isinstance(binding, Mapping) else None
     )
+    reference_identity = (
+        binding.get("content_routing_reference_identity")
+        if isinstance(binding, Mapping)
+        else None
+    )
     frozen_identity = (
         binding.get("frozen_evidence_protocol_identity")
         if isinstance(binding, Mapping)
@@ -362,6 +404,8 @@ def _validate_qualification_evidence(
             report.get("gpu_resource_budget_ready")
             == invocation["gpu_resource_budget_ready"],
             isinstance(binding, Mapping),
+            isinstance(reference_identity, Mapping),
+            dict(reference_identity) == dict(expected_reference_identity),
             binding.get("code_version") == repository_commit,
             binding.get("dependency_profile_id") == SCIENTIFIC_PROFILE_ID,
             binding_input_ready,
@@ -427,9 +471,8 @@ def run_gpu_method_qualification_host_workflow(
     known_answer: str | Path,
     qualification_output_root: str | Path,
     frozen_evidence_protocol: str | Path,
-    reference_gradient: float,
-    reference_response: float,
-    reference_sensitivity: float,
+    expected_reference_registry_digest: str,
+    expected_reference_registry_file_sha256: str,
     registered_budget: str | Path | None = None,
 ) -> dict[str, Any]:
     """在受治理隔离环境中运行单 Prompt 资格化并重建宿主结论."""
@@ -449,6 +492,10 @@ def run_gpu_method_qualification_host_workflow(
         root_path,
         frozen_evidence_protocol,
     )
+    expected_reference_identity = _load_fixed_reference_identity(
+        expected_registry_digest=expected_reference_registry_digest,
+        expected_file_sha256=expected_reference_registry_file_sha256,
+    )
     execution_report_path = resolved_result_path.with_name(
         resolved_result_path.stem
         + "_gpu_method_qualification_scientific_execution.json"
@@ -467,12 +514,10 @@ def run_gpu_method_qualification_host_workflow(
         str(resolved_output_root),
         "--frozen-evidence-protocol",
         str(protocol_path),
-        "--reference-gradient",
-        repr(reference_gradient),
-        "--reference-response",
-        repr(reference_response),
-        "--reference-sensitivity",
-        repr(reference_sensitivity),
+        "--expected-reference-registry-digest",
+        expected_reference_registry_digest,
+        "--expected-reference-registry-file-sha256",
+        expected_reference_registry_file_sha256,
     ]
     if registered_budget is not None:
         child_argv.extend(["--registered-budget", str(registered_budget)])
@@ -504,6 +549,7 @@ def run_gpu_method_qualification_host_workflow(
         isolated_report=isolated_report,
         frozen_evidence_protocol=protocol,
         frozen_evidence_protocol_path=protocol_path,
+        expected_reference_identity=expected_reference_identity,
     )
     operator_ready = report["gpu_operator_preflight_ready"]
     failure_reasons = [] if operator_ready else ["gpu_operator_preflight_not_ready"]
@@ -544,6 +590,143 @@ def run_gpu_method_qualification_host_workflow(
     }
 
 
+def run_content_routing_reference_host_workflow(
+    *,
+    root: str | Path,
+    repository_commit: str,
+    result_path: str | Path,
+    output_root: str | Path,
+) -> dict[str, Any]:
+    """Run the real producer/replay child and verify candidate bytes without promotion."""
+
+    root_path = Path(root).resolve()
+    resolved_result_path = _resolve_under_outputs(root_path, result_path, "result_path")
+    resolved_output_root = _resolve_under_outputs(root_path, output_root, "output_root")
+    execution_report_path = resolved_result_path.with_name(
+        resolved_result_path.stem + "_content_routing_reference_execution.json"
+    )
+    isolated_report, persisted_path = execute_isolated_scientific_command(
+        SCIENTIFIC_PROFILE_ID,
+        [
+            str(root_path / "scripts/run_content_routing_reference_runtime.py"),
+            "--root",
+            str(root_path),
+            "--output-root",
+            str(resolved_output_root),
+        ],
+        execution_report_path=execution_report_path,
+        repository_root=root_path,
+    )
+    persisted_path = Path(persisted_path).resolve()
+    if not persisted_path.is_file() or _read_json_mapping(persisted_path) != isolated_report:
+        raise ValueError("reference scientific execution report identity mismatch")
+    if (
+        isolated_report.get("formal_execution_commit") != repository_commit
+        or isolated_report.get("formal_execution_lock_revalidated_after_child") is not True
+    ):
+        raise ValueError("reference child did not preserve the formal execution lock")
+    execution = isolated_report.get("execution")
+    if not isinstance(execution, Mapping):
+        raise ValueError("reference scientific execution is missing")
+    if execution.get("return_code") != 0 or isolated_report.get("decision") != "pass":
+        raise ValueError("reference scientific execution did not pass")
+    invocation = _invocation_record(str(execution.get("stdout", "")))
+    if invocation is None or set(invocation) != {
+        "report_schema",
+        "schema_version",
+        "candidate_path",
+        "candidate_file_sha256",
+        "candidate_registry_digest",
+        "qualification_report_path",
+        "qualification_report_sha256",
+        "qualification_ready",
+        "supports_paper_claim",
+    }:
+        raise ValueError("reference child invocation identity is invalid")
+    if (
+        invocation["report_schema"] != CONTENT_ROUTING_REFERENCE_INVOCATION_SCHEMA
+        or invocation["schema_version"] != 1
+        or invocation["qualification_ready"] is not True
+        or invocation["supports_paper_claim"] is not False
+    ):
+        raise ValueError("reference child invocation decision is invalid")
+    candidate_path = _resolve_under_outputs(
+        root_path, str(invocation["candidate_path"]), "candidate_path"
+    )
+    report_path = _resolve_under_outputs(
+        root_path,
+        str(invocation["qualification_report_path"]),
+        "qualification_report_path",
+    )
+    for path in (candidate_path, report_path):
+        try:
+            path.relative_to(resolved_output_root)
+        except ValueError as exc:
+            raise ValueError("reference output escaped the requested output root") from exc
+    if not candidate_path.is_file() or not report_path.is_file():
+        raise ValueError("reference candidate or qualification report is missing")
+    candidate_bytes = candidate_path.read_bytes()
+    if hashlib.sha256(candidate_bytes).hexdigest() != invocation["candidate_file_sha256"]:
+        raise ValueError("reference candidate file digest mismatch")
+    if _file_sha256(report_path) != invocation["qualification_report_sha256"]:
+        raise ValueError("reference qualification report digest mismatch")
+    from experiments.protocol.content_routing_reference_registry import (
+        _strict_json_object,
+        _validate_content_routing_reference_registry,
+    )
+
+    registry = _strict_json_object(candidate_bytes)
+    _validate_content_routing_reference_registry(
+        registry,
+        raw_payload=candidate_bytes,
+        expected_registry_digest=str(invocation["candidate_registry_digest"]),
+    )
+    qualification = _read_json_mapping(report_path)
+    qualification_digest = qualification.get("qualification_digest")
+    qualification_digest_input = dict(qualification)
+    qualification_digest_input.pop("qualification_digest", None)
+    if not all(
+        (
+            qualification.get("report_schema")
+            == "content_routing_reference_runtime_qualification_v1",
+            qualification.get("schema_version") == 1,
+            qualification.get("qualification_ready") is True,
+            qualification.get("producer_replay_byte_identical") is True,
+            qualification.get("content_routing_reference_registry_digest")
+            == invocation["candidate_registry_digest"],
+            qualification.get("content_routing_reference_registry_file_sha256")
+            == invocation["candidate_file_sha256"],
+            qualification.get("candidate_path")
+            == candidate_path.relative_to(root_path).as_posix(),
+            qualification.get("supports_paper_claim") is False,
+            _is_sha256(qualification_digest),
+            build_stable_digest(qualification_digest_input)
+            == qualification_digest,
+        )
+    ):
+        raise ValueError("reference producer/replay qualification is invalid")
+    workflow_summary = {
+        "workflow_name": CONTENT_ROUTING_REFERENCE_WORKFLOW_NAME,
+        "candidate_path": candidate_path.relative_to(root_path).as_posix(),
+        "content_routing_reference_registry_digest": invocation[
+            "candidate_registry_digest"
+        ],
+        "content_routing_reference_registry_file_sha256": invocation[
+            "candidate_file_sha256"
+        ],
+        "qualification_report_path": report_path.relative_to(root_path).as_posix(),
+        "workflow_completion_state": "reference_candidate_qualified",
+        "supports_paper_claim": False,
+    }
+    return {
+        "workflow_summary": workflow_summary,
+        "workflow_environment": _workflow_environment(isolated_report, persisted_path),
+        "archive_record": None,
+        "return_code": 0,
+        "decision": "pass",
+        "failure_reasons": [],
+        "supports_paper_claim": False,
+    }
 def run_content_runtime_smoke_host_workflow(
     *,
     root: str | Path,

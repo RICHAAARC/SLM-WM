@@ -1209,6 +1209,87 @@ def _final_image_attention_observability_ready(
     )
 
 
+def _write_calibration_protocol_boundary(
+    *,
+    root_path: Path,
+    output_dir: Path,
+    paper_run: PaperRunConfig,
+    calibration_negatives: tuple[dict[str, Any], ...],
+    content_routing_reference_registry_digest: str,
+    content_routing_reference_registry_file_sha256: str,
+) -> dict[str, Any]:
+    """Persist and independently rebuild the calibration-only protocol boundary."""
+
+    if len(calibration_negatives) != 33:
+        raise RuntimeError(
+            "probe_paper calibration-only requires exactly 33 clean negatives"
+        )
+    protocol = calibrate_complete_evidence_protocol(
+        calibration_negatives,
+        paper_run.target_fpr,
+    )
+    validate_frozen_evidence_protocol_integrity(protocol)
+    records_path = output_dir / "calibration_detection_records.jsonl"
+    protocol_path = output_dir / "frozen_evidence_protocol.json"
+    summary_path = output_dir / "calibration_protocol_summary.json"
+    records_path.write_text(
+        "".join(
+            json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
+            for record in calibration_negatives
+        ),
+        encoding="utf-8",
+    )
+    persisted_records = tuple(_read_jsonl(records_path))
+    rebuilt = calibrate_complete_evidence_protocol(
+        persisted_records,
+        paper_run.target_fpr,
+    )
+    if rebuilt != protocol:
+        raise RuntimeError("persisted calibration records rebuild drifted")
+    protocol_path.write_text(
+        json.dumps(
+            protocol.to_dict(),
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    summary = {
+        "paper_run_name": paper_run.run_name,
+        "protocol_decision": "calibration_complete",
+        "workflow_completion_state": "calibration_complete",
+        "calibration_detection_record_count": len(persisted_records),
+        "calibration_detection_records_path": records_path.relative_to(
+            root_path
+        ).as_posix(),
+        "calibration_detection_records_sha256": file_digest(records_path),
+        "frozen_evidence_protocol_path": protocol_path.relative_to(
+            root_path
+        ).as_posix(),
+        "frozen_evidence_protocol_sha256": file_digest(protocol_path),
+        "frozen_threshold_digest": protocol.threshold_digest,
+        "content_routing_reference_registry_digest": (
+            content_routing_reference_registry_digest
+        ),
+        "content_routing_reference_registry_file_sha256": (
+            content_routing_reference_registry_file_sha256
+        ),
+        "test_prompt_execution_count": 0,
+        "attack_execution_count": 0,
+        "fid_kid_execution_count": 0,
+        "paper_run_closed": False,
+        "repeat_component_ready": False,
+        "supports_paper_claim": False,
+    }
+    summary_path.write_text(
+        json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return summary
+
+
 def run_image_only_dataset_runtime(
     base_method_config: SemanticWatermarkRuntimeConfig,
     root: str | Path = ".",
@@ -1216,6 +1297,9 @@ def run_image_only_dataset_runtime(
     max_new_prompts_per_session: int = 0,
     *,
     content_routing_references: ContentRoutingReferenceScalars | None = None,
+    calibration_only: bool = False,
+    content_routing_reference_registry_digest: str = "",
+    content_routing_reference_registry_file_sha256: str = "",
 ) -> dict[str, Any]:
     """运行当前论文规模的全部 Prompt 并生成可校准记录。"""
 
@@ -1223,6 +1307,24 @@ def run_image_only_dataset_runtime(
         raise RuntimeError(
             "数据集runner缺少已资格化content routing references，禁止回退旧链"
         )
+    if type(calibration_only) is not bool:
+        raise TypeError("calibration_only must be an exact bool")
+    for field_name, value in (
+        (
+            "content_routing_reference_registry_digest",
+            content_routing_reference_registry_digest,
+        ),
+        (
+            "content_routing_reference_registry_file_sha256",
+            content_routing_reference_registry_file_sha256,
+        ),
+    ):
+        if (
+            type(value) is not str
+            or len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+        ):
+            raise ValueError(f"{field_name} must be a lowercase SHA-256 digest")
     root_path = Path(root).resolve()
     formal_execution_run_lock = (
         repository_environment.require_published_formal_execution_lock(root_path)
@@ -1394,6 +1496,39 @@ def run_image_only_dataset_runtime(
         detection_records.extend(_read_jsonl(root_path / result.detection_record_path))
         scientific_update_records.extend(_read_jsonl(root_path / result.update_record_path))
         completed_prompt_ids.append(prompt_record.prompt_id)
+        if calibration_only:
+            completed_calibration_ids = {
+                str(record.get("prompt_id"))
+                for record in detection_records
+                if record.get("split") == "calibration"
+                and record.get("sample_role") == "clean_negative"
+                and not record.get("attack_id")
+            }
+            expected_calibration_ids = {
+                record.prompt_id for record in calibration_prompt_records
+            }
+            if completed_calibration_ids == expected_calibration_ids:
+                calibration_negatives = tuple(
+                    record
+                    for record in detection_records
+                    if record.get("split") == "calibration"
+                    and record.get("sample_role") == "clean_negative"
+                    and not record.get("attack_id")
+                )
+                summary = _write_calibration_protocol_boundary(
+                    root_path=root_path,
+                    output_dir=output_dir,
+                    paper_run=resolved_paper_run,
+                    calibration_negatives=calibration_negatives,
+                    content_routing_reference_registry_digest=(
+                        content_routing_reference_registry_digest
+                    ),
+                    content_routing_reference_registry_file_sha256=(
+                        content_routing_reference_registry_file_sha256
+                    ),
+                )
+                progress_path.unlink(missing_ok=True)
+                return summary
         if generated_now and len(runtime_results) < len(prompt_records):
             write_resume_progress()
 
