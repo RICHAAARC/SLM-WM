@@ -2570,6 +2570,21 @@ def test_image_only_detector_reextracts_qk_after_alignment(
     assert result.attention_geometry_score > 0.65
     assert result.attention_sync_score is not None and result.attention_sync_score > 0.65
     assert result.metadata["attention_relation_direct_qk_source_ready"] is True
+    component_protocol = attention_relation_component_protocol(
+        (1.0 / 3.0, 0.0, 1.0 / 3.0, 1.0 / 3.0)
+    )
+    assert result.metadata[
+        "attention_relation_active_component_names"
+    ] == list(component_protocol["attention_relation_active_component_names"])
+    assert result.metadata["attention_relation_component_weights"] == [
+        1.0 / 3.0,
+        0.0,
+        1.0 / 3.0,
+        1.0 / 3.0,
+    ]
+    assert result.metadata[
+        "attention_relation_component_protocol_digest"
+    ] == component_protocol["attention_relation_component_protocol_digest"]
     assert result.aligned_content_score is not None
     assert result.metadata["stable_pair_weight_identity_ready"] is True
     assert len(result.metadata["stable_pair_weight_identity_digest"]) == 64

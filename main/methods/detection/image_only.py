@@ -1194,6 +1194,17 @@ def measure_image_only_watermark(
         "attention_relation_direct_qk_source_ready": (
             attention_relation_source == DIRECT_QK_RELATION_SOURCE
         ),
+        "attention_relation_active_component_names": list(
+            component_protocol[
+                "attention_relation_active_component_names"
+            ]
+        ),
+        "attention_relation_component_weights": list(component_weights),
+        "attention_relation_component_protocol_digest": (
+            component_protocol[
+                "attention_relation_component_protocol_digest"
+            ]
+        ),
         "attention_relation_component_identity_digest": (
             attention_relation_component_identity_digest
         ),
