@@ -118,6 +118,32 @@ def test_resource_budget_requires_observations_and_registered_limits() -> None:
     assert report["affects_gpu_operator_preflight_ready"] is False
 
 
+def test_legacy_absence_accepts_an_explicit_psd_cg_prohibition() -> None:
+    """方法定义里的 false 禁用声明不是旧 PSD-CG 运行证据。"""
+
+    metadata = {
+        "legacy_runtime_dependency_absence_ready": True,
+        "forbidden_runtime_modules": [
+            "main.methods.subspace.jacobian_nullspace",
+            "main.methods.semantic.runtime",
+        ],
+        "method_definition": {
+            "attention_geometry": {"psd_cg_allowed": False}
+        },
+    }
+
+    assert qualification._legacy_runtime_dependency_absence_ready(metadata)
+    metadata["method_definition"]["attention_geometry"][
+        "psd_cg_allowed"
+    ] = True
+    assert not qualification._legacy_runtime_dependency_absence_ready(metadata)
+    metadata["method_definition"]["attention_geometry"] = {
+        "psd_cg_allowed": False,
+        "exact_jvp_enabled": False,
+    }
+    assert not qualification._legacy_runtime_dependency_absence_ready(metadata)
+
+
 def test_threshold_free_measurement_cannot_claim_formal_blind_detection() -> None:
     """metadata布尔值不得替代冻结阈值协议实际物化的判定字段。"""
 

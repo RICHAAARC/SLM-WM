@@ -334,6 +334,56 @@ def _operator_fact(
     }
 
 
+def _legacy_runtime_dependency_absence_ready(
+    metadata: Mapping[str, Any],
+) -> bool:
+    """只拒绝可达旧依赖，不把显式禁用声明误判为旧执行。"""
+
+    forbidden_modules = [
+        "main.methods.subspace.jacobian_nullspace",
+        "main.methods.semantic.runtime",
+    ]
+    method_definition = metadata.get("method_definition")
+    method_definition = (
+        method_definition if isinstance(method_definition, Mapping) else {}
+    )
+    attention_geometry = method_definition.get("attention_geometry")
+    attention_geometry = (
+        attention_geometry if isinstance(attention_geometry, Mapping) else {}
+    )
+    filtered_attention_geometry = {
+        field_name: field_value
+        for field_name, field_value in attention_geometry.items()
+        if field_name != "psd_cg_allowed"
+    }
+    filtered_method_definition = dict(method_definition)
+    filtered_method_definition["attention_geometry"] = (
+        filtered_attention_geometry
+    )
+    filtered_metadata = dict(metadata)
+    filtered_metadata["method_definition"] = filtered_method_definition
+    runtime_identity_text = json.dumps(
+        filtered_metadata,
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return bool(
+        metadata.get("legacy_runtime_dependency_absence_ready") is True
+        and metadata.get("forbidden_runtime_modules") == forbidden_modules
+        and attention_geometry.get("psd_cg_allowed") is False
+        and all(
+            token not in runtime_identity_text
+            for token in (
+                "semantic_feature_operator_contract",
+                "complete_716",
+                "exact_jvp",
+                "exact_vjp",
+                "psd_cg",
+            )
+        )
+    )
+
+
 def rebuild_keyed_prg_known_answer_report(
     known_answer_path: str | Path,
 ) -> dict[str, Any]:
@@ -539,26 +589,7 @@ def build_gpu_operator_preflight_report(
     known_answer = rebuild_keyed_prg_known_answer_report(known_answer_path)
     metadata = result.get("metadata")
     metadata = metadata if isinstance(metadata, Mapping) else {}
-    runtime_identity_text = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
-    legacy_runtime_absent = all(
-        token not in runtime_identity_text
-        for token in (
-            "semantic_feature_operator_contract",
-            "complete_716",
-            "exact_jvp",
-            "exact_vjp",
-            "psd_cg",
-        )
-    )
-    legacy_runtime_absent = bool(
-        legacy_runtime_absent
-        and metadata.get("legacy_runtime_dependency_absence_ready") is True
-        and metadata.get("forbidden_runtime_modules")
-        == [
-            "main.methods.subspace.jacobian_nullspace",
-            "main.methods.semantic.runtime",
-        ]
-    )
+    legacy_runtime_absent = _legacy_runtime_dependency_absence_ready(metadata)
     facts = (
         _operator_fact(
             "exact_commit_dependency_model_and_input_binding",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 import subprocess
@@ -19,6 +20,14 @@ from experiments.runners import semantic_watermark_runtime as runtime
 
 
 pytestmark = pytest.mark.quick
+
+
+def test_formal_runtime_records_fixed_registry_reference_role() -> None:
+    """正式生成链不得把 fixed registry 输入误标成 smoke reference。"""
+
+    source = inspect.getsource(runtime.run_semantic_watermark_runtime)
+    assert "fixed_content_routing_reference_registry" in source
+    assert "explicit_smoke_only_unqualified" not in source
 
 
 class _Attention(torch.nn.Module):

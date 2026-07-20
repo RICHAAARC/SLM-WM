@@ -71,6 +71,7 @@ from main.methods.geometry import (
     qk_atomic_content_records_digest,
     qk_atomic_evaluation_records_digest,
     qk_operator_metadata_records_digest,
+    qk_operator_metadata_records_ready,
     qk_self_attention,
     recompute_attention_alignment_digest_payload,
     recover_attention_affine_alignment,
@@ -2573,6 +2574,18 @@ def test_image_only_detector_reextracts_qk_after_alignment(
     assert result.metadata["stable_pair_weight_identity_ready"] is True
     assert len(result.metadata["stable_pair_weight_identity_digest"]) == 64
     assert result.metadata["detection_qk_atomic_content_ready"] is True
+    assert len(
+        result.metadata["attention_relation_qk_operator_metadata_records"]
+    ) == 2
+    assert qk_operator_metadata_records_ready(
+        result.metadata["attention_relation_qk_operator_metadata_records"],
+        (layer_name, second_layer_name),
+    )
+    assert result.metadata[
+        "attention_relation_qk_operator_metadata_digest"
+    ] == qk_operator_metadata_records_digest(
+        result.metadata["attention_relation_qk_operator_metadata_records"]
+    )
     assert tuple(
         record["qk_evaluation_role"]
         for record in result.metadata["detection_qk_atomic_content_records"]

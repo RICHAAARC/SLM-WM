@@ -923,7 +923,7 @@ def _formal_single_write_record_ready(
         and record.get("attention_module_names")
         == list(config.attention_module_names)
         and record.get("reference_source")
-        == "explicit_smoke_only_unqualified"
+        == "fixed_content_routing_reference_registry"
         and record.get("supports_paper_claim") is False
     )
 

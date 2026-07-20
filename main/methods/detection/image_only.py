@@ -918,6 +918,7 @@ def measure_image_only_watermark(
     attention_relation_source = ""
     attention_relation_component_identity_digest = ""
     attention_relation_keyed_projection_digest = ""
+    attention_relation_qk_operator_metadata_records: list[dict[str, Any]] = []
     attention_relation_qk_operator_metadata_digest = ""
     qk_atomic_content_records: list[dict[str, Any]] = []
     qk_atomic_layer_names: tuple[str, ...] = ()
@@ -973,6 +974,9 @@ def measure_image_only_watermark(
         attention_relation_qk_operator_metadata_digest = (
             relation_identity.qk_operator_metadata_digest
         )
+        attention_relation_qk_operator_metadata_records = [
+            dict(item) for item in relation_identity.qk_operator_metadata_records
+        ]
         stable_selection = select_stable_attention_tokens(
             attention_records,
             stable_token_fraction=config.attention_stable_token_fraction,
@@ -1045,6 +1049,8 @@ def measure_image_only_watermark(
                 or not aligned_relation_identity.qk_operator_metadata_ready
                 or aligned_relation_identity.qk_operator_metadata_digest
                 != attention_relation_qk_operator_metadata_digest
+                or list(aligned_relation_identity.qk_operator_metadata_records)
+                != attention_relation_qk_operator_metadata_records
                 or not aligned_relation_identity.qk_atomic_content_ready
             ):
                 raise RuntimeError("对齐前后没有共享同一四分量 Q/K 关系图身份")
@@ -1196,6 +1202,9 @@ def measure_image_only_watermark(
         ),
         "attention_relation_qk_operator_metadata_digest": (
             attention_relation_qk_operator_metadata_digest
+        ),
+        "attention_relation_qk_operator_metadata_records": (
+            attention_relation_qk_operator_metadata_records
         ),
         "attention_relation_qk_operator_metadata_ready": (
             bool(image_attention_extractor is not None)

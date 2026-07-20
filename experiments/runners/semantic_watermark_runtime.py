@@ -6152,7 +6152,7 @@ def run_semantic_watermark_runtime(
             **record["metadata"],
             "method_role": measurement_config.method_role,
             "measurement_status": "threshold_independent_image_only_evidence",
-            "reference_source": "explicit_smoke_only_unqualified",
+            "reference_source": "fixed_content_routing_reference_registry",
             "supports_paper_claim": False,
         }
         detections.append(record)
@@ -6205,7 +6205,7 @@ def run_semantic_watermark_runtime(
             "final_postwrite_qk_digest"
         ],
         "attention_module_names": list(config.attention_module_names),
-        "reference_source": "explicit_smoke_only_unqualified",
+        "reference_source": "fixed_content_routing_reference_registry",
         "supports_paper_claim": False,
     }
     if not all(
@@ -6286,7 +6286,7 @@ def run_semantic_watermark_runtime(
             "forbidden_runtime_modules": list(forbidden_runtime_modules),
             "paired_quality": paired_quality,
             "content_runtime_diagnostic": diagnostic,
-            "reference_source": "explicit_smoke_only_unqualified",
+            "reference_source": "fixed_content_routing_reference_registry",
             "supports_paper_claim": False,
             "scientific_unit_config_digest": (
                 semantic_watermark_runtime_config_digest(config)
