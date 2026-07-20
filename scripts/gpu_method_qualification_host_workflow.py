@@ -335,7 +335,14 @@ def _validate_qualification_evidence(
     report_digest = report.get("qualification_report_digest")
     digest_input = dict(report)
     digest_input.pop("qualification_report_digest", None)
-    binding = report.get("qualification_binding")
+    raw_operator_report = report.get("gpu_operator_preflight")
+    operator_report = (
+        raw_operator_report
+        if isinstance(raw_operator_report, Mapping)
+        else {}
+    )
+    raw_binding = operator_report.get("qualification_binding")
+    binding = raw_binding if isinstance(raw_binding, Mapping) else {}
     binding_input = (
         binding.get("input_summary") if isinstance(binding, Mapping) else None
     )
@@ -388,6 +395,10 @@ def _validate_qualification_evidence(
         and binding_input.get("paper_run_name") == paper_run_name
         and binding_input.get("prompt_id") == prompt_id
     )
+    reference_identity_ready = bool(
+        isinstance(reference_identity, Mapping)
+        and dict(reference_identity) == dict(expected_reference_identity)
+    )
     if not all(
         (
             report.get("qualification_report_schema")
@@ -403,9 +414,9 @@ def _validate_qualification_evidence(
             == invocation["gpu_operator_preflight_ready"],
             report.get("gpu_resource_budget_ready")
             == invocation["gpu_resource_budget_ready"],
-            isinstance(binding, Mapping),
-            isinstance(reference_identity, Mapping),
-            dict(reference_identity) == dict(expected_reference_identity),
+            isinstance(raw_operator_report, Mapping),
+            isinstance(raw_binding, Mapping),
+            reference_identity_ready,
             binding.get("code_version") == repository_commit,
             binding.get("dependency_profile_id") == SCIENTIFIC_PROFILE_ID,
             binding_input_ready,

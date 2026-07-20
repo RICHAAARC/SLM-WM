@@ -101,29 +101,32 @@ def _qualification_report(
 ) -> dict[str, object]:
     """构造满足宿主交叉复验规则的最小资格化报告."""
 
+    qualification_binding = {
+        "code_version": repository_commit,
+        "dependency_profile_id": workflow.SCIENTIFIC_PROFILE_ID,
+        "input_summary": {
+            "paper_run_name": paper_run_name,
+            "prompt_id": prompt_id,
+        },
+        "content_routing_reference_identity": _fixed_reference_identity(),
+        "frozen_evidence_protocol_identity": {
+            "source_path": protocol_path.as_posix(),
+            "source_file_sha256": _sha256(protocol_path),
+            "threshold_digest": protocol.threshold_digest,
+            "image_only_measurement_config_digest": (
+                protocol.image_only_measurement_config_digest
+            ),
+        },
+        "formal_detection_records_identity": {
+            "path": formal_detection_path.relative_to(root).as_posix(),
+            "file_sha256": _sha256(formal_detection_path),
+            "record_count": formal_detection_count,
+        },
+    }
     report: dict[str, object] = {
         "qualification_report_schema": GPU_METHOD_QUALIFICATION_SCHEMA,
-        "qualification_binding": {
-            "code_version": repository_commit,
-            "dependency_profile_id": workflow.SCIENTIFIC_PROFILE_ID,
-            "input_summary": {
-                "paper_run_name": paper_run_name,
-                "prompt_id": prompt_id,
-            },
-            "content_routing_reference_identity": _fixed_reference_identity(),
-            "frozen_evidence_protocol_identity": {
-                "source_path": protocol_path.as_posix(),
-                "source_file_sha256": _sha256(protocol_path),
-                "threshold_digest": protocol.threshold_digest,
-                "image_only_measurement_config_digest": (
-                    protocol.image_only_measurement_config_digest
-                ),
-            },
-            "formal_detection_records_identity": {
-                "path": formal_detection_path.relative_to(root).as_posix(),
-                "file_sha256": _sha256(formal_detection_path),
-                "record_count": formal_detection_count,
-            },
+        "gpu_operator_preflight": {
+            "qualification_binding": qualification_binding,
         },
         "gpu_operator_preflight_ready": operator_ready,
         "gpu_resource_budget_ready": False,
@@ -349,6 +352,8 @@ def test_host_workflow_uses_exact_sd35_child_and_operator_gate(
         "invocation_threshold_digest",
         "report_protocol_threshold_digest",
         "formal_record_threshold_digest",
+        "operator_report_missing",
+        "qualification_binding_missing",
         "reference_scalar",
         "reference_digest",
     ),
@@ -428,7 +433,7 @@ def test_host_rejects_formal_detection_and_protocol_identity_drift(
     elif mutation == "invocation_threshold_digest":
         invocation["frozen_threshold_digest"] = "0" * 64
     elif mutation == "report_protocol_threshold_digest":
-        report["qualification_binding"]["frozen_evidence_protocol_identity"][
+        report["gpu_operator_preflight"]["qualification_binding"]["frozen_evidence_protocol_identity"][
             "threshold_digest"
         ] = "0" * 64
     elif mutation == "formal_record_threshold_digest":
@@ -449,15 +454,19 @@ def test_host_rejects_formal_detection_and_protocol_identity_drift(
         )
         changed_sha = _sha256(formal_detection_path)
         invocation["formal_detection_record_sha256"] = changed_sha
-        report["qualification_binding"]["formal_detection_records_identity"][
+        report["gpu_operator_preflight"]["qualification_binding"]["formal_detection_records_identity"][
             "file_sha256"
         ] = changed_sha
+    elif mutation == "operator_report_missing":
+        del report["gpu_operator_preflight"]
+    elif mutation == "qualification_binding_missing":
+        del report["gpu_operator_preflight"]["qualification_binding"]
     elif mutation == "reference_scalar":
-        report["qualification_binding"]["content_routing_reference_identity"][
+        report["gpu_operator_preflight"]["qualification_binding"]["content_routing_reference_identity"][
             "reference_values"
         ]["reference_gradient"] = 0.75
     elif mutation == "reference_digest":
-        report["qualification_binding"]["content_routing_reference_identity"][
+        report["gpu_operator_preflight"]["qualification_binding"]["content_routing_reference_identity"][
             "content_routing_reference_registry_digest"
         ] = "9" * 64
     persist_report()
