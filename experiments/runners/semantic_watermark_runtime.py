@@ -1016,6 +1016,9 @@ def _run_content_runtime_generation(
         raise RuntimeError("content smoke did not execute the unique index-10 write")
     return clean_image, output.images[0], {
         **diagnostic,
+        "base_latent_content_digest_random": base_identity[
+            "base_latent_content_digest_random"
+        ],
         "base_latent_identity_digest_random": base_identity[
             "base_latent_identity_digest_random"
         ],
@@ -1049,6 +1052,42 @@ def run_content_runtime_smoke(
         include_clean=False,
     )
     return watermarked_image, diagnostic
+
+
+def _content_runtime_formal_randomization_reference(
+    config: SemanticWatermarkRuntimeConfig,
+    diagnostic: Mapping[str, Any],
+) -> dict[str, Any]:
+    """从新单写回链实际使用的seed、key和base latent重建样本随机身份。"""
+
+    identity = {
+        "randomization_repeat_id": config.randomization_repeat_id,
+        "generation_seed_index": int(config.generation_seed_index),
+        "generation_seed_offset": int(config.generation_seed_offset),
+        "watermark_key_index": int(config.watermark_key_index),
+        "generation_seed_random": int(config.seed),
+        "watermark_key_seed_random": int(config.watermark_key_seed_random),
+        "formal_randomization_protocol_digest": (
+            config.formal_randomization_protocol_digest
+        ),
+        "watermark_key_material_digest_random": build_stable_digest(
+            {"key_material": config.key_material}
+        ),
+    }
+    identity["formal_randomization_identity_digest_random"] = (
+        build_stable_digest(identity)
+    )
+    return formal_randomization_sample_reference(
+        identity,
+        base_latent_identity={
+            "base_latent_content_digest_random": diagnostic[
+                "base_latent_content_digest_random"
+            ],
+            "base_latent_identity_digest_random": diagnostic[
+                "base_latent_identity_digest_random"
+            ],
+        },
+    )
 
 
 def _stable_json(value: Any) -> str:
@@ -6216,6 +6255,9 @@ def run_semantic_watermark_runtime(
         torch_module=torch,
         random_identity_random=random_identity_random,
     )
+    formal_randomization_reference = (
+        _content_runtime_formal_randomization_reference(config, diagnostic)
+    )
     result = SemanticWatermarkRuntimeResult(
         run_id=run_id,
         run_decision="pass",
@@ -6234,6 +6276,7 @@ def run_semantic_watermark_runtime(
             "method_definition_digest": (
                 semantic_conditioned_latent_method_definition_digest()
             ),
+            "formal_randomization_reference": formal_randomization_reference,
             "detector_input_access_mode": "image_key_public_model_only",
             "threshold_free_blind_measurement_ready": bool(detections),
             "formal_blind_detection_ready": False,

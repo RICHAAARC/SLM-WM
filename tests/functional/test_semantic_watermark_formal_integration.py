@@ -231,7 +231,17 @@ def test_smoke_runtime_executes_only_index10_and_one_write(
         runtime_versions={"sd35_operator_identity": {}},
     )
     monkeypatch.setattr(runtime, "_load_content_runtime_smoke_components", lambda *_a, **_k: components)
-    monkeypatch.setattr(runtime, "build_canonical_sd35_base_latent", lambda **_k: (latent, {"base_latent_identity_digest_random": "b" * 64}))
+    monkeypatch.setattr(
+        runtime,
+        "build_canonical_sd35_base_latent",
+        lambda **_k: (
+            latent,
+            {
+                "base_latent_content_digest_random": "1" * 64,
+                "base_latent_identity_digest_random": "b" * 64,
+            },
+        ),
+    )
     monkeypatch.setattr(runtime, "_content_runtime_prompt_embeddings", lambda *_a: (None, None))
     monkeypatch.setattr(runtime, "_decode_content_runtime_latent", lambda *_a: torch.zeros((1, 3, 1, 1)))
     monkeypatch.setattr(runtime, "build_public_probe_identity", lambda _revision: {})
@@ -294,6 +304,8 @@ def test_smoke_runtime_executes_only_index10_and_one_write(
     assert diagnostic["current_image_decode_count"] == 1
     assert diagnostic["public_probe_additional_decode_count"] == 1
     assert diagnostic["actual_dtype_single_write_count"] == 1
+    assert diagnostic["base_latent_content_digest_random"] == "1" * 64
+    assert diagnostic["base_latent_identity_digest_random"] == "b" * 64
     assert diagnostic["lf_effective_l2"] > 0.0
     assert diagnostic["hf_tail_effective_l2"] > 0.0
     assert diagnostic["geometry_effective_l2"] > 0.0
@@ -301,6 +313,44 @@ def test_smoke_runtime_executes_only_index10_and_one_write(
     assert diagnostic["post_write_qk_strict_ready"] is True
     assert order[:4] == ["observations", "content", "geometry", "write"]
     assert order.count("write") == 1
+
+
+def test_content_runtime_randomization_reference_binds_actual_base_latent() -> None:
+    """新正式链必须把实际seed、key与base latent身份交给writer manifest。"""
+
+    config = runtime.SemanticWatermarkRuntimeConfig(
+        key_material="formal-key",
+        seed=12345,
+    )
+    diagnostic = {
+        "base_latent_content_digest_random": "1" * 64,
+        "base_latent_identity_digest_random": "2" * 64,
+    }
+    actual = runtime._content_runtime_formal_randomization_reference(
+        config,
+        diagnostic,
+    )
+    identity = {
+        "randomization_repeat_id": config.randomization_repeat_id,
+        "generation_seed_index": config.generation_seed_index,
+        "generation_seed_offset": config.generation_seed_offset,
+        "watermark_key_index": config.watermark_key_index,
+        "generation_seed_random": config.seed,
+        "watermark_key_seed_random": config.watermark_key_seed_random,
+        "formal_randomization_protocol_digest": (
+            config.formal_randomization_protocol_digest
+        ),
+        "watermark_key_material_digest_random": runtime.build_stable_digest(
+            {"key_material": config.key_material}
+        ),
+    }
+    identity["formal_randomization_identity_digest_random"] = (
+        runtime.build_stable_digest(identity)
+    )
+    assert actual == {
+        **identity,
+        **diagnostic,
+    }
 
 
 @pytest.mark.quick
@@ -348,7 +398,10 @@ def test_smoke_runtime_rejects_incorrect_public_probe_decode_count(
         "build_canonical_sd35_base_latent",
         lambda **_kwargs: (
             latent,
-            {"base_latent_identity_digest_random": "b" * 64},
+            {
+                "base_latent_content_digest_random": "1" * 64,
+                "base_latent_identity_digest_random": "b" * 64,
+            },
         ),
     )
     monkeypatch.setattr(
