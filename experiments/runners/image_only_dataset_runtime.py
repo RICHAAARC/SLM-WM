@@ -1694,7 +1694,13 @@ def run_image_only_dataset_runtime(
             resolved_paper_run,
             prompt_index=prompt_record.prompt_index,
         )
-        result = load_completed_semantic_watermark_runtime_result(run_config, root=root_path)
+        result = load_completed_semantic_watermark_runtime_result(
+            run_config,
+            root=root_path,
+            expected_content_strength_common_multiplier=(
+                content_strength_common_multiplier
+            ),
+        )
         generated_now = False
         if result is not None:
             resumed_prompt_count += 1

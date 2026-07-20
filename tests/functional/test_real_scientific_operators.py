@@ -20,6 +20,7 @@ import main.core.keyed_prg as keyed_prg_module
 import main.methods.carrier.keyed_tensor as keyed_tensor_module
 import main.methods.geometry.differentiable_attention as attention_module
 import main.methods.subspace.jacobian_nullspace as nullspace_module
+import experiments.runners.semantic_watermark_runtime as runtime_module
 
 from main.core.keyed_prg import KEYED_PRG_VERSION, keyed_prg_protocol_record
 from main.methods.carrier.keyed_tensor import (
@@ -3677,6 +3678,606 @@ def test_completed_runtime_cache_rejects_missing_scientific_content_binding(
         ),
         encoding="utf-8",
     )
+
+    assert (
+        load_completed_semantic_watermark_runtime_result(
+            config,
+            root=tmp_path,
+        )
+        is None
+    )
+
+
+def _write_formal_content_runtime_cache_fixture(
+    root: Path,
+    *,
+    config: SemanticWatermarkRuntimeConfig | None = None,
+    content_strength_common_multiplier: float = 1.0,
+) -> tuple[
+    SemanticWatermarkRuntimeConfig,
+    Path,
+    Path,
+    dict[str, object],
+]:
+    """写出不运行模型的最小正式单写回cache夹具。"""
+
+    if config is None:
+        config = SemanticWatermarkRuntimeConfig(
+            output_dir="outputs/formal_cache_test",
+            prompt_id="formal_cache_prompt",
+            split="calibration",
+            standard_attack_profiles=(),
+            diffusion_attacks_enabled=False,
+        )
+    run_id = build_semantic_watermark_run_id(config)
+    run_dir = root / config.output_dir / run_id
+    run_dir.mkdir(parents=True)
+    clean_path = run_dir / "clean_image.png"
+    watermarked_path = run_dir / "watermarked_image.png"
+    update_path = run_dir / "latent_update_records.jsonl"
+    detection_path = run_dir / "image_only_detection_records.jsonl"
+    result_path = run_dir / "runtime_result.json"
+    manifest_path = run_dir / "manifest.local.json"
+    clean_path.write_bytes(b"formal-cache-clean")
+    watermarked_path.write_bytes(b"formal-cache-watermarked")
+
+    diagnostic: dict[str, object] = {
+        "method_role": "full_dual_chain",
+        "captured_previous_index": 9,
+        "captured_previous_count": 1,
+        "callback_write_index": 10,
+        "callback_write_count": 1,
+        "current_image_decode_count": 1,
+        "public_probe_additional_decode_count": 1,
+        "actual_dtype_single_write_count": 1,
+        "common_gamma": 1.0,
+        "content_strength_common_multiplier": (
+            content_strength_common_multiplier
+        ),
+        "lf_nominal_strength": 0.25,
+        "hf_tail_nominal_strength": 0.15,
+        "lf_effective_l2": 0.2,
+        "hf_tail_effective_l2": 0.1,
+        "geometry_effective_l2": 0.05,
+        "combined_effective_l2": 0.3,
+        "combined_effective_l2_limit": 0.5,
+        "combined_effective_l2_ready": True,
+        "actual_dtype_single_write_digest": "1" * 64,
+        "content_only_postwrite_qk_score": 0.2,
+        "final_postwrite_qk_score": 0.3,
+        "post_write_qk_strict_ready": True,
+        "content_only_postwrite_qk_digest": "2" * 64,
+        "final_postwrite_qk_digest": "3" * 64,
+        "routing_identity_digest": "4" * 64,
+        "geometry_qk_atomic_records_digest": "5" * 64,
+        "geometry_update_digest": "6" * 64,
+        "base_latent_content_digest_random": "7" * 64,
+        "base_latent_identity_digest_random": "8" * 64,
+    }
+    update_record = {
+        "run_id": run_id,
+        "step_index": 10,
+        **diagnostic,
+        "attention_module_names": list(config.attention_module_names),
+        "reference_source": "fixed_content_routing_reference_registry",
+        "supports_paper_claim": False,
+    }
+    update_path.write_text(
+        json.dumps(update_record, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    clean_relative = clean_path.relative_to(root).as_posix()
+    watermarked_relative = watermarked_path.relative_to(root).as_posix()
+    image_identities = {
+        clean_relative: hashlib.sha256(clean_path.read_bytes()).hexdigest(),
+        watermarked_relative: hashlib.sha256(
+            watermarked_path.read_bytes()
+        ).hexdigest(),
+    }
+    detection_records = []
+    for sample_role, image_relative in (
+        ("clean_negative", clean_relative),
+        ("positive_source", watermarked_relative),
+        ("wrong_key_negative", watermarked_relative),
+    ):
+        record = _calibration_measurement(0)
+        record.update(
+            {
+                "run_id": run_id,
+                "prompt_id": config.prompt_id,
+                "split": config.split,
+                "sample_role": sample_role,
+                "detection_key_role": (
+                    "registered_wrong_key_negative"
+                    if sample_role == "wrong_key_negative"
+                    else "registered_watermark_key"
+                ),
+                "attacked_image_key": "",
+                "source_image_path": image_relative,
+                "source_image_digest": image_identities[image_relative],
+                "evaluated_image_path": image_relative,
+                "evaluated_image_digest": image_identities[image_relative],
+            }
+        )
+        record_metadata = dict(record["metadata"])
+        record_metadata.update(
+            {
+                "method_role": "full_dual_chain",
+                "measurement_status": (
+                    "threshold_independent_image_only_evidence"
+                ),
+                "reference_source": (
+                    "fixed_content_routing_reference_registry"
+                ),
+                "supports_paper_claim": False,
+            }
+        )
+        record["metadata"] = record_metadata
+        record["measurement_digest"] = build_stable_digest(
+            recompute_image_only_measurement_digest_payload(record)
+        )
+        validate_image_only_measurement_digest_record(record)
+        detection_records.append(record)
+    detection_path.write_text(
+        "".join(
+            json.dumps(record, sort_keys=True) + "\n"
+            for record in detection_records
+        ),
+        encoding="utf-8",
+    )
+
+    config_digest = build_stable_digest(
+        semantic_watermark_runtime_config_payload(config)
+    )
+    formal_randomization_reference = (
+        runtime_module._content_runtime_formal_randomization_reference(
+            config,
+            diagnostic,
+        )
+    )
+    result_payload: dict[str, object] = {
+        "run_id": run_id,
+        "run_decision": "pass",
+        "clean_image_path": clean_relative,
+        "watermarked_image_path": watermarked_relative,
+        "update_record_path": update_path.relative_to(root).as_posix(),
+        "detection_record_path": detection_path.relative_to(root).as_posix(),
+        "manifest_path": manifest_path.relative_to(root).as_posix(),
+        "update_count": 1,
+        "elapsed_seconds": 1.0,
+        "metadata": {
+            "method_runtime": "formal_content_dual_chain_single_write",
+            "threshold_free_blind_measurement_ready": True,
+            "formal_blind_detection_ready": False,
+            "legacy_runtime_dependency_absence_ready": True,
+            "reference_source": "fixed_content_routing_reference_registry",
+            "supports_paper_claim": False,
+            "formal_randomization_reference": formal_randomization_reference,
+            "content_runtime_diagnostic": diagnostic,
+            "scientific_unit_config_digest": config_digest,
+            "scientific_unit_provenance": (
+                build_test_scientific_unit_provenance(
+                    run_id,
+                    config_digest,
+                )
+            ),
+        },
+    }
+    result_path.write_text(
+        json.dumps(result_payload, sort_keys=True),
+        encoding="utf-8",
+    )
+    output_paths = (
+        update_path.relative_to(root).as_posix(),
+        detection_path.relative_to(root).as_posix(),
+        result_path.relative_to(root).as_posix(),
+        clean_relative,
+        watermarked_relative,
+        manifest_path.relative_to(root).as_posix(),
+    )
+    manifest_payload = {
+        "config": {
+            "scientific_unit_config_digest": config_digest,
+            "formal_randomization_reference": formal_randomization_reference,
+        },
+        "code_version": resolve_code_version(root),
+        "output_paths": list(output_paths),
+        "metadata": {
+            "run_id": run_id,
+            "protocol_decision": "pass",
+            "detector_input_access_mode": "image_key_public_model_only",
+            "supports_paper_claim": False,
+            "formal_runtime_chain": (
+                "content_routing_lf_hf_qk_common_gamma_single_write"
+            ),
+            "formal_detection_chain": (
+                "threshold_free_lf_hf_tail_measurement_pending_frozen_evidence"
+            ),
+        },
+    }
+    manifest_payload["config_digest"] = build_stable_digest(
+        manifest_payload["config"]
+    )
+    manifest_path.write_text(
+        json.dumps(manifest_payload, sort_keys=True),
+        encoding="utf-8",
+    )
+    return config, result_path, manifest_path, result_payload
+
+
+@pytest.mark.quick
+def test_image_only_dataset_resumes_formal_cache_with_expected_multiplier(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """真实dataset续跑必须传候选倍率并跳过context与writer。"""
+
+    from experiments.protocol.content_routing_reference_quantile import (
+        ContentRoutingReferenceScalars,
+    )
+    from experiments.runners import image_only_dataset_runtime as dataset_runtime
+
+    base_config = SemanticWatermarkRuntimeConfig(
+        standard_attack_profiles=(),
+        diffusion_attacks_enabled=False,
+    )
+    prompt_record = SimpleNamespace(
+        prompt_id="formal_cache_prompt",
+        prompt_text="formal cache prompt",
+        prompt_index=0,
+        split="calibration",
+    )
+    paper_run = SimpleNamespace(
+        run_name="probe_paper",
+        prompt_file="configs/formal_cache_prompts.txt",
+        prompt_set="probe_paper",
+        sample_count=1,
+        inference_steps=base_config.inference_steps,
+        guidance_scale=base_config.guidance_scale,
+        attention_injection_steps=base_config.injection_step_indices,
+        minimum_clean_negative_count=0,
+        target_fpr=0.1,
+    )
+    expected_config = replace(
+        base_config,
+        prompt=prompt_record.prompt_text,
+        prompt_id=prompt_record.prompt_id,
+        split=prompt_record.split,
+        seed=base_config.seed,
+        inference_steps=paper_run.inference_steps,
+        guidance_scale=paper_run.guidance_scale,
+        injection_step_indices=paper_run.attention_injection_steps,
+        standard_attack_profiles=(),
+        diffusion_attacks_enabled=False,
+        detector_guided_attack_threshold_protocol=None,
+        output_dir=(
+            "outputs/image_only_dataset_runtime/probe_paper/"
+            "content_strength_075/runs"
+        ),
+    )
+    _write_formal_content_runtime_cache_fixture(
+        tmp_path,
+        config=expected_config,
+        content_strength_common_multiplier=0.75,
+    )
+    calls: dict[str, object] = {
+        "context": 0,
+        "writer": 0,
+        "expected_multipliers": [],
+        "resumed_prompt_count": 0,
+    }
+    original_loader = dataset_runtime.load_completed_semantic_watermark_runtime_result
+
+    def load_cache(
+        config: SemanticWatermarkRuntimeConfig,
+        root: str | Path = ".",
+        *,
+        expected_content_strength_common_multiplier: float = 1.0,
+    ) -> object:
+        expected_multipliers = calls["expected_multipliers"]
+        assert isinstance(expected_multipliers, list)
+        expected_multipliers.append(expected_content_strength_common_multiplier)
+        return original_loader(
+            config,
+            root=root,
+            expected_content_strength_common_multiplier=(
+                expected_content_strength_common_multiplier
+            ),
+        )
+
+    def fail_context(*_args: object, **_kwargs: object) -> object:
+        calls["context"] = int(calls["context"]) + 1
+        raise AssertionError("cache hit must not load the runtime context")
+
+    def fail_writer(*_args: object, **_kwargs: object) -> object:
+        calls["writer"] = int(calls["writer"]) + 1
+        raise AssertionError("cache hit must not rerun the writer")
+
+    monkeypatch.setattr(
+        dataset_runtime,
+        "load_completed_semantic_watermark_runtime_result",
+        load_cache,
+    )
+    monkeypatch.setattr(
+        dataset_runtime,
+        "load_semantic_watermark_runtime_context",
+        fail_context,
+    )
+    monkeypatch.setattr(
+        dataset_runtime,
+        "_write_semantic_watermark_runtime_outputs_with_content_strength",
+        fail_writer,
+    )
+    monkeypatch.setattr(
+        dataset_runtime.repository_environment,
+        "require_published_formal_execution_lock",
+        lambda _root: {},
+    )
+    monkeypatch.setattr(
+        dataset_runtime,
+        "validate_formal_dataset_randomization_identity",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        dataset_runtime,
+        "read_prompt_file",
+        lambda _path: (prompt_record.prompt_text,),
+    )
+    monkeypatch.setattr(
+        dataset_runtime,
+        "build_prompt_records",
+        lambda _prompt_set, _prompts: (prompt_record,),
+    )
+    monkeypatch.setattr(
+        dataset_runtime,
+        "apply_split_assignments",
+        lambda records: tuple(records),
+    )
+    monkeypatch.setattr(
+        dataset_runtime,
+        "restore_role_checkpoints",
+        lambda **_kwargs: [],
+    )
+
+    def calibration_boundary(**_kwargs: object) -> dict[str, object]:
+        caller_frame = inspect.currentframe().f_back
+        assert caller_frame is not None
+        resumed_prompt_count = caller_frame.f_locals["resumed_prompt_count"]
+        calls["resumed_prompt_count"] = resumed_prompt_count
+        return {
+            "protocol_decision": "calibration_complete",
+            "resumed_prompt_count": resumed_prompt_count,
+        }
+
+    monkeypatch.setattr(
+        dataset_runtime,
+        "_write_calibration_protocol_boundary",
+        calibration_boundary,
+    )
+    summary = dataset_runtime.run_image_only_dataset_runtime(
+        base_config,
+        root=tmp_path,
+        paper_run=paper_run,
+        content_routing_references=ContentRoutingReferenceScalars(
+            1.0,
+            0.5,
+            0.25,
+        ),
+        calibration_only=True,
+        content_strength_common_multiplier=0.75,
+        calibration_content_strength_sensitivity=True,
+        content_routing_reference_registry_digest="1" * 64,
+        content_routing_reference_registry_file_sha256="2" * 64,
+    )
+
+    assert summary["resumed_prompt_count"] == 1
+    assert calls == {
+        "context": 0,
+        "writer": 0,
+        "expected_multipliers": [0.75],
+        "resumed_prompt_count": 1,
+    }
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("fixture_multiplier", "expected_multiplier"),
+    ((0.75, 1.0), (0.75, 2.0)),
+)
+def test_completed_formal_runtime_cache_rejects_expected_multiplier_drift(
+    tmp_path: Path,
+    fixture_multiplier: float,
+    expected_multiplier: float,
+) -> None:
+    """调用方候选倍率漂移或非正式候选不得命中cache。"""
+
+    config, _result_path, _manifest_path, _result_payload = (
+        _write_formal_content_runtime_cache_fixture(
+            tmp_path,
+            content_strength_common_multiplier=fixture_multiplier,
+        )
+    )
+
+    assert (
+        load_completed_semantic_watermark_runtime_result(
+            config,
+            root=tmp_path,
+            expected_content_strength_common_multiplier=expected_multiplier,
+        )
+        is None
+    )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("field_name", "replacement"),
+    (
+        ("lf_nominal_strength", 0.0),
+        ("hf_tail_nominal_strength", -0.1),
+        ("lf_nominal_strength", float("inf")),
+        ("hf_tail_nominal_strength", float("nan")),
+    ),
+)
+def test_completed_formal_runtime_cache_rejects_invalid_nominal_strength(
+    tmp_path: Path,
+    field_name: str,
+    replacement: float,
+) -> None:
+    """正式cache中的LF/HF名义强度必须有限且严格为正。"""
+
+    config, result_path, _manifest_path, result_payload = (
+        _write_formal_content_runtime_cache_fixture(tmp_path)
+    )
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    result["metadata"]["content_runtime_diagnostic"][field_name] = replacement
+    result_path.write_text(json.dumps(result), encoding="utf-8")
+    update_path = tmp_path / str(result_payload["update_record_path"])
+    update = json.loads(update_path.read_text(encoding="utf-8"))
+    update[field_name] = replacement
+    update_path.write_text(json.dumps(update) + "\n", encoding="utf-8")
+
+    assert (
+        load_completed_semantic_watermark_runtime_result(
+            config,
+            root=tmp_path,
+        )
+        is None
+    )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("target", "field_name", "replacement"),
+    (
+        ("metadata", "method_runtime", "legacy_runtime"),
+        ("metadata", "legacy_runtime_dependency_absence_ready", False),
+        ("diagnostic", "actual_dtype_single_write_count", 2),
+        ("diagnostic", "combined_effective_l2_ready", False),
+        ("diagnostic", "post_write_qk_strict_ready", False),
+        ("manifest", "formal_runtime_chain", "drifted_runtime_chain"),
+        ("manifest", "formal_detection_chain", "drifted_detection_chain"),
+    ),
+)
+def test_completed_formal_runtime_cache_rejects_identity_and_gate_drift(
+    tmp_path: Path,
+    target: str,
+    field_name: str,
+    replacement: object,
+) -> None:
+    """正式cache的角色、单写回、预算、Q/K与链身份漂移必须拒绝。"""
+
+    config, result_path, manifest_path, _result_payload = (
+        _write_formal_content_runtime_cache_fixture(tmp_path)
+    )
+    if target == "manifest":
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["metadata"][field_name] = replacement
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    else:
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        location = (
+            result["metadata"]
+            if target == "metadata"
+            else result["metadata"]["content_runtime_diagnostic"]
+        )
+        location[field_name] = replacement
+        result_path.write_text(json.dumps(result), encoding="utf-8")
+
+    assert (
+        load_completed_semantic_watermark_runtime_result(
+            config,
+            root=tmp_path,
+        )
+        is None
+    )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "mutation",
+    ("formal_randomization", "scientific_provenance"),
+)
+def test_completed_formal_runtime_cache_rejects_randomization_or_provenance_drift(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    """正式随机身份或科学来源摘要漂移不得命中cache。"""
+
+    config, result_path, _manifest_path, _result_payload = (
+        _write_formal_content_runtime_cache_fixture(tmp_path)
+    )
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    if mutation == "formal_randomization":
+        result["metadata"]["formal_randomization_reference"][
+            "generation_seed_random"
+        ] += 1
+    else:
+        result["metadata"]["scientific_unit_provenance"][
+            "scientific_unit_provenance_digest"
+        ] = "0" * 64
+    result_path.write_text(json.dumps(result), encoding="utf-8")
+
+    assert (
+        load_completed_semantic_watermark_runtime_result(
+            config,
+            root=tmp_path,
+        )
+        is None
+    )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "missing_output",
+        "detection_digest",
+        "detection_key_role",
+        "update_record",
+    ),
+)
+def test_completed_formal_runtime_cache_rejects_artifact_drift(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    """正式cache的文件、检测摘要或单写回记录漂移必须拒绝。"""
+
+    config, result_path, _manifest_path, result_payload = (
+        _write_formal_content_runtime_cache_fixture(tmp_path)
+    )
+    if mutation == "missing_output":
+        (tmp_path / str(result_payload["clean_image_path"])).unlink()
+    elif mutation == "detection_digest":
+        detection_path = tmp_path / str(result_payload["detection_record_path"])
+        records = [
+            json.loads(line)
+            for line in detection_path.read_text(encoding="utf-8").splitlines()
+        ]
+        records[0]["content_score"] += 0.01
+        detection_path.write_text(
+            "".join(json.dumps(record) + "\n" for record in records),
+            encoding="utf-8",
+        )
+    elif mutation == "detection_key_role":
+        detection_path = tmp_path / str(result_payload["detection_record_path"])
+        records = [
+            json.loads(line)
+            for line in detection_path.read_text(encoding="utf-8").splitlines()
+        ]
+        records[2]["detection_key_role"] = "registered_watermark_key"
+        records[2]["measurement_digest"] = build_stable_digest(
+            recompute_image_only_measurement_digest_payload(records[2])
+        )
+        detection_path.write_text(
+            "".join(json.dumps(record) + "\n" for record in records),
+            encoding="utf-8",
+        )
+    else:
+        update_path = tmp_path / str(result_payload["update_record_path"])
+        update = json.loads(update_path.read_text(encoding="utf-8"))
+        update["callback_write_count"] = 2
+        update_path.write_text(json.dumps(update) + "\n", encoding="utf-8")
 
     assert (
         load_completed_semantic_watermark_runtime_result(

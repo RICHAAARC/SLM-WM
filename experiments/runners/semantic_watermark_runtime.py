@@ -95,6 +95,7 @@ from main.methods.detection import (
     image_only_measurement_config_identity_record,
     measure_image_only_watermark,
     recompute_image_only_measurement_digest_payload,
+    validate_image_only_measurement_digest_record,
 )
 from main.methods.geometry import (
     ATTENTION_COORDINATE_CONVENTION,
@@ -1959,9 +1960,293 @@ def _scientific_content_binding_artifact_ready(
     return rebuilt_record == binding_record
 
 
+def _formal_content_runtime_artifact_binding_ready(
+    result_payload: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+    root_path: Path,
+    config: SemanticWatermarkRuntimeConfig,
+    *,
+    expected_content_strength_common_multiplier: float,
+) -> bool:
+    """复验新正式单写回运行的持久化诊断、记录与文件身份。"""
+
+    if (
+        type(expected_content_strength_common_multiplier) is not float
+        or expected_content_strength_common_multiplier not in (0.75, 1.0, 1.25)
+    ):
+        return False
+
+    metadata = result_payload.get("metadata")
+    manifest_config = manifest.get("config")
+    manifest_metadata = manifest.get("metadata")
+    if not all(
+        isinstance(value, Mapping)
+        for value in (metadata, manifest_config, manifest_metadata)
+    ):
+        return False
+    diagnostic = metadata.get("content_runtime_diagnostic")
+    formal_randomization_reference = metadata.get(
+        "formal_randomization_reference"
+    )
+    if not isinstance(diagnostic, Mapping) or not isinstance(
+        formal_randomization_reference,
+        Mapping,
+    ):
+        return False
+    try:
+        rebuilt_formal_randomization_reference = (
+            _content_runtime_formal_randomization_reference(
+                config,
+                diagnostic,
+            )
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+    if not (
+        metadata.get("method_runtime")
+        == "formal_content_dual_chain_single_write"
+        and metadata.get("threshold_free_blind_measurement_ready") is True
+        and metadata.get("formal_blind_detection_ready") is False
+        and metadata.get("legacy_runtime_dependency_absence_ready") is True
+        and metadata.get("reference_source")
+        == "fixed_content_routing_reference_registry"
+        and metadata.get("supports_paper_claim") is False
+        and dict(formal_randomization_reference)
+        == rebuilt_formal_randomization_reference
+        and manifest_config.get("formal_randomization_reference")
+        == formal_randomization_reference
+        and manifest_metadata.get("run_id") == result_payload.get("run_id")
+        and manifest_metadata.get("protocol_decision") == "pass"
+        and manifest_metadata.get("detector_input_access_mode")
+        == "image_key_public_model_only"
+        and manifest_metadata.get("supports_paper_claim") is False
+        and manifest_metadata.get("formal_runtime_chain")
+        == "content_routing_lf_hf_qk_common_gamma_single_write"
+        and manifest_metadata.get("formal_detection_chain")
+        == "threshold_free_lf_hf_tail_measurement_pending_frozen_evidence"
+    ):
+        return False
+
+    result_paths = {
+        field_name: str(result_payload.get(field_name, ""))
+        for field_name in (
+            "clean_image_path",
+            "watermarked_image_path",
+            "update_record_path",
+            "detection_record_path",
+            "manifest_path",
+        )
+    }
+    output_paths = tuple(str(path) for path in manifest.get("output_paths", ()))
+    expected_result_path = (
+        Path(result_paths["manifest_path"]).parent / "runtime_result.json"
+    ).as_posix()
+    required_paths = (*result_paths.values(), expected_result_path)
+    if (
+        any(not path for path in required_paths)
+        or any(path not in output_paths for path in required_paths)
+        or len(output_paths) != len(set(output_paths))
+    ):
+        return False
+    resolved_paths = {
+        role: _resolve_repository_output_path(root_path, path)
+        for role, path in result_paths.items()
+    }
+    resolved_result_path = _resolve_repository_output_path(
+        root_path,
+        expected_result_path,
+    )
+    if (
+        any(path is None or not path.is_file() for path in resolved_paths.values())
+        or resolved_result_path is None
+        or not resolved_result_path.is_file()
+    ):
+        return False
+
+    try:
+        update_records = _read_jsonl_object_records(
+            resolved_paths["update_record_path"]
+        )
+        detection_records = _read_jsonl_object_records(
+            resolved_paths["detection_record_path"]
+        )
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+    if (
+        result_payload.get("update_count") != 1
+        or len(update_records) != 1
+        or len(detection_records) < 3
+    ):
+        return False
+
+    update_record = update_records[0]
+    mirrored_fields = (
+        "method_role",
+        "captured_previous_index",
+        "captured_previous_count",
+        "callback_write_index",
+        "callback_write_count",
+        "current_image_decode_count",
+        "public_probe_additional_decode_count",
+        "actual_dtype_single_write_count",
+        "common_gamma",
+        "content_strength_common_multiplier",
+        "lf_nominal_strength",
+        "hf_tail_nominal_strength",
+        "lf_effective_l2",
+        "hf_tail_effective_l2",
+        "geometry_effective_l2",
+        "combined_effective_l2",
+        "combined_effective_l2_limit",
+        "combined_effective_l2_ready",
+        "actual_dtype_single_write_digest",
+        "content_only_postwrite_qk_score",
+        "final_postwrite_qk_score",
+        "post_write_qk_strict_ready",
+        "content_only_postwrite_qk_digest",
+        "final_postwrite_qk_digest",
+        "routing_identity_digest",
+        "geometry_qk_atomic_records_digest",
+        "geometry_update_digest",
+    )
+    if any(
+        update_record.get(field_name) != diagnostic.get(field_name)
+        for field_name in mirrored_fields
+    ):
+        return False
+
+    positive_fields = (
+        "lf_nominal_strength",
+        "hf_tail_nominal_strength",
+        "lf_effective_l2",
+        "hf_tail_effective_l2",
+        "geometry_effective_l2",
+        "combined_effective_l2",
+        "combined_effective_l2_limit",
+    )
+    finite_fields = (
+        *positive_fields,
+        "common_gamma",
+        "content_only_postwrite_qk_score",
+        "final_postwrite_qk_score",
+    )
+    digest_fields = (
+        "actual_dtype_single_write_digest",
+        "content_only_postwrite_qk_digest",
+        "final_postwrite_qk_digest",
+        "routing_identity_digest",
+        "geometry_qk_atomic_records_digest",
+        "geometry_update_digest",
+    )
+    if not (
+        update_record.get("run_id") == result_payload.get("run_id")
+        and update_record.get("content_strength_common_multiplier")
+        == expected_content_strength_common_multiplier
+        and diagnostic.get("content_strength_common_multiplier")
+        == expected_content_strength_common_multiplier
+        and update_record.get("step_index") == 10
+        and update_record.get("method_role") == "full_dual_chain"
+        and update_record.get("captured_previous_index") == 9
+        and update_record.get("captured_previous_count") == 1
+        and update_record.get("callback_write_index") == 10
+        and update_record.get("callback_write_count") == 1
+        and update_record.get("current_image_decode_count") == 1
+        and update_record.get("public_probe_additional_decode_count") == 1
+        and update_record.get("actual_dtype_single_write_count") == 1
+        and all(
+            type(update_record.get(field_name)) is float
+            and math.isfinite(update_record[field_name])
+            for field_name in finite_fields
+        )
+        and all(update_record[field_name] > 0.0 for field_name in positive_fields)
+        and 0.0 < update_record["common_gamma"] <= 1.0
+        and update_record["combined_effective_l2"]
+        <= update_record["combined_effective_l2_limit"]
+        and update_record.get("combined_effective_l2_ready") is True
+        and update_record["final_postwrite_qk_score"]
+        > update_record["content_only_postwrite_qk_score"]
+        and update_record.get("post_write_qk_strict_ready") is True
+        and all(_is_sha256_hex(update_record.get(field_name)) for field_name in digest_fields)
+        and update_record.get("attention_module_names")
+        == list(config.attention_module_names)
+        and update_record.get("reference_source")
+        == "fixed_content_routing_reference_registry"
+        and update_record.get("supports_paper_claim") is False
+    ):
+        return False
+
+    base_detection_roles = []
+    base_role_paths = {
+        "clean_negative": result_paths["clean_image_path"],
+        "positive_source": result_paths["watermarked_image_path"],
+        "wrong_key_negative": result_paths["watermarked_image_path"],
+    }
+    base_role_key_roles = {
+        "clean_negative": REGISTERED_WATERMARK_KEY_ROLE,
+        "positive_source": REGISTERED_WATERMARK_KEY_ROLE,
+        "wrong_key_negative": REGISTERED_WRONG_KEY_ROLE,
+    }
+    try:
+        for record in detection_records:
+            validate_image_only_measurement_digest_record(record)
+            record_metadata = record.get("metadata")
+            if not isinstance(record_metadata, Mapping):
+                return False
+            if not (
+                record.get("run_id") == result_payload.get("run_id")
+                and record.get("prompt_id") == config.prompt_id
+                and record.get("split") == config.split
+                and record_metadata.get("method_role") == "full_dual_chain"
+                and record_metadata.get("measurement_status")
+                == "threshold_independent_image_only_evidence"
+                and record_metadata.get("reference_source")
+                == "fixed_content_routing_reference_registry"
+                and record_metadata.get("supports_paper_claim") is False
+            ):
+                return False
+            if not record.get("attacked_image_key"):
+                sample_role = record.get("sample_role")
+                if not (
+                    sample_role in base_role_paths
+                    and record.get("source_image_path")
+                    == base_role_paths[sample_role]
+                    and record.get("evaluated_image_path")
+                    == base_role_paths[sample_role]
+                    and record.get("detection_key_role")
+                    == base_role_key_roles[sample_role]
+                ):
+                    return False
+                base_detection_roles.append(sample_role)
+            for path_field, digest_field in (
+                ("source_image_path", "source_image_digest"),
+                ("evaluated_image_path", "evaluated_image_digest"),
+            ):
+                relative_path = str(record.get(path_field, ""))
+                resolved_path = _resolve_repository_output_path(
+                    root_path,
+                    relative_path,
+                )
+                if not (
+                    relative_path in output_paths
+                    and resolved_path is not None
+                    and resolved_path.is_file()
+                    and file_digest(resolved_path) == record.get(digest_field)
+                ):
+                    return False
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+    return tuple(base_detection_roles) == (
+        "clean_negative",
+        "positive_source",
+        "wrong_key_negative",
+    )
+
+
 def load_completed_semantic_watermark_runtime_result(
     config: SemanticWatermarkRuntimeConfig,
     root: str | Path = ".",
+    *,
+    expected_content_strength_common_multiplier: float = 1.0,
 ) -> SemanticWatermarkRuntimeResult | None:
     """读取同代码版本、同配置且文件完整的已完成运行。
 
@@ -2007,20 +2292,37 @@ def load_completed_semantic_watermark_runtime_result(
     output_paths = tuple(str(path) for path in manifest.get("output_paths", ()))
     if not output_paths or not all((root_path / path).is_file() for path in output_paths):
         return None
-    if not _carrier_only_counterfactual_artifact_binding_ready(
-        result_payload,
-        manifest,
-        root_path,
-        config,
+    metadata = result_payload.get("metadata")
+    if (
+        isinstance(metadata, Mapping)
+        and metadata.get("method_runtime")
+        == "formal_content_dual_chain_single_write"
     ):
-        return None
-    if not _scientific_content_binding_artifact_ready(
-        result_payload,
-        manifest,
-        root_path,
-        config,
-    ):
-        return None
+        if not _formal_content_runtime_artifact_binding_ready(
+            result_payload,
+            manifest,
+            root_path,
+            config,
+            expected_content_strength_common_multiplier=(
+                expected_content_strength_common_multiplier
+            ),
+        ):
+            return None
+    else:
+        if not _carrier_only_counterfactual_artifact_binding_ready(
+            result_payload,
+            manifest,
+            root_path,
+            config,
+        ):
+            return None
+        if not _scientific_content_binding_artifact_ready(
+            result_payload,
+            manifest,
+            root_path,
+            config,
+        ):
+            return None
     try:
         return SemanticWatermarkRuntimeResult(**result_payload)
     except TypeError:
