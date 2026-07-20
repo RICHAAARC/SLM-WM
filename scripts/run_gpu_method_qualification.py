@@ -19,7 +19,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from experiments.protocol.formal_randomization import formal_randomization_repeat_ids
+from experiments.protocol.formal_randomization import (
+    formal_generation_seed,
+    formal_randomization_repeat_ids,
+    formal_watermark_key_material,
+    resolve_formal_randomization_repeat,
+    validate_formal_prompt_randomization_identity,
+)
 from experiments.protocol.gpu_method_qualification import (
     build_gpu_method_qualification_report,
 )
@@ -198,6 +204,53 @@ def _registered_prompt(root: Path, paper_run_name: str, prompt_id: str) -> Any:
     if len(matches) != 1:
         raise ValueError("--prompt-id 必须唯一存在于当前受治理 Prompt 文件")
     return matches[0]
+
+
+def _bind_formal_prompt_randomization(
+    config: Any,
+    prompt_record: Any,
+    root_key_material: str,
+) -> Any:
+    """Bind the qualification sample to the registered Prompt seed and key."""
+
+    if type(root_key_material) is not str or not root_key_material:
+        raise RuntimeError("formal runtime requires SLM_WM_KEY_MATERIAL")
+    prompt_index = getattr(prompt_record, "prompt_index", None)
+    if type(prompt_index) is not int or prompt_index < 0:
+        raise ValueError("registered qualification Prompt requires prompt_index")
+    repeat = resolve_formal_randomization_repeat(
+        config.randomization_repeat_id
+    )
+    base_generation_seed = int(config.seed) - int(
+        repeat.generation_seed_offset
+    )
+    bound = replace(
+        config,
+        seed=formal_generation_seed(
+            base_generation_seed,
+            prompt_index,
+            repeat,
+        ),
+        key_material=formal_watermark_key_material(
+            root_key_material,
+            repeat,
+        ),
+    )
+    validate_formal_prompt_randomization_identity(
+        base_generation_seed_random=base_generation_seed,
+        prompt_index=prompt_index,
+        randomization_repeat_id=bound.randomization_repeat_id,
+        generation_seed_index=bound.generation_seed_index,
+        generation_seed_offset=bound.generation_seed_offset,
+        watermark_key_index=bound.watermark_key_index,
+        generation_seed_random=bound.seed,
+        watermark_key_seed_random=bound.watermark_key_seed_random,
+        key_material=bound.key_material,
+        formal_randomization_protocol_digest=(
+            bound.formal_randomization_protocol_digest
+        ),
+    )
+    return bound
 
 
 def _qualification_binding(
@@ -456,9 +509,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         output_dir=(output_root / "runtime_runs").relative_to(root).as_posix(),
     )
     key_material = os.environ.get("SLM_WM_KEY_MATERIAL")
-    if type(key_material) is not str or not key_material:
-        raise RuntimeError("formal runtime requires SLM_WM_KEY_MATERIAL")
-    config = replace(config, key_material=key_material)
+    config = _bind_formal_prompt_randomization(
+        config,
+        prompt_record,
+        key_material,
+    )
     if args.content_runtime_smoke:
         if (
             args.frozen_evidence_protocol is not None

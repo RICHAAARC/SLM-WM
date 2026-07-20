@@ -20,11 +20,74 @@ from experiments.protocol.detection_key_identity import (
     REGISTERED_WRONG_KEY_ROLE,
     resolve_detection_key_material_and_identity,
 )
+from experiments.protocol.formal_randomization import (
+    formal_generation_seed,
+    formal_watermark_key_material,
+    formal_watermark_key_seed_random,
+    resolve_formal_randomization_repeat,
+)
 from main.core.digest import build_stable_digest
 from scripts import run_gpu_method_qualification as entry
 
 
 pytestmark = pytest.mark.quick
+
+
+def _formal_runtime_config(**changes: object) -> SemanticWatermarkRuntimeConfig:
+    root_key_material = "slm_wm_paper_key"
+    repeat = resolve_formal_randomization_repeat("seed_00_key_00")
+    return SemanticWatermarkRuntimeConfig(
+        key_material=formal_watermark_key_material(
+            root_key_material,
+            repeat,
+        ),
+        watermark_key_seed_random=formal_watermark_key_seed_random(
+            root_key_material,
+            repeat,
+        ),
+        **changes,
+    )
+
+
+def test_qualification_binds_registered_prompt_seed_and_repeat_key() -> None:
+    """单Prompt资格化不得复用base seed或把派生key覆盖回根密钥。"""
+
+    root_key_material = "slm_wm_paper_key"
+    base = _formal_runtime_config()
+    prompt = SimpleNamespace(prompt_index=7)
+    repeat = resolve_formal_randomization_repeat(
+        base.randomization_repeat_id
+    )
+
+    bound = entry._bind_formal_prompt_randomization(
+        base,
+        prompt,
+        root_key_material,
+    )
+
+    base_generation_seed = base.seed - repeat.generation_seed_offset
+    assert bound.seed == formal_generation_seed(
+        base_generation_seed,
+        prompt.prompt_index,
+        repeat,
+    )
+    assert bound.seed != base.seed
+    assert bound.key_material == formal_watermark_key_material(
+        root_key_material,
+        repeat,
+    )
+    assert bound.key_material != root_key_material
+
+
+def test_qualification_rejects_unregistered_root_key_before_runtime() -> None:
+    """未匹配冻结3-key计划的根密钥不得形成资格化运行配置。"""
+
+    with pytest.raises(ValueError, match="预注册正式 key plan"):
+        entry._bind_formal_prompt_randomization(
+            _formal_runtime_config(),
+            SimpleNamespace(prompt_index=0),
+            "unregistered-root-key",
+        )
 
 
 def test_content_smoke_requires_explicit_binary32_references() -> None:
@@ -240,6 +303,7 @@ def test_gpu_qualification_entry_uses_real_writer_and_operator_exit_gate(
         prompt_digest="a" * 64,
         prompt_set="probe_paper",
         split="dev",
+        prompt_index=7,
     )
     runtime_result = {
         "run_id": "single_prompt_real_method_run",
@@ -279,7 +343,7 @@ def test_gpu_qualification_entry_uses_real_writer_and_operator_exit_gate(
     monkeypatch.setattr(
         entry,
         "build_method_config",
-        lambda _root: SemanticWatermarkRuntimeConfig(
+        lambda _root: _formal_runtime_config(
             device_name="cuda",
             diffusion_attacks_enabled=False,
         ),
@@ -347,7 +411,7 @@ def test_gpu_qualification_entry_uses_real_writer_and_operator_exit_gate(
     )
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
-    monkeypatch.setenv("SLM_WM_KEY_MATERIAL", "registered-key")
+    monkeypatch.setenv("SLM_WM_KEY_MATERIAL", "slm_wm_paper_key")
 
     exit_code = entry.main(
         (
@@ -371,6 +435,21 @@ def test_gpu_qualification_entry_uses_real_writer_and_operator_exit_gate(
     assert exit_code == expected_exit_code
     assert len(calls) == 1
     assert calls[0].prompt_id == prompt.prompt_id
+    base_config = _formal_runtime_config()
+    repeat = resolve_formal_randomization_repeat(
+        base_config.randomization_repeat_id
+    )
+    base_generation_seed = base_config.seed - repeat.generation_seed_offset
+    assert calls[0].seed == formal_generation_seed(
+        base_generation_seed,
+        prompt.prompt_index,
+        repeat,
+    )
+    assert calls[0].key_material == formal_watermark_key_material(
+        "slm_wm_paper_key",
+        repeat,
+    )
+    assert calls[0].key_material != "slm_wm_paper_key"
     assert calls[0].standard_attack_profiles == ()
     assert calls[0].diffusion_attacks_enabled is False
     report_path = (
@@ -404,6 +483,7 @@ def test_formal_qualification_requires_protocol_before_writer(
         prompt_digest="a" * 64,
         prompt_set="probe_paper",
         split="dev",
+        prompt_index=0,
     )
     calls = {"writer": 0}
     monkeypatch.setattr(entry, "_registered_prompt", lambda *_args: prompt)
@@ -425,7 +505,7 @@ def test_formal_qualification_requires_protocol_before_writer(
     monkeypatch.setattr(
         entry,
         "build_method_config",
-        lambda _root: SemanticWatermarkRuntimeConfig(
+        lambda _root: _formal_runtime_config(
             device_name="cuda",
             diffusion_attacks_enabled=False,
         ),
@@ -437,7 +517,7 @@ def test_formal_qualification_requires_protocol_before_writer(
 
     monkeypatch.setattr(entry, "write_semantic_watermark_runtime_outputs", writer)
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
-    monkeypatch.setenv("SLM_WM_KEY_MATERIAL", "registered-key")
+    monkeypatch.setenv("SLM_WM_KEY_MATERIAL", "slm_wm_paper_key")
 
     with pytest.raises(ValueError, match="frozen-evidence-protocol"):
         entry.main(
