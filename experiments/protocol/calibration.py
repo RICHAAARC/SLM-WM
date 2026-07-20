@@ -38,8 +38,9 @@ def is_clean_unattacked_negative(
         "detection_key_role"
     ) != expected_detection_key_role:
         return False
+    attack_id = record.get("attack_id")
     return bool(
-        not str(record.get("attack_id", "")).strip()
+        (attack_id is None or not str(attack_id).strip())
         and record.get("attack_performed") is not True
         and str(record.get("attack_family", "")).strip().lower()
         in _CLEAN_ATTACK_FAMILIES

@@ -67,7 +67,7 @@ def _main_method_rows() -> tuple[tuple[dict[str, object], ...], dict[str, object
             "split": split,
             "sample_role": "clean_negative",
             "detection_key_role": "registered_watermark_key",
-            "attack_id": "",
+            "attack_id": None,
             "content_score": score,
             "aligned_content_score": score,
             "attention_geometry_score": 0.0,
@@ -225,6 +225,20 @@ def test_calibrator_rejects_hidden_attack_condition_on_clean_negative() -> None:
     changed[0] = {
         **changed[0],
         "attack_condition": "jpeg_compression",
+    }
+
+    with pytest.raises(ValueError, match="registered-key clean negatives"):
+        calibrate_complete_evidence_protocol(changed, target_fpr=0.25)
+
+
+def test_calibrator_rejects_nonempty_attack_id_on_clean_negative() -> None:
+    """JSON null 表示未攻击，但非空攻击 ID 仍必须失败关闭。"""
+
+    rows, _protocol = _main_method_rows()
+    changed = list(_raw_measurements(rows[:3]))
+    changed[0] = {
+        **changed[0],
+        "attack_id": "jpeg_attack_0001",
     }
 
     with pytest.raises(ValueError, match="registered-key clean negatives"):
