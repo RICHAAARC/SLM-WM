@@ -452,6 +452,18 @@ def build_child_command(
                     "calibration-only is valid only for image_only_dataset"
                 )
             command.append("--calibration-only")
+        if getattr(
+            arguments, "calibration_content_strength_sensitivity", False
+        ):
+            if (
+                arguments.workflow != "image_only_dataset"
+                or not arguments.calibration_only
+                or not arguments.persistent_output_dir
+            ):
+                raise FormalWorkflowHostError(
+                    "content strength sensitivity requires image_only calibration-only and persistent root"
+                )
+            command.append("--calibration-content-strength-sensitivity")
     elif arguments.operation == "repeat_evidence":
         command.extend(
             [
@@ -572,6 +584,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     gpu.add_argument("--randomization-repeat-id", default="")
     gpu.add_argument("--calibration-only", action="store_true")
+    gpu.add_argument(
+        "--calibration-content-strength-sensitivity", action="store_true"
+    )
     gpu.add_argument("--expected-reference-registry-digest", default="")
     gpu.add_argument(
         "--expected-reference-registry-file-sha256", default=""

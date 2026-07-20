@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,6 +12,7 @@ import pytest
 
 from scripts import run_gpu_server_workflow as workflow
 from scripts import semantic_watermark_scientific_workflow as method_session
+from experiments.runtime import semantic_watermark_scientific_session as child_session
 
 
 COMMIT = "a" * 40
@@ -698,6 +700,338 @@ def test_main_method_route_maps_persistent_archives_and_resume_checkpoint(
         persistent_root / "semantic_watermark_resume_checkpoint"
     )
     assert result["workflow_summary"]["workflow_decision"] == "complete"
+
+
+@pytest.mark.quick
+def test_calibration_content_sensitivity_is_private_to_official_image_route(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """非正式路由或非calibration调用必须在编排/模型/output前拒绝倍率。"""
+
+    monkeypatch.setattr(
+        workflow,
+        "_require_workflow_orchestrator_environment",
+        lambda _root: (_ for _ in ()).throw(
+            AssertionError("invalid sensitivity must fail before orchestrator")
+        ),
+    )
+    invalid = (
+        {
+            "workflow_name": "external_baseline_tree_ring",
+            "calibration_only": True,
+            "content_strength_common_multiplier": 0.75,
+            "calibration_content_strength_sensitivity": True,
+        },
+        {
+            "workflow_name": "image_only_dataset",
+            "calibration_only": False,
+            "content_strength_common_multiplier": 0.75,
+            "calibration_content_strength_sensitivity": True,
+        },
+        {
+            "workflow_name": "image_only_dataset",
+            "calibration_only": True,
+            "content_strength_common_multiplier": 1.1,
+            "calibration_content_strength_sensitivity": True,
+        },
+        {
+            "workflow_name": "image_only_dataset",
+            "calibration_only": True,
+            "content_strength_common_multiplier": 0.75,
+            "calibration_content_strength_sensitivity": False,
+        },
+    )
+    for case in invalid:
+        with pytest.raises(ValueError):
+            workflow.run_workflow(
+                case["workflow_name"],
+                "probe_paper",
+                COMMIT,
+                tmp_path,
+                randomization_repeat_id=(
+                    "seed_00_key_00"
+                    if case["workflow_name"] == "image_only_dataset"
+                    else None
+                ),
+                calibration_only=case["calibration_only"],
+                expected_reference_registry_digest=(
+                    "5" * 64
+                    if case["workflow_name"] == "image_only_dataset"
+                    else ""
+                ),
+                expected_reference_registry_file_sha256=(
+                    "6" * 64
+                    if case["workflow_name"] == "image_only_dataset"
+                    else ""
+                ),
+                content_strength_common_multiplier=case[
+                    "content_strength_common_multiplier"
+                ],
+                calibration_content_strength_sensitivity=case[
+                    "calibration_content_strength_sensitivity"
+                ],
+            )
+
+
+@pytest.mark.quick
+def test_main_route_exposes_candidate_only_during_session_and_restores_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """私有candidate keyword只在official session进程边界可见且随后恢复。"""
+
+    captured: dict[str, str | None] = {}
+
+    def fake_session(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        for key in (
+            "SLM_WM_CONTENT_STRENGTH_COMMON_MULTIPLIER",
+            "SLM_WM_CALIBRATION_CONTENT_STRENGTH_SENSITIVITY",
+        ):
+            captured[key] = os.environ.get(key)
+        return {"workflow_decision": "calibration_complete"}
+
+    monkeypatch.setattr(
+        method_session,
+        "run_semantic_watermark_image_only_session",
+        fake_session,
+    )
+    monkeypatch.setenv("SLM_WM_CONTENT_STRENGTH_COMMON_MULTIPLIER", "outer")
+    monkeypatch.delenv(
+        "SLM_WM_CALIBRATION_CONTENT_STRENGTH_SENSITIVITY",
+        raising=False,
+    )
+
+    workflow._run_main_method_route(
+        route=workflow.WORKFLOW_ROUTES["image_only_dataset"],
+        workflow_name="image_only_dataset",
+        paper_run_name="probe_paper",
+        root_path=tmp_path,
+        calibration_only=True,
+        expected_reference_registry_digest="5" * 64,
+        expected_reference_registry_file_sha256="6" * 64,
+        content_strength_common_multiplier=1.25,
+        calibration_content_strength_sensitivity=True,
+    )
+
+    assert captured == {
+        "SLM_WM_CONTENT_STRENGTH_COMMON_MULTIPLIER": "1.25",
+        "SLM_WM_CALIBRATION_CONTENT_STRENGTH_SENSITIVITY": "1",
+    }
+    assert os.environ["SLM_WM_CONTENT_STRENGTH_COMMON_MULTIPLIER"] == "outer"
+    assert (
+        "SLM_WM_CALIBRATION_CONTENT_STRENGTH_SENSITIVITY"
+        not in os.environ
+    )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("multiplier", "candidate_role"),
+    (
+        ("0.75", "content_strength_075"),
+        ("1.0", "content_strength_100"),
+        ("1.25", "content_strength_125"),
+    ),
+)
+def test_candidate_child_dispatch_and_artifacts_are_role_isolated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    multiplier: str,
+    candidate_role: str,
+) -> None:
+    """scientific child必须把候选summary与dispatch写到同一精确角色。"""
+
+    monkeypatch.setenv("SLM_WM_CALIBRATION_ONLY", "1")
+    monkeypatch.setenv(
+        "SLM_WM_CALIBRATION_CONTENT_STRENGTH_SENSITIVITY", "1"
+    )
+    monkeypatch.setenv(
+        "SLM_WM_CONTENT_STRENGTH_COMMON_MULTIPLIER", multiplier
+    )
+    monkeypatch.setattr(child_session, "ROOT", tmp_path)
+    monkeypatch.setattr(
+        child_session,
+        "build_paper_run_config",
+        lambda _root: SimpleNamespace(run_name="probe_paper"),
+    )
+    candidate_dir = (
+        tmp_path
+        / "outputs/image_only_dataset_runtime/probe_paper"
+        / candidate_role
+    )
+
+    def run_child(_command: object) -> dict[str, Any]:
+        candidate_dir.mkdir(parents=True, exist_ok=True)
+        (candidate_dir / "calibration_protocol_summary.json").write_text(
+            json.dumps(
+                {
+                    "protocol_decision": "calibration_complete",
+                    "content_strength_common_multiplier": float(multiplier),
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {
+            "argv": ["python"],
+            "return_code": 0,
+            "stdout": "",
+            "stderr": "",
+            "packaging_deferred": True,
+        }
+
+    monkeypatch.setattr(child_session, "_run_child", run_child)
+    report = child_session.run_scientific_commands(
+        run_formal_ablation=False
+    )
+
+    dispatch_path = (
+        tmp_path
+        / "outputs/scientific_command_execution/probe_paper"
+        / candidate_role
+        / child_session.DISPATCH_REPORT_FILE_NAME
+    )
+    assert dispatch_path.is_file()
+    assert not (
+        dispatch_path.parent.parent / child_session.DISPATCH_REPORT_FILE_NAME
+    ).exists()
+    assert report["content_strength_candidate_role"] == candidate_role
+    assert report["artifact_state"] == {
+        **report["artifact_state"],
+        "content_strength_candidate_role": candidate_role,
+        "calibration_summary_path": (
+            "outputs/image_only_dataset_runtime/probe_paper/"
+            f"{candidate_role}/calibration_protocol_summary.json"
+        ),
+    }
+
+
+@pytest.mark.quick
+def test_outer_session_consumes_nested_candidate_dispatch_artifact_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """outer session必须消费child artifact_state而非父目录扁平stub。"""
+
+    monkeypatch.setenv("SLM_WM_CALIBRATION_ONLY", "1")
+    monkeypatch.setenv(
+        "SLM_WM_CALIBRATION_CONTENT_STRENGTH_SENSITIVITY", "1"
+    )
+    monkeypatch.setenv("SLM_WM_CONTENT_STRENGTH_COMMON_MULTIPLIER", "0.75")
+    paper_run = SimpleNamespace(
+        run_name="probe_paper",
+        target_fpr=0.01,
+        randomization_repeat_id="seed_00_key_00",
+    )
+    monkeypatch.setattr(
+        method_session,
+        "build_paper_run_config",
+        lambda _root: paper_run,
+    )
+    monkeypatch.setattr(
+        method_session,
+        "_recover_closed_archives",
+        lambda **_kwargs: {
+            "all_expected_roles_recovered": False,
+            "closed_archive_recovery": {},
+        },
+    )
+    monkeypatch.setattr(
+        method_session,
+        "validate_scientific_execution_report",
+        lambda _path, **_kwargs: {"decision": "pass"},
+    )
+    monkeypatch.setattr(
+        method_session,
+        "_scientific_report_evidence",
+        lambda *_args: {"scientific_execution_evidence": "verified"},
+    )
+    captured: dict[str, Path] = {}
+    candidate_relative = Path(
+        "outputs/image_only_dataset_runtime/probe_paper/content_strength_075"
+    )
+
+    def execute(
+        _profile: str,
+        _argv: object,
+        *,
+        execution_report_path: Path,
+        repository_root: Path,
+    ) -> tuple[dict[str, Any], Path]:
+        captured["execution_report_path"] = execution_report_path
+        execution_report_path.parent.mkdir(parents=True, exist_ok=True)
+        execution_report_path.write_text("{}\n", encoding="utf-8")
+        candidate_dir = repository_root / candidate_relative
+        candidate_dir.mkdir(parents=True, exist_ok=True)
+        summary = {
+            "protocol_decision": "calibration_complete",
+            "content_strength_common_multiplier": 0.75,
+            "calibration_protocol_summary": {
+                "registered_wrong_strict_prompt_count": 33,
+            },
+        }
+        (candidate_dir / "calibration_protocol_summary.json").write_text(
+            json.dumps(summary),
+            encoding="utf-8",
+        )
+        dispatch_path = (
+            repository_root
+            / "outputs/scientific_command_execution/probe_paper"
+            / "content_strength_075"
+            / method_session.DISPATCH_REPORT_FILE_NAME
+        )
+        dispatch_path.parent.mkdir(parents=True, exist_ok=True)
+        dispatch_path.write_text(
+            json.dumps(
+                {
+                    "decision": "pass",
+                    "content_strength_candidate_role": (
+                        "content_strength_075"
+                    ),
+                    "artifact_state": {
+                        "content_strength_candidate_role": (
+                            "content_strength_075"
+                        ),
+                        "runtime_progress_present": False,
+                        "runtime_progress_path": (
+                            candidate_relative
+                            / "dataset_runtime_progress.json"
+                        ).as_posix(),
+                        "calibration_summary_present": True,
+                        "calibration_summary_path": (
+                            candidate_relative
+                            / "calibration_protocol_summary.json"
+                        ).as_posix(),
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {"decision": "pass"}, execution_report_path
+
+    monkeypatch.setattr(
+        method_session,
+        "execute_isolated_scientific_command",
+        execute,
+    )
+    result = method_session.run_semantic_watermark_image_only_session(
+        tmp_path
+    )
+
+    assert captured["execution_report_path"] == (
+        tmp_path
+        / "outputs/isolated_scientific_execution/sd35_method_runtime_gpu/"
+        "probe_paper/content_strength_075/"
+        "semantic_watermark_image_only_session.json"
+    )
+    assert result["content_strength_candidate_role"] == "content_strength_075"
+    assert result["calibration_protocol_summary"] == {
+        "protocol_decision": "calibration_complete",
+        "content_strength_common_multiplier": 0.75,
+        "calibration_protocol_summary": {
+            "registered_wrong_strict_prompt_count": 33,
+        },
+    }
 
 
 @pytest.mark.quick

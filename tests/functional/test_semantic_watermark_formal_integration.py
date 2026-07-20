@@ -25,9 +25,75 @@ pytestmark = pytest.mark.quick
 def test_formal_runtime_records_fixed_registry_reference_role() -> None:
     """正式生成链不得把 fixed registry 输入误标成 smoke reference。"""
 
-    source = inspect.getsource(runtime.run_semantic_watermark_runtime)
+    source = inspect.getsource(
+        runtime._run_semantic_watermark_runtime_with_content_strength
+    )
     assert "fixed_content_routing_reference_registry" in source
     assert "explicit_smoke_only_unqualified" not in source
+
+
+def test_content_strength_candidates_are_calibration_only_and_keep_formal_risk() -> None:
+    """倍率敏感性不得复用旧risk token或渗入默认/test/attack运行。"""
+
+    calibration = replace(
+        runtime.SemanticWatermarkRuntimeConfig(),
+        split="calibration",
+        standard_attack_profiles=(),
+        diffusion_attacks_enabled=False,
+    )
+    assert calibration.risk_parameter_protocol == "formal_reference"
+    for multiplier in (0.75, 1.0, 1.25):
+        runtime._require_calibration_content_strength_multiplier(
+            calibration,
+            content_strength_common_multiplier=multiplier,
+            calibration_content_strength_sensitivity=True,
+        )
+
+    with pytest.raises(ValueError, match="名义内容倍率"):
+        runtime._require_calibration_content_strength_multiplier(
+            calibration,
+            content_strength_common_multiplier=0.75,
+            calibration_content_strength_sensitivity=False,
+        )
+    for invalid_config in (
+        replace(calibration, split="test"),
+        replace(calibration, standard_attack_profiles=("full_main",)),
+        replace(calibration, diffusion_attacks_enabled=True),
+    ):
+        with pytest.raises(ValueError, match="calibration split"):
+            runtime._require_calibration_content_strength_multiplier(
+                invalid_config,
+                content_strength_common_multiplier=1.0,
+                calibration_content_strength_sensitivity=True,
+            )
+
+
+def test_public_runtime_entrypoints_are_nominal_only() -> None:
+    """普通production caller不得通过公开run/write请求非名义内容倍率。"""
+
+    for function in (
+        runtime.run_semantic_watermark_runtime,
+        runtime.write_semantic_watermark_runtime_outputs,
+    ):
+        parameters = inspect.signature(function).parameters
+        assert "content_strength_common_multiplier" not in parameters
+        assert "calibration_content_strength_sensitivity" not in parameters
+        with pytest.raises(TypeError):
+            inspect.signature(function).bind(
+                object(),
+                content_strength_common_multiplier=0.75,
+                calibration_content_strength_sensitivity=True,
+            )
+    dataset_source = inspect.getsource(
+        __import__(
+            "experiments.runners.image_only_dataset_runtime",
+            fromlist=["run_image_only_dataset_runtime"],
+        ).run_image_only_dataset_runtime
+    )
+    assert "_write_semantic_watermark_runtime_outputs_with_content_strength" in (
+        dataset_source
+    )
+    assert "if calibration_content_strength_sensitivity:" in dataset_source
 
 
 class _Attention(torch.nn.Module):
@@ -269,6 +335,8 @@ def test_smoke_runtime_executes_only_index10_and_one_write(
     content = SimpleNamespace(
         lf_update=torch.ones_like(latent),
         hf_tail_update=torch.ones_like(latent),
+        lf_nominal_strength=0.0025,
+        hf_tail_nominal_strength=0.0015,
         method_role="full_dual_chain",
     )
     monkeypatch.setattr(runtime, "build_content_carrier_update", lambda **_k: order.append("content") or content)

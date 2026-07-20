@@ -41,6 +41,35 @@ SCIENTIFIC_PROFILE_ID = "sd35_method_runtime_gpu"
 SCIENTIFIC_DISPATCH_MODULE = (
     "experiments.runtime.semantic_watermark_scientific_session"
 )
+_CONTENT_STRENGTH_CANDIDATE_ROLES = {
+    "0.75": "content_strength_075",
+    "1.0": "content_strength_100",
+    "1.25": "content_strength_125",
+}
+
+
+def _content_strength_candidate_role() -> str | None:
+    """解析official calibration-only会话的唯一内容倍率角色。"""
+
+    sensitivity = os.environ.get(
+        "SLM_WM_CALIBRATION_CONTENT_STRENGTH_SENSITIVITY", ""
+    )
+    if sensitivity == "":
+        return None
+    if sensitivity != "1" or os.environ.get("SLM_WM_CALIBRATION_ONLY") != "1":
+        raise RuntimeError("内容倍率候选只允许official calibration-only会话")
+    role = _CONTENT_STRENGTH_CANDIDATE_ROLES.get(
+        os.environ.get("SLM_WM_CONTENT_STRENGTH_COMMON_MULTIPLIER", "")
+    )
+    if role is None:
+        raise RuntimeError("内容倍率候选角色与冻结三候选不一致")
+    return role
+
+
+def _candidate_scoped_directory(path: Path, candidate_role: str | None) -> Path:
+    """把隔离执行与dispatch证据置于唯一候选目录。"""
+
+    return path if candidate_role is None else path / candidate_role
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -545,6 +574,9 @@ def run_semantic_watermark_image_only_session(
     root_path = Path(root).resolve()
     paper_run = build_paper_run_config(root_path)
     paper_run_name = paper_run.run_name
+    content_strength_candidate_role = _content_strength_candidate_role()
+    if content_strength_candidate_role is not None and run_formal_ablation:
+        raise RuntimeError("内容倍率候选不得启动正式消融")
     if resume_checkpoint_dir is not None:
         os.environ["SLM_WM_RESUME_CHECKPOINT_DIR"] = str(
             Path(resume_checkpoint_dir).expanduser().resolve()
@@ -586,7 +618,10 @@ def run_semantic_watermark_image_only_session(
             "repeat_component_ready": True,
             **closed_archive_recovery,
         }
-    runtime_output_dir = root_path / "outputs" / "image_only_dataset_runtime" / paper_run_name
+    runtime_output_dir = _candidate_scoped_directory(
+        root_path / "outputs" / "image_only_dataset_runtime" / paper_run_name,
+        content_strength_candidate_role,
+    )
     quality_output_dir = root_path / "outputs" / "dataset_level_quality" / paper_run_name
     ablation_output_dir = root_path / "outputs" / "formal_mechanism_ablation" / paper_run_name
     sensitivity_output_dir = (
@@ -595,12 +630,18 @@ def run_semantic_watermark_image_only_session(
         / "formal_branch_risk_sensitivity"
         / paper_run_name
     )
-    execution_report_path = (
+    execution_report_dir = (
         root_path
         / "outputs"
         / "isolated_scientific_execution"
         / SCIENTIFIC_PROFILE_ID
         / paper_run_name
+    )
+    execution_report_path = (
+        _candidate_scoped_directory(
+            execution_report_dir,
+            content_strength_candidate_role,
+        )
         / "semantic_watermark_image_only_session.json"
     )
     child_argv_tail = ["-m", SCIENTIFIC_DISPATCH_MODULE]
@@ -627,18 +668,51 @@ def run_semantic_watermark_image_only_session(
         execution_report,
         resolved_execution_report_path,
     )
-    dispatch_report_path = (
+    dispatch_report_dir = (
         root_path
         / "outputs"
         / "scientific_command_execution"
         / paper_run_name
+    )
+    dispatch_report_path = (
+        _candidate_scoped_directory(
+            dispatch_report_dir,
+            content_strength_candidate_role,
+        )
         / DISPATCH_REPORT_FILE_NAME
     )
+    dispatch_report = _read_json(dispatch_report_path)
+    if dispatch_report.get("decision") != "pass":
+        raise RuntimeError("科学子进程dispatch报告未通过")
+    if dispatch_report.get("content_strength_candidate_role", "") != (
+        content_strength_candidate_role or ""
+    ):
+        raise RuntimeError("科学子进程dispatch候选角色漂移")
+    artifact_state = dispatch_report.get("artifact_state")
+    if not isinstance(artifact_state, dict):
+        raise RuntimeError("科学子进程dispatch缺少artifact_state")
+    if artifact_state.get("content_strength_candidate_role", "") != (
+        content_strength_candidate_role or ""
+    ):
+        raise RuntimeError("科学子进程artifact候选角色漂移")
+    expected_runtime_progress_path = (
+        runtime_output_dir / "dataset_runtime_progress.json"
+    ).relative_to(root_path).as_posix()
+    expected_calibration_summary_path = (
+        runtime_output_dir / "calibration_protocol_summary.json"
+    ).relative_to(root_path).as_posix()
+    if (
+        artifact_state.get("runtime_progress_path")
+        != expected_runtime_progress_path
+        or artifact_state.get("calibration_summary_path")
+        != expected_calibration_summary_path
+    ):
+        raise RuntimeError("科学子进程artifact路径未绑定当前候选")
 
-    runtime_progress_path = runtime_output_dir / "dataset_runtime_progress.json"
-    calibration_summary_path = runtime_output_dir / "calibration_protocol_summary.json"
-    if calibration_summary_path.is_file():
-        calibration_summary = _read_json(calibration_summary_path)
+    if artifact_state.get("calibration_summary_present") is True:
+        calibration_summary = _read_json(
+            root_path / expected_calibration_summary_path
+        )
         if calibration_summary.get("protocol_decision") != "calibration_complete":
             raise RuntimeError("calibration-only intermediate result is invalid")
         return {
@@ -650,13 +724,16 @@ def run_semantic_watermark_image_only_session(
             "paper_run_name": paper_run_name,
             "active_workflow": "image_only_dataset_runtime",
             "calibration_protocol_summary": calibration_summary,
+            "content_strength_candidate_role": (
+                content_strength_candidate_role or ""
+            ),
             "formal_ablation_requested": run_formal_ablation,
             "closed_archive_recovery_ready": False,
             "closed_archive_recovery": closed_archive_recovery,
             "supports_paper_claim": False,
             **evidence,
         }
-    if runtime_progress_path.is_file():
+    if artifact_state.get("runtime_progress_present") is True:
         return {
             "workflow_decision": "resume_required",
             "workflow_completion_state": "resume_required",
@@ -665,7 +742,12 @@ def run_semantic_watermark_image_only_session(
             "result_closure_ready": False,
             "paper_run_name": paper_run_name,
             "active_workflow": "image_only_dataset_runtime",
-            "runtime_progress": _read_json(runtime_progress_path),
+            "runtime_progress": _read_json(
+                root_path / expected_runtime_progress_path
+            ),
+            "content_strength_candidate_role": (
+                content_strength_candidate_role or ""
+            ),
             "formal_ablation_requested": run_formal_ablation,
             "closed_archive_recovery_ready": False,
             "closed_archive_recovery": closed_archive_recovery,

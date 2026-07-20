@@ -33,6 +33,7 @@ _TEMPLATE_UNIT_NORM_RTOL = 1.0e-5
 _TEMPLATE_UNIT_NORM_ATOL = 1.0e-6
 _LF_RELATIVE_STRENGTH = 0.0025
 _HF_TAIL_RELATIVE_STRENGTH = 0.0015
+_CONTENT_STRENGTH_COMMON_MULTIPLIERS = (0.75, 1.0, 1.25)
 
 
 def _torch() -> Any:
@@ -281,6 +282,7 @@ def _build_float32_updates(
     lf_active: bool,
     hf_tail_active: bool,
     uniform_routing: bool,
+    content_strength_common_multiplier: float,
 ) -> tuple[Any, Any, Any, Any, Any, Any, Any, Any, Any]:
     """按冻结float32顺序形成方向、名义更新与唯一内容基底。"""
 
@@ -307,12 +309,21 @@ def _build_float32_updates(
     ):
         raise ValueError("内容载体方向必须全部有限")
 
-    lf_nominal_strength_tensor = latent_l2_tensor * latent_float32.new_tensor(
-        _LF_RELATIVE_STRENGTH
+    multiplier_tensor = latent_float32.new_tensor(
+        content_strength_common_multiplier
+    )
+    lf_relative_strength_tensor = (
+        latent_float32.new_tensor(_LF_RELATIVE_STRENGTH) * multiplier_tensor
+    )
+    hf_tail_relative_strength_tensor = (
+        latent_float32.new_tensor(_HF_TAIL_RELATIVE_STRENGTH)
+        * multiplier_tensor
+    )
+    lf_nominal_strength_tensor = (
+        latent_l2_tensor * lf_relative_strength_tensor
     )
     hf_tail_nominal_strength_tensor = (
-        latent_l2_tensor
-        * latent_float32.new_tensor(_HF_TAIL_RELATIVE_STRENGTH)
+        latent_l2_tensor * hf_tail_relative_strength_tensor
     )
     lf_update = (
         lf_direction * lf_nominal_strength_tensor
@@ -376,10 +387,19 @@ def build_content_carrier_update(
         "content_chain_only",
         "geometry_recovery_without_embedded_sync",
     ],
+    content_strength_common_multiplier: float = 1.0,
 ) -> ContentCarrierUpdateResult:
     """以冻结角色、掩码和名义强度构造几何同步前内容基底。"""
 
     lf_active, hf_tail_active, uniform_routing = _role_activity(method_role)
+    if (
+        type(content_strength_common_multiplier) is not float
+        or content_strength_common_multiplier
+        not in _CONTENT_STRENGTH_COMMON_MULTIPLIERS
+    ):
+        raise ValueError(
+            "content_strength_common_multiplier 必须为 0.75、1.0 或 1.25"
+        )
     _validate_static_inputs_and_identity(
         current_scheduler_latent,
         routing,
@@ -410,6 +430,7 @@ def build_content_carrier_update(
         lf_active=lf_active,
         hf_tail_active=hf_tail_active,
         uniform_routing=uniform_routing,
+        content_strength_common_multiplier=content_strength_common_multiplier,
     )
     return ContentCarrierUpdateResult(
         geometry_capacity_map=geometry_capacity_map,

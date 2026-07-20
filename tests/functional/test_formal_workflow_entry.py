@@ -51,6 +51,7 @@ def test_gpu_entry_delegates_to_independent_server_workflow(
         calibration_only=False,
         expected_reference_registry_digest="1" * 64,
         expected_reference_registry_file_sha256="2" * 64,
+        calibration_content_strength_sensitivity=False,
     )
     result = entry._gpu_result(arguments, tmp_path)
 
@@ -66,8 +67,163 @@ def test_gpu_entry_delegates_to_independent_server_workflow(
         "calibration_only": False,
         "expected_reference_registry_digest": "1" * 64,
         "expected_reference_registry_file_sha256": "2" * 64,
+        "content_strength_common_multiplier": 1.0,
+        "calibration_content_strength_sensitivity": False,
     }
     assert result["workflow_summary"] == {"run_decision": "pass"}
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("nominal_ready", (False, True))
+def test_content_strength_sensitivity_runs_all_candidates_and_only_selects_nominal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    nominal_ready: bool,
+) -> None:
+    """三候选固定全跑；非名义候选永不晋升，名义失败即science_blocked。"""
+
+    calls: list[tuple[float, str]] = []
+
+    def fake_run_workflow(
+        *_arguments: object,
+        **keywords: object,
+    ) -> dict[str, object]:
+        multiplier = float(keywords["content_strength_common_multiplier"])
+        persistent = str(_arguments[4])
+        calls.append((multiplier, persistent))
+        compatible = nominal_ready if multiplier == 1.0 else True
+        candidate_role = {
+            0.75: "content_strength_075",
+            1.0: "content_strength_100",
+            1.25: "content_strength_125",
+        }[multiplier]
+        return {
+            "workflow_summary": {
+                "workflow_decision": "calibration_complete",
+                "workflow_completion_state": "calibration_complete",
+                "content_strength_candidate_role": candidate_role,
+                "calibration_protocol_summary": {
+                    "protocol_decision": "calibration_complete",
+                    "calibration_detection_record_count": 33,
+                    "test_prompt_execution_count": 0,
+                    "attack_execution_count": 0,
+                    "content_strength_common_multiplier": multiplier,
+                    "candidate_qualification_compatible": compatible,
+                    "formal_parameter_selection_eligible": (
+                        multiplier == 1.0 and compatible
+                    ),
+                },
+            },
+            "workflow_environment": {},
+            "archive_record": {},
+        }
+
+    monkeypatch.setattr(entry, "run_workflow", fake_run_workflow)
+    arguments = argparse.Namespace(
+        workflow="image_only_dataset",
+        paper_run_name="probe_paper",
+        persistent_output_dir=str(tmp_path / "persistent"),
+        repository_commit="a" * 40,
+        randomization_repeat_id="seed_00_key_00",
+        calibration_only=True,
+        expected_reference_registry_digest="1" * 64,
+        expected_reference_registry_file_sha256="2" * 64,
+        calibration_content_strength_sensitivity=True,
+    )
+
+    result = entry._gpu_result(arguments, tmp_path)
+
+    assert [multiplier for multiplier, _ in calls] == [0.75, 1.0, 1.25]
+    assert [Path(path).name for _, path in calls] == [
+        "content_strength_075",
+        "content_strength_100",
+        "content_strength_125",
+    ]
+    summary = result["workflow_summary"]
+    assert summary["all_candidate_execution_count"] == 3
+    assert summary["all_calibration_prompt_execution_count"] == 99
+    assert summary["non_nominal_candidates_descriptive_only"] is True
+    assert summary["selected_content_strength_common_multiplier"] == (
+        1.0 if nominal_ready else None
+    )
+    assert summary["protocol_decision"] == (
+        "nominal_reference_qualification_compatible"
+        if nominal_ready
+        else "science_blocked"
+    )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "invalid_session_shape",
+    ("flat_stub", "missing_nested_summary", "outer_role_drift"),
+)
+def test_content_strength_sensitivity_rejects_invalid_outer_session_shape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_session_shape: str,
+) -> None:
+    """候选聚合必须消费正式session外层身份与嵌套calibration摘要。"""
+
+    call_index = 0
+
+    def fake_run_workflow(
+        *_arguments: object,
+        **keywords: object,
+    ) -> dict[str, object]:
+        nonlocal call_index
+        multiplier = float(keywords["content_strength_common_multiplier"])
+        candidate_role = (
+            "content_strength_075",
+            "content_strength_100",
+            "content_strength_125",
+        )[call_index]
+        call_index += 1
+        calibration_summary = {
+            "protocol_decision": "calibration_complete",
+            "calibration_detection_record_count": 33,
+            "test_prompt_execution_count": 0,
+            "attack_execution_count": 0,
+            "content_strength_common_multiplier": multiplier,
+            "candidate_qualification_compatible": True,
+            "formal_parameter_selection_eligible": multiplier == 1.0,
+        }
+        if invalid_session_shape == "flat_stub":
+            session = calibration_summary
+        else:
+            session = {
+                "workflow_decision": "calibration_complete",
+                "workflow_completion_state": "calibration_complete",
+                "content_strength_candidate_role": (
+                    "content_strength_125"
+                    if invalid_session_shape == "outer_role_drift"
+                    and multiplier == 0.75
+                    else candidate_role
+                ),
+            }
+            if invalid_session_shape != "missing_nested_summary":
+                session["calibration_protocol_summary"] = calibration_summary
+        return {
+            "workflow_summary": session,
+            "workflow_environment": {},
+            "archive_record": {},
+        }
+
+    monkeypatch.setattr(entry, "run_workflow", fake_run_workflow)
+    arguments = argparse.Namespace(
+        workflow="image_only_dataset",
+        paper_run_name="probe_paper",
+        persistent_output_dir=str(tmp_path / "persistent"),
+        repository_commit="a" * 40,
+        randomization_repeat_id="seed_00_key_00",
+        calibration_only=True,
+        expected_reference_registry_digest="1" * 64,
+        expected_reference_registry_file_sha256="2" * 64,
+        calibration_content_strength_sensitivity=True,
+    )
+
+    with pytest.raises(RuntimeError, match="content strength sensitivity"):
+        entry._gpu_result(arguments, tmp_path)
 
 
 @pytest.mark.quick

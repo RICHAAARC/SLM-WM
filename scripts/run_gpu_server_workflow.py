@@ -388,6 +388,8 @@ def _run_main_method_route(
     calibration_only: bool = False,
     expected_reference_registry_digest: str = "",
     expected_reference_registry_file_sha256: str = "",
+    content_strength_common_multiplier: float = 1.0,
+    calibration_content_strength_sensitivity: bool = False,
 ) -> Dict[str, Any]:
     """调用可脱离 Notebook 的完整主方法绑定与打包会话."""
 
@@ -415,6 +417,12 @@ def _run_main_method_route(
     previous_registry_file_sha256 = os.environ.get(
         "SLM_WM_CONTENT_ROUTING_REFERENCE_REGISTRY_FILE_SHA256"
     )
+    previous_content_multiplier = os.environ.get(
+        "SLM_WM_CONTENT_STRENGTH_COMMON_MULTIPLIER"
+    )
+    previous_content_sensitivity = os.environ.get(
+        "SLM_WM_CALIBRATION_CONTENT_STRENGTH_SENSITIVITY"
+    )
     try:
         if calibration_only:
             os.environ["SLM_WM_CALIBRATION_ONLY"] = "1"
@@ -426,6 +434,15 @@ def _run_main_method_route(
         os.environ["SLM_WM_CONTENT_ROUTING_REFERENCE_REGISTRY_FILE_SHA256"] = (
             expected_reference_registry_file_sha256
         )
+        os.environ["SLM_WM_CONTENT_STRENGTH_COMMON_MULTIPLIER"] = repr(
+            content_strength_common_multiplier
+        )
+        if calibration_content_strength_sensitivity:
+            os.environ["SLM_WM_CALIBRATION_CONTENT_STRENGTH_SENSITIVITY"] = "1"
+        else:
+            os.environ.pop(
+                "SLM_WM_CALIBRATION_CONTENT_STRENGTH_SENSITIVITY", None
+            )
         session = run_semantic_watermark_image_only_session(
             root_path,
             run_formal_ablation=workflow_name == "mechanism_ablation",
@@ -443,6 +460,14 @@ def _run_main_method_route(
         _restore_environment_value(
             "SLM_WM_CONTENT_ROUTING_REFERENCE_REGISTRY_FILE_SHA256",
             previous_registry_file_sha256,
+        )
+        _restore_environment_value(
+            "SLM_WM_CONTENT_STRENGTH_COMMON_MULTIPLIER",
+            previous_content_multiplier,
+        )
+        _restore_environment_value(
+            "SLM_WM_CALIBRATION_CONTENT_STRENGTH_SENSITIVITY",
+            previous_content_sensitivity,
         )
     return {
         "workflow_summary": session,
@@ -643,6 +668,8 @@ def run_workflow(
     calibration_only: bool = False,
     expected_reference_registry_digest: str = "",
     expected_reference_registry_file_sha256: str = "",
+    content_strength_common_multiplier: float = 1.0,
+    calibration_content_strength_sensitivity: bool = False,
 ) -> Dict[str, Any]:
     """在 CPU 父入口中发布执行身份并调度一个隔离 GPU 工作流."""
 
@@ -672,6 +699,23 @@ def run_workflow(
         raise TypeError("calibration_only must be an exact bool")
     if calibration_only and workflow_name != "image_only_dataset":
         raise ValueError("calibration-only is valid only for image_only_dataset")
+    if type(calibration_content_strength_sensitivity) is not bool:
+        raise TypeError(
+            "calibration_content_strength_sensitivity must be an exact bool"
+        )
+    if type(content_strength_common_multiplier) is not float:
+        raise TypeError("content_strength_common_multiplier must be an exact float")
+    if calibration_content_strength_sensitivity:
+        if (
+            workflow_name != "image_only_dataset"
+            or not calibration_only
+            or content_strength_common_multiplier not in (0.75, 1.0, 1.25)
+        ):
+            raise ValueError(
+                "content strength sensitivity requires image_only calibration-only exact candidate"
+            )
+    elif content_strength_common_multiplier != 1.0:
+        raise ValueError("default GPU workflow requires content multiplier 1.0")
     if workflow_name != "image_only_dataset" and (
         expected_reference_registry_digest
         or expected_reference_registry_file_sha256
@@ -719,6 +763,12 @@ def run_workflow(
             ),
             "randomization_repeat_id": resolved_repeat_id or "",
             "calibration_only": calibration_only,
+            "content_strength_common_multiplier": (
+                content_strength_common_multiplier
+            ),
+            "calibration_content_strength_sensitivity": (
+                calibration_content_strength_sensitivity
+            ),
             "content_routing_reference_registry_digest": (
                 expected_reference_registry_digest
             ),
@@ -739,6 +789,12 @@ def run_workflow(
                 ),
                 expected_reference_registry_file_sha256=(
                     expected_reference_registry_file_sha256
+                ),
+                content_strength_common_multiplier=(
+                    content_strength_common_multiplier
+                ),
+                calibration_content_strength_sensitivity=(
+                    calibration_content_strength_sensitivity
                 ),
             )
             if route.uses_scientific_command
@@ -795,6 +851,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--calibration-only", action="store_true")
+    parser.add_argument(
+        "--content-strength-common-multiplier", type=float, default=1.0
+    )
+    parser.add_argument(
+        "--calibration-content-strength-sensitivity", action="store_true"
+    )
     parser.add_argument("--expected-reference-registry-digest", default="")
     parser.add_argument(
         "--expected-reference-registry-file-sha256", default=""
@@ -818,6 +880,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     args.randomization_repeat_id or None
                 ),
                 calibration_only=args.calibration_only,
+                content_strength_common_multiplier=(
+                    args.content_strength_common_multiplier
+                ),
+                calibration_content_strength_sensitivity=(
+                    args.calibration_content_strength_sensitivity
+                ),
                 expected_reference_registry_digest=(
                     args.expected_reference_registry_digest
                 ),

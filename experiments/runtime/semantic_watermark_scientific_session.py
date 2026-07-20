@@ -53,6 +53,34 @@ SEMANTIC_ARTIFACT_SPECS = {
         "parameter_sensitivity_summary.json",
     ),
 }
+_CONTENT_STRENGTH_CANDIDATE_ROLES = {
+    "0.75": "content_strength_075",
+    "1.0": "content_strength_100",
+    "1.25": "content_strength_125",
+}
+
+
+def _content_strength_candidate_role() -> str | None:
+    """解析official calibration-only进程显式登记的内容倍率角色。"""
+
+    sensitivity = os.environ.get(
+        "SLM_WM_CALIBRATION_CONTENT_STRENGTH_SENSITIVITY", ""
+    )
+    if sensitivity == "":
+        return None
+    if sensitivity != "1" or os.environ.get("SLM_WM_CALIBRATION_ONLY") != "1":
+        raise RuntimeError("内容倍率候选只允许official calibration-only会话")
+    multiplier = os.environ.get("SLM_WM_CONTENT_STRENGTH_COMMON_MULTIPLIER", "")
+    role = _CONTENT_STRENGTH_CANDIDATE_ROLES.get(multiplier)
+    if role is None:
+        raise RuntimeError("内容倍率候选角色与冻结三候选不一致")
+    return role
+
+
+def _candidate_scoped_directory(path: Path, candidate_role: str | None) -> Path:
+    """把候选scientific产物隔离到唯一倍率角色目录。"""
+
+    return path if candidate_role is None else path / candidate_role
 
 
 def _file_sha256(path: Path) -> str:
@@ -102,10 +130,17 @@ def _run_child(command_tail: Sequence[str]) -> dict[str, Any]:
     }
 
 
-def _artifact_state(paper_run_name: str) -> dict[str, Any]:
+def _artifact_state(
+    paper_run_name: str,
+    *,
+    content_strength_candidate_role: str | None,
+) -> dict[str, Any]:
     """读取主方法,质量评估和消融的当前完成或续跑状态."""
 
-    runtime_dir = ROOT / "outputs" / "image_only_dataset_runtime" / paper_run_name
+    runtime_dir = _candidate_scoped_directory(
+        ROOT / "outputs" / "image_only_dataset_runtime" / paper_run_name,
+        content_strength_candidate_role,
+    )
     quality_dir = ROOT / "outputs" / "dataset_level_quality" / paper_run_name
     ablation_dir = ROOT / "outputs" / "formal_mechanism_ablation" / paper_run_name
     sensitivity_dir = (
@@ -115,6 +150,9 @@ def _artifact_state(paper_run_name: str) -> dict[str, Any]:
     calibration_summary_path = runtime_dir / "calibration_protocol_summary.json"
     ablation_progress_path = ablation_dir / "runtime_rerun_progress.json"
     return {
+        "content_strength_candidate_role": (
+            content_strength_candidate_role or ""
+        ),
         "runtime_progress_present": runtime_progress_path.is_file(),
         "runtime_progress_path": runtime_progress_path.relative_to(ROOT).as_posix(),
         "calibration_summary_present": calibration_summary_path.is_file(),
@@ -207,17 +245,29 @@ def run_scientific_commands(*, run_formal_ablation: bool) -> dict[str, Any]:
     """顺序运行主方法, 并仅在主证据闭合后运行正式消融."""
 
     paper_run_name = build_paper_run_config(ROOT).run_name
-    report_path = (
+    content_strength_candidate_role = _content_strength_candidate_role()
+    if content_strength_candidate_role is not None and run_formal_ablation:
+        raise RuntimeError("内容倍率候选不得启动正式消融")
+    report_dir = (
         ROOT
         / "outputs"
         / "scientific_command_execution"
         / paper_run_name
+    )
+    report_path = (
+        _candidate_scoped_directory(
+            report_dir,
+            content_strength_candidate_role,
+        )
         / DISPATCH_REPORT_FILE_NAME
     )
     report: dict[str, Any] = {
         "report_schema": DISPATCH_REPORT_SCHEMA,
         "schema_version": DISPATCH_REPORT_SCHEMA_VERSION,
         "paper_run_name": paper_run_name,
+        "content_strength_candidate_role": (
+            content_strength_candidate_role or ""
+        ),
         "formal_ablation_requested": run_formal_ablation,
         "packaging_deferred": True,
         "python_executable": sys.executable,
@@ -243,7 +293,10 @@ def run_scientific_commands(*, run_formal_ablation: bool) -> dict[str, Any]:
         if runtime_command["return_code"] != 0:
             raise RuntimeError("image_only_dataset_runtime_command_failed")
 
-        state = _artifact_state(paper_run_name)
+        state = _artifact_state(
+            paper_run_name,
+            content_strength_candidate_role=content_strength_candidate_role,
+        )
         report["artifact_state"] = state
         if state["calibration_summary_present"]:
             calibration_summary = _read_json(
@@ -293,7 +346,12 @@ def run_scientific_commands(*, run_formal_ablation: bool) -> dict[str, Any]:
             )
             if ablation_command["return_code"] != 0:
                 raise RuntimeError("runtime_rerun_ablation_command_failed")
-            state = _artifact_state(paper_run_name)
+            state = _artifact_state(
+                paper_run_name,
+                content_strength_candidate_role=(
+                    content_strength_candidate_role
+                ),
+            )
             report["artifact_state"] = state
             if not state["ablation_progress_present"]:
                 ablation_summary = _read_json(ROOT / state["ablation_summary_path"])
@@ -322,7 +380,12 @@ def run_scientific_commands(*, run_formal_ablation: bool) -> dict[str, Any]:
                     raise RuntimeError(
                         "branch_risk_parameter_sensitivity_command_failed"
                     )
-                state = _artifact_state(paper_run_name)
+                state = _artifact_state(
+                    paper_run_name,
+                    content_strength_candidate_role=(
+                        content_strength_candidate_role
+                    ),
+                )
                 report["artifact_state"] = state
                 if not state["sensitivity_progress_present"]:
                     sensitivity_summary = _read_json(

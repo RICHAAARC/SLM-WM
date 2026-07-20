@@ -78,6 +78,7 @@ from main.methods.semantic.feature_protocol import (
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
+    _write_semantic_watermark_runtime_outputs_with_content_strength,
     load_completed_semantic_watermark_runtime_result,
     load_semantic_watermark_runtime_context,
     semantic_watermark_runtime_config_payload,
@@ -119,6 +120,14 @@ from main.methods.geometry import (
     qk_operator_metadata_records_digest,
     qk_operator_metadata_records_ready,
 )
+
+
+_CONTENT_STRENGTH_COMMON_MULTIPLIERS = (0.75, 1.0, 1.25)
+_CONTENT_STRENGTH_OUTPUT_ROLES = {
+    0.75: "content_strength_075",
+    1.0: "content_strength_100",
+    1.25: "content_strength_125",
+}
 from main.methods.detection import (
     validate_image_only_measurement_projection_record,
 )
@@ -1215,6 +1224,12 @@ def _write_calibration_protocol_boundary(
     output_dir: Path,
     paper_run: PaperRunConfig,
     calibration_negatives: tuple[dict[str, Any], ...],
+    runtime_results: tuple[dict[str, Any], ...],
+    detection_records: tuple[dict[str, Any], ...],
+    scientific_update_records: tuple[dict[str, Any], ...],
+    method_config: SemanticWatermarkRuntimeConfig,
+    content_strength_common_multiplier: float,
+    calibration_content_strength_sensitivity: bool,
     content_routing_reference_registry_digest: str,
     content_routing_reference_registry_file_sha256: str,
 ) -> dict[str, Any]:
@@ -1246,6 +1261,163 @@ def _write_calibration_protocol_boundary(
     )
     if rebuilt != protocol:
         raise RuntimeError("persisted calibration records rebuild drifted")
+
+    if type(calibration_content_strength_sensitivity) is not bool:
+        raise TypeError(
+            "calibration_content_strength_sensitivity must be an exact bool"
+        )
+    if calibration_content_strength_sensitivity:
+        if content_strength_common_multiplier not in (0.75, 1.0, 1.25):
+            raise ValueError("content strength sensitivity candidate is invalid")
+    elif content_strength_common_multiplier != 1.0:
+        raise ValueError("default calibration requires nominal content strength")
+
+    prompt_ids = tuple(
+        str(record.get("prompt_id", ""))
+        for record in detection_records
+        if record.get("sample_role") == "positive_source"
+        and not record.get("attack_id")
+    )
+    strict_attribution_prompt_count = 0
+    quality_measurement_ready = False
+    content_strength_identity_ready = False
+    write_budget_gate_ready = False
+    detection_operator_gate_ready = False
+    if calibration_content_strength_sensitivity:
+        if (
+            len(runtime_results) != 33
+            or len(prompt_ids) != 33
+            or any(not prompt_id for prompt_id in prompt_ids)
+        ):
+            raise RuntimeError(
+                "内容倍率候选必须完整覆盖33条calibration Prompt"
+            )
+        if len(set(prompt_ids)) != len(prompt_ids):
+            raise RuntimeError("内容倍率候选不得重复calibration Prompt")
+        for prompt_id in prompt_ids:
+            rows = tuple(
+                record
+                for record in detection_records
+                if record.get("prompt_id") == prompt_id
+                and not record.get("attack_id")
+                and record.get("sample_role")
+                in {"positive_source", "wrong_key_negative"}
+            )
+            by_role = {
+                str(record.get("sample_role")): record for record in rows
+            }
+            if len(rows) != 2 or set(by_role) != {
+                "positive_source",
+                "wrong_key_negative",
+            }:
+                raise RuntimeError(
+                    "每条calibration Prompt必须有唯一registered/wrong测量"
+                )
+            registered_score = by_role["positive_source"].get(
+                "content_score"
+            )
+            wrong_score = by_role["wrong_key_negative"].get(
+                "content_score"
+            )
+            if not all(
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(float(value))
+                for value in (registered_score, wrong_score)
+            ):
+                raise RuntimeError(
+                    "registered/wrong content score必须为有限数"
+                )
+            strict_attribution_prompt_count += int(
+                float(registered_score) > float(wrong_score)
+            )
+
+        quality_measurement_ready = all(
+            result.get("run_decision") == "pass"
+            and isinstance(
+                result.get("metadata", {}).get("paired_quality"), dict
+            )
+            and all(
+                isinstance(
+                    result["metadata"]["paired_quality"].get(field_name),
+                    (int, float),
+                )
+                and not isinstance(
+                    result["metadata"]["paired_quality"].get(field_name),
+                    bool,
+                )
+                and math.isfinite(
+                    float(
+                        result["metadata"]["paired_quality"][field_name]
+                    )
+                )
+                for field_name in ("ssim", "mse", "mean_abs_error")
+            )
+            and (
+                result["metadata"]["paired_quality"].get("psnr") == "inf"
+                or (
+                    isinstance(
+                        result["metadata"]["paired_quality"].get("psnr"),
+                        (int, float),
+                    )
+                    and not isinstance(
+                        result["metadata"]["paired_quality"].get("psnr"),
+                        bool,
+                    )
+                    and math.isfinite(
+                        float(result["metadata"]["paired_quality"]["psnr"])
+                    )
+                )
+            )
+            and _final_image_preservation_ready(result, method_config)
+            and _carrier_only_final_image_preservation_ready(
+                result,
+                method_config,
+            )
+            for result in runtime_results
+        )
+        content_strength_identity_ready = bool(
+            len(scientific_update_records) == 33
+            and all(
+                record.get("content_strength_common_multiplier")
+                == content_strength_common_multiplier
+                and all(
+                    isinstance(record.get(field_name), (int, float))
+                    and not isinstance(record.get(field_name), bool)
+                    and math.isfinite(float(record[field_name]))
+                    and float(record[field_name]) > 0.0
+                    for field_name in (
+                        "lf_nominal_strength",
+                        "hf_tail_nominal_strength",
+                    )
+                )
+                for record in scientific_update_records
+            )
+        )
+        write_budget_gate_ready = bool(
+            len(scientific_update_records) == 33
+            and all(
+                _formal_single_write_record_ready(record, method_config)
+                for record in scientific_update_records
+            )
+        )
+        detection_operator_gate_ready = bool(
+            detection_records
+            and all(
+                _detection_qk_atomic_content_ready(record, method_config)
+                for record in detection_records
+            )
+        )
+    existing_quality_budget_gates_ready = bool(
+        quality_measurement_ready
+        and content_strength_identity_ready
+        and write_budget_gate_ready
+        and detection_operator_gate_ready
+    )
+    qualification_compatible = bool(
+        strict_attribution_prompt_count == 33
+        and existing_quality_budget_gates_ready
+    )
     protocol_path.write_text(
         json.dumps(
             protocol.to_dict(),
@@ -1283,6 +1455,43 @@ def _write_calibration_protocol_boundary(
         "repeat_component_ready": False,
         "supports_paper_claim": False,
     }
+    if calibration_content_strength_sensitivity:
+        summary.update(
+            {
+                "content_strength_common_multiplier": (
+                    content_strength_common_multiplier
+                ),
+                "registered_wrong_strict_prompt_count": (
+                    strict_attribution_prompt_count
+                ),
+                "registered_wrong_strict_all_ready": (
+                    strict_attribution_prompt_count == 33
+                ),
+                "quality_measurement_ready": quality_measurement_ready,
+                "content_strength_identity_ready": (
+                    content_strength_identity_ready
+                ),
+                "write_budget_gate_ready": write_budget_gate_ready,
+                "detection_operator_gate_ready": (
+                    detection_operator_gate_ready
+                ),
+                "existing_quality_budget_gates_ready": (
+                    existing_quality_budget_gates_ready
+                ),
+                "candidate_qualification_compatible": (
+                    qualification_compatible
+                ),
+                "candidate_decision": (
+                    "qualification_compatible"
+                    if qualification_compatible
+                    else "science_blocked"
+                ),
+                "formal_parameter_selection_eligible": bool(
+                    content_strength_common_multiplier == 1.0
+                    and qualification_compatible
+                ),
+            }
+        )
     summary_path.write_text(
         json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
         encoding="utf-8",
@@ -1298,6 +1507,8 @@ def run_image_only_dataset_runtime(
     *,
     content_routing_references: ContentRoutingReferenceScalars | None = None,
     calibration_only: bool = False,
+    content_strength_common_multiplier: float = 1.0,
+    calibration_content_strength_sensitivity: bool = False,
     content_routing_reference_registry_digest: str = "",
     content_routing_reference_registry_file_sha256: str = "",
 ) -> dict[str, Any]:
@@ -1309,6 +1520,23 @@ def run_image_only_dataset_runtime(
         )
     if type(calibration_only) is not bool:
         raise TypeError("calibration_only must be an exact bool")
+    if type(calibration_content_strength_sensitivity) is not bool:
+        raise TypeError(
+            "calibration_content_strength_sensitivity must be an exact bool"
+        )
+    if type(content_strength_common_multiplier) is not float:
+        raise TypeError("content_strength_common_multiplier must be an exact float")
+    if calibration_content_strength_sensitivity:
+        if (
+            not calibration_only
+            or content_strength_common_multiplier
+            not in _CONTENT_STRENGTH_COMMON_MULTIPLIERS
+        ):
+            raise ValueError(
+                "内容共同倍率敏感性要求calibration-only精确三候选"
+            )
+    elif content_strength_common_multiplier != 1.0:
+        raise ValueError("默认image-only dataset只允许名义内容倍率1.0")
     for field_name, value in (
         (
             "content_routing_reference_registry_digest",
@@ -1343,6 +1571,10 @@ def run_image_only_dataset_runtime(
         )
     )[: resolved_paper_run.sample_count]
     output_dir = root_path / "outputs" / "image_only_dataset_runtime" / resolved_paper_run.run_name
+    if calibration_content_strength_sensitivity:
+        output_dir = output_dir / _CONTENT_STRENGTH_OUTPUT_ROLES[
+            content_strength_common_multiplier
+        ]
     output_dir.mkdir(parents=True, exist_ok=True)
     progress_path = output_dir / "dataset_runtime_progress.json"
     restore_role_checkpoints(
@@ -1454,7 +1686,7 @@ def run_image_only_dataset_runtime(
                 else None
             ),
             output_dir=(
-                f"outputs/image_only_dataset_runtime/{resolved_paper_run.run_name}/runs"
+                output_dir.relative_to(root_path).as_posix() + "/runs"
             ),
         )
         validate_formal_dataset_randomization_identity(
@@ -1475,13 +1707,32 @@ def run_image_only_dataset_runtime(
                     verified_formal_execution_lock=formal_execution_run_lock,
                     repository_root=root_path,
                 )
-            result = write_semantic_watermark_runtime_outputs(
-                run_config,
-                root=root_path,
-                references=content_routing_references,
-                verified_formal_execution_lock=formal_execution_run_lock,
-                runtime_context=shared_context,
-            )
+            if calibration_content_strength_sensitivity:
+                result = (
+                    _write_semantic_watermark_runtime_outputs_with_content_strength(
+                        run_config,
+                        root=root_path,
+                        references=content_routing_references,
+                        verified_formal_execution_lock=(
+                            formal_execution_run_lock
+                        ),
+                        runtime_context=shared_context,
+                        content_strength_common_multiplier=(
+                            content_strength_common_multiplier
+                        ),
+                        calibration_content_strength_sensitivity=True,
+                    )
+                )
+            else:
+                result = write_semantic_watermark_runtime_outputs(
+                    run_config,
+                    root=root_path,
+                    references=content_routing_references,
+                    verified_formal_execution_lock=(
+                        formal_execution_run_lock
+                    ),
+                    runtime_context=shared_context,
+                )
             new_prompt_count += 1
             generated_now = True
         result_payload = result.to_dict()
@@ -1520,6 +1771,18 @@ def run_image_only_dataset_runtime(
                     output_dir=output_dir,
                     paper_run=resolved_paper_run,
                     calibration_negatives=calibration_negatives,
+                    runtime_results=tuple(runtime_results),
+                    detection_records=tuple(detection_records),
+                    scientific_update_records=tuple(
+                        scientific_update_records
+                    ),
+                    method_config=base_method_config,
+                    content_strength_common_multiplier=(
+                        content_strength_common_multiplier
+                    ),
+                    calibration_content_strength_sensitivity=(
+                        calibration_content_strength_sensitivity
+                    ),
                     content_routing_reference_registry_digest=(
                         content_routing_reference_registry_digest
                     ),

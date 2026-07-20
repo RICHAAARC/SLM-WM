@@ -6,6 +6,7 @@ import ast
 from dataclasses import FrozenInstanceError, fields, replace
 import inspect
 from pathlib import Path
+import struct
 from typing import Any
 
 import pytest
@@ -144,6 +145,7 @@ def _build(
     lf: LowFrequencyCarrierTemplate,
     hf: HighFrequencyTailCarrierTemplate,
     role: str = "full_dual_chain",
+    multiplier: float = 1.0,
 ) -> ContentCarrierUpdateResult:
     """使用全部keyword-only正式参数调用公开构造器。"""
 
@@ -153,6 +155,7 @@ def _build(
         lf_template=lf,
         hf_tail_template=hf,
         method_role=role,
+        content_strength_common_multiplier=multiplier,
     )
 
 
@@ -182,6 +185,7 @@ def test_public_contract_is_frozen_exact_and_not_package_exported() -> None:
         "lf_template",
         "hf_tail_template",
         "method_role",
+        "content_strength_common_multiplier",
     ]
     assert all(
         parameter.kind is inspect.Parameter.KEYWORD_ONLY
@@ -196,6 +200,78 @@ def test_public_contract_is_frozen_exact_and_not_package_exported() -> None:
     result = _build(latent, routing, lf, hf)
     with pytest.raises(FrozenInstanceError):
         result.method_role = "lf_only_content"  # type: ignore[misc]
+
+
+@pytest.mark.parametrize("multiplier", (0.75, 1.0, 1.25))
+def test_common_multiplier_scales_only_two_nominal_content_strengths(
+    multiplier: float,
+) -> None:
+    """冻结三候选只共同缩放LF/HF名义强度且不改变0.70/0.30职责。"""
+
+    latent, routing, lf, hf = _inputs()
+    result = _build(latent, routing, lf, hf, multiplier=multiplier)
+    latent_float32 = latent.detach().to(dtype=torch.float32)
+    latent_l2 = torch.linalg.vector_norm(latent_float32.reshape(-1))
+    multiplier_tensor = latent_float32.new_tensor(multiplier)
+    expected_lf = latent_l2 * (
+        latent_float32.new_tensor(0.0025) * multiplier_tensor
+    )
+    expected_hf = latent_l2 * (
+        latent_float32.new_tensor(0.0015) * multiplier_tensor
+    )
+
+    assert result.lf_nominal_strength == float(expected_lf.item())
+    assert result.hf_tail_nominal_strength == float(expected_hf.item())
+    assert torch.equal(result.lf_update, result.lf_direction * expected_lf)
+    assert torch.equal(
+        result.hf_tail_update,
+        result.hf_tail_direction * expected_hf,
+    )
+
+
+def test_one_point_two_five_multiplier_uses_device_float32_bit_order() -> None:
+    """1.25候选不得先在Python binary64中预乘再转换为float32。"""
+
+    latent, routing, lf, hf = _inputs()
+    result = _build(latent, routing, lf, hf, multiplier=1.25)
+    latent_float32 = latent.detach().to(dtype=torch.float32)
+    latent_l2 = torch.linalg.vector_norm(latent_float32.reshape(-1))
+    multiplier = latent_float32.new_tensor(1.25)
+    lf_relative = latent_float32.new_tensor(0.0025) * multiplier
+    hf_relative = latent_float32.new_tensor(0.0015) * multiplier
+    binary64_first_lf = latent_float32.new_tensor(0.0025 * 1.25)
+    binary64_first_hf = latent_float32.new_tensor(0.0015 * 1.25)
+
+    assert struct.pack(">f", float(lf_relative.item())) != struct.pack(
+        ">f", float(binary64_first_lf.item())
+    )
+    assert struct.pack(">f", float(hf_relative.item())) != struct.pack(
+        ">f", float(binary64_first_hf.item())
+    )
+    assert struct.pack(
+        ">f", result.lf_nominal_strength
+    ) == struct.pack(">f", float((latent_l2 * lf_relative).item()))
+    assert struct.pack(
+        ">f", result.hf_tail_nominal_strength
+    ) == struct.pack(">f", float((latent_l2 * hf_relative).item()))
+
+
+@pytest.mark.parametrize("invalid", (True, 1, 0.5, 1.5, float("nan")))
+def test_common_multiplier_rejects_values_outside_frozen_candidates(
+    invalid: Any,
+) -> None:
+    """业务入口不得把任意倍率或bool解释为正式敏感性候选。"""
+
+    latent, routing, lf, hf = _inputs()
+    with pytest.raises(ValueError, match="0.75、1.0 或 1.25"):
+        build_content_carrier_update(
+            current_scheduler_latent=latent,
+            routing=routing,
+            lf_template=lf,
+            hf_tail_template=hf,
+            method_role="full_dual_chain",
+            content_strength_common_multiplier=invalid,
+        )
 
 
 @pytest.mark.parametrize(

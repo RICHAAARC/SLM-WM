@@ -206,6 +206,12 @@ def test_calibration_only_boundary_persists_and_rebuilds_before_test_workload(
         output_dir=output_dir,
         paper_run=SimpleNamespace(run_name="probe_paper", target_fpr=0.1),
         calibration_negatives=records,
+        runtime_results=(),
+        detection_records=(),
+        scientific_update_records=(),
+        method_config=SemanticWatermarkRuntimeConfig(key_material="key"),
+        content_strength_common_multiplier=1.0,
+        calibration_content_strength_sensitivity=False,
         content_routing_reference_registry_digest="1" * 64,
         content_routing_reference_registry_file_sha256="2" * 64,
     )
@@ -232,6 +238,135 @@ def test_calibration_only_boundary_persists_and_rebuilds_before_test_workload(
         (output_dir / "frozen_evidence_protocol.json").read_text(encoding="utf-8")
     )
     assert stored == protocol.to_dict()
+
+
+@pytest.mark.quick
+def test_content_strength_candidate_requires_all_33_strict_attributions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """候选不得用均值或部分Prompt替代33/33 registered严格胜出。"""
+
+    calibration_negatives = tuple(
+        bind_formal_detection_record(
+            {
+                "prompt_id": f"calibration-{index:02d}",
+                "split": "calibration",
+                "sample_role": "clean_negative",
+                "detection_key_role": "registered_watermark_key",
+                "attack_id": "",
+                "content_score": 0.0,
+                "aligned_content_score": 0.0,
+                "attention_geometry_score": 0.0,
+                "registration_confidence": 0.0,
+                "attention_sync_score": 0.0,
+                "geometry_reliable": False,
+                "alignment": {"registration_geometry_reliable": False},
+            }
+        )
+        for index in range(33)
+    )
+    runtime_results = tuple(
+        {
+            "run_decision": "pass",
+            "metadata": {
+                "paired_quality": {
+                    "ssim": 1.0,
+                    "mse": 0.0,
+                    "mean_abs_error": 0.0,
+                    "psnr": "inf",
+                }
+            },
+        }
+        for _ in range(33)
+    )
+    detections: list[dict[str, Any]] = []
+    for index in range(33):
+        prompt_id = f"calibration-{index:02d}"
+        detections.extend(
+            (
+                {
+                    "prompt_id": prompt_id,
+                    "sample_role": "positive_source",
+                    "attack_id": "",
+                    "content_score": 0.2,
+                },
+                {
+                    "prompt_id": prompt_id,
+                    "sample_role": "wrong_key_negative",
+                    "attack_id": "",
+                    "content_score": 0.1,
+                },
+            )
+        )
+    monkeypatch.setattr(
+        "experiments.runners.image_only_dataset_runtime._formal_single_write_record_ready",
+        lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        "experiments.runners.image_only_dataset_runtime._detection_qk_atomic_content_ready",
+        lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        "experiments.runners.image_only_dataset_runtime._final_image_preservation_ready",
+        lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        "experiments.runners.image_only_dataset_runtime._carrier_only_final_image_preservation_ready",
+        lambda *_args: True,
+    )
+    method_config = SemanticWatermarkRuntimeConfig(key_material="key")
+
+    def build_summary(
+        candidate_detections: tuple[dict[str, Any], ...],
+        output_name: str,
+        *,
+        update_multiplier: float = 1.0,
+    ) -> dict[str, Any]:
+        output_dir = tmp_path / "outputs" / output_name
+        output_dir.mkdir(parents=True)
+        return _write_calibration_protocol_boundary(
+            root_path=tmp_path,
+            output_dir=output_dir,
+            paper_run=SimpleNamespace(run_name="probe_paper", target_fpr=0.1),
+            calibration_negatives=calibration_negatives,
+            runtime_results=runtime_results,
+            detection_records=candidate_detections,
+            scientific_update_records=tuple(
+                {
+                    "content_strength_common_multiplier": update_multiplier,
+                    "lf_nominal_strength": 0.0025,
+                    "hf_tail_nominal_strength": 0.0015,
+                }
+                for _ in range(33)
+            ),
+            method_config=method_config,
+            content_strength_common_multiplier=1.0,
+            calibration_content_strength_sensitivity=True,
+            content_routing_reference_registry_digest="1" * 64,
+            content_routing_reference_registry_file_sha256="2" * 64,
+        )
+
+    compatible = build_summary(tuple(detections), "compatible")
+    assert compatible["registered_wrong_strict_prompt_count"] == 33
+    assert compatible["content_strength_identity_ready"] is True
+    assert compatible["candidate_qualification_compatible"] is True
+    assert compatible["formal_parameter_selection_eligible"] is True
+
+    mismatched_identity = build_summary(
+        tuple(detections),
+        "mismatched_identity",
+        update_multiplier=0.75,
+    )
+    assert mismatched_identity["content_strength_identity_ready"] is False
+    assert mismatched_identity["candidate_qualification_compatible"] is False
+
+    detections[1] = {**detections[1], "content_score": 0.2}
+    blocked = build_summary(tuple(detections), "blocked")
+    assert blocked["registered_wrong_strict_prompt_count"] == 32
+    assert blocked["candidate_qualification_compatible"] is False
+    assert blocked["candidate_decision"] == "science_blocked"
+    assert blocked["formal_parameter_selection_eligible"] is False
 
 
 @pytest.mark.quick
@@ -3575,6 +3710,45 @@ def test_closed_archive_recovery_without_directories_is_empty(
     assert recovered["all_expected_roles_recovered"] is False
 
 
+def _write_image_only_dispatch_artifact_state(
+    root: Path,
+    run_name: str,
+) -> None:
+    """写出与真实child shape一致的默认image-only dispatch状态。"""
+
+    runtime_relative = Path("outputs/image_only_dataset_runtime") / run_name
+    runtime_dir = root / runtime_relative
+    progress_path = runtime_dir / "dataset_runtime_progress.json"
+    calibration_path = runtime_dir / "calibration_protocol_summary.json"
+    dispatch_path = (
+        root
+        / "outputs/scientific_command_execution"
+        / run_name
+        / scientific_workflow.DISPATCH_REPORT_FILE_NAME
+    )
+    dispatch_path.parent.mkdir(parents=True, exist_ok=True)
+    dispatch_path.write_text(
+        json.dumps(
+            {
+                "decision": "pass",
+                "content_strength_candidate_role": "",
+                "artifact_state": {
+                    "content_strength_candidate_role": "",
+                    "runtime_progress_present": progress_path.is_file(),
+                    "runtime_progress_path": (
+                        runtime_relative / "dataset_runtime_progress.json"
+                    ).as_posix(),
+                    "calibration_summary_present": calibration_path.is_file(),
+                    "calibration_summary_path": (
+                        runtime_relative / "calibration_protocol_summary.json"
+                    ).as_posix(),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 @pytest.mark.quick
 def test_partial_closed_archive_recovery_neither_extracts_nor_skips_execution(
     tmp_path: Path,
@@ -3607,6 +3781,7 @@ def test_partial_closed_archive_recovery_neither_extracts_nor_skips_execution(
         ),
         encoding="utf-8",
     )
+    _write_image_only_dispatch_artifact_state(tmp_path, run_name)
     execution_path = tmp_path / "outputs" / "scientific_execution.json"
     execution_path.write_text("{}", encoding="utf-8")
     execution_report = {
@@ -3897,6 +4072,7 @@ def test_colab_image_only_session_reports_persistent_resume(
         json.dumps({"protocol_decision": "pass"}),
         encoding="utf-8",
     )
+    _write_image_only_dispatch_artifact_state(tmp_path, run_name)
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", run_name)
     monkeypatch.setattr(
         scientific_workflow,
@@ -3975,6 +4151,7 @@ def test_colab_image_only_session_mirrors_completed_formal_packages(
         ),
         encoding="utf-8",
     )
+    _write_image_only_dispatch_artifact_state(tmp_path, run_name)
     (runtime_dir / "image_only_dataset_runtime_package_fixture.zip").write_bytes(b"runtime")
     (quality_dir / "dataset_level_quality_package_fixture.zip").write_bytes(b"quality")
     runtime_drive_dir = tmp_path / "drive" / "image_only_dataset_runtime"
@@ -4084,6 +4261,7 @@ def test_formal_ablation_resume_skips_binding_and_packaging(
         ),
         encoding="utf-8",
     )
+    _write_image_only_dispatch_artifact_state(tmp_path, run_name)
     execution_path = tmp_path / "outputs" / "scientific_execution.json"
     execution_path.write_text("{}", encoding="utf-8")
     execution_report = {

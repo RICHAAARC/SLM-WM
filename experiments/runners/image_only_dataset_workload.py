@@ -37,6 +37,7 @@ from experiments.protocol.content_routing_reference_registry import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
+_CONTENT_STRENGTH_COMMON_MULTIPLIERS = (0.75, 1.0, 1.25)
 
 
 def build_method_config(
@@ -161,6 +162,31 @@ def run_image_only_dataset_workload(
         expected_registry_digest=expected_registry_digest,
         expected_file_sha256=expected_registry_file_sha256,
     )
+    content_sensitivity_token = os.environ.get(
+        "SLM_WM_CALIBRATION_CONTENT_STRENGTH_SENSITIVITY"
+    )
+    if content_sensitivity_token not in (None, "1"):
+        raise ValueError(
+            "SLM_WM_CALIBRATION_CONTENT_STRENGTH_SENSITIVITY must be absent or 1"
+        )
+    calibration_content_strength_sensitivity = (
+        content_sensitivity_token == "1"
+    )
+    try:
+        content_strength_common_multiplier = float(
+            os.environ.get("SLM_WM_CONTENT_STRENGTH_COMMON_MULTIPLIER", "1.0")
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "SLM_WM_CONTENT_STRENGTH_COMMON_MULTIPLIER must be numeric"
+        ) from exc
+    if calibration_content_strength_sensitivity:
+        if content_strength_common_multiplier not in (
+            _CONTENT_STRENGTH_COMMON_MULTIPLIERS
+        ):
+            raise ValueError("content strength sensitivity requires 0.75, 1.0, or 1.25")
+    elif content_strength_common_multiplier != 1.0:
+        raise ValueError("default production requires content multiplier 1.0")
     paper_run = build_paper_run_config(root_path)
     summary = run_image_only_dataset_runtime(
         build_method_config(root_path),
@@ -171,6 +197,12 @@ def run_image_only_dataset_workload(
         ),
         content_routing_references=references,
         calibration_only=(os.environ.get("SLM_WM_CALIBRATION_ONLY") == "1"),
+        content_strength_common_multiplier=(
+            content_strength_common_multiplier
+        ),
+        calibration_content_strength_sensitivity=(
+            calibration_content_strength_sensitivity
+        ),
         content_routing_reference_registry_digest=expected_registry_digest,
         content_routing_reference_registry_file_sha256=(
             expected_registry_file_sha256

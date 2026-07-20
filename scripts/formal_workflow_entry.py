@@ -117,21 +117,153 @@ def _write_result(root: Path, result_path: str | Path, payload: dict[str, Any]) 
 def _gpu_result(arguments: argparse.Namespace, root: Path) -> dict[str, Any]:
     """调用能够自行完成环境配置的独立 GPU 服务器 workflow."""
 
-    return run_workflow(
-        arguments.workflow,
-        arguments.paper_run_name,
-        arguments.repository_commit,
-        root,
-        arguments.persistent_output_dir or None,
-        randomization_repeat_id=(arguments.randomization_repeat_id or None),
-        calibration_only=arguments.calibration_only,
-        expected_reference_registry_digest=(
-            arguments.expected_reference_registry_digest
-        ),
-        expected_reference_registry_file_sha256=(
-            arguments.expected_reference_registry_file_sha256
-        ),
+    multipliers = (
+        (0.75, 1.0, 1.25)
+        if getattr(
+            arguments, "calibration_content_strength_sensitivity", False
+        )
+        else (1.0,)
     )
+    calibration_content_strength_sensitivity = bool(
+        getattr(arguments, "calibration_content_strength_sensitivity", False)
+    )
+    if calibration_content_strength_sensitivity and (
+        arguments.workflow != "image_only_dataset"
+        or not arguments.calibration_only
+        or not arguments.persistent_output_dir
+    ):
+        raise ValueError(
+            "content strength sensitivity requires image_only calibration-only and persistent root"
+        )
+    results: list[dict[str, Any]] = []
+    for multiplier in multipliers:
+        persistent_root = arguments.persistent_output_dir or None
+        if persistent_root is not None and len(multipliers) == 3:
+            token = {0.75: "content_strength_075", 1.0: "content_strength_100", 1.25: "content_strength_125"}[multiplier]
+            persistent_root = str(Path(persistent_root) / token)
+        results.append(
+            run_workflow(
+                arguments.workflow,
+                arguments.paper_run_name,
+                arguments.repository_commit,
+                root,
+                persistent_root,
+                randomization_repeat_id=(
+                    arguments.randomization_repeat_id or None
+                ),
+                calibration_only=arguments.calibration_only,
+                expected_reference_registry_digest=(
+                    arguments.expected_reference_registry_digest
+                ),
+                expected_reference_registry_file_sha256=(
+                    arguments.expected_reference_registry_file_sha256
+                ),
+                content_strength_common_multiplier=multiplier,
+                calibration_content_strength_sensitivity=(
+                    calibration_content_strength_sensitivity
+                ),
+            )
+        )
+    if len(results) == 1:
+        return results[0]
+    candidate_summaries: list[dict[str, Any]] = []
+    candidate_roles = (
+        "content_strength_075",
+        "content_strength_100",
+        "content_strength_125",
+    )
+    for result, multiplier, candidate_role in zip(
+        results,
+        multipliers,
+        candidate_roles,
+        strict=True,
+    ):
+        session = result.get("workflow_summary")
+        if (
+            type(session) is not dict
+            or session.get("workflow_decision") != "calibration_complete"
+            or session.get("workflow_completion_state")
+            != "calibration_complete"
+            or session.get("content_strength_candidate_role") != candidate_role
+        ):
+            raise RuntimeError(
+                "content strength sensitivity session identity is incomplete"
+            )
+        calibration_summary = session.get("calibration_protocol_summary")
+        if (
+            type(calibration_summary) is not dict
+            or type(
+                calibration_summary.get("content_strength_common_multiplier")
+            )
+            is not float
+            or calibration_summary["content_strength_common_multiplier"]
+            != multiplier
+        ):
+            raise RuntimeError(
+                "content strength sensitivity calibration summary is incomplete"
+            )
+        candidate_summaries.append(calibration_summary)
+    if [
+        summary.get("content_strength_common_multiplier")
+        for summary in candidate_summaries
+    ] != [0.75, 1.0, 1.25] or any(
+        summary.get("protocol_decision") != "calibration_complete"
+        or summary.get("calibration_detection_record_count") != 33
+        or summary.get("test_prompt_execution_count") != 0
+        or summary.get("attack_execution_count") != 0
+        or type(summary.get("candidate_qualification_compatible")) is not bool
+        for summary in candidate_summaries
+    ):
+        raise RuntimeError("content strength sensitivity candidates are incomplete")
+    for multiplier, summary in zip(
+        (0.75, 1.0, 1.25),
+        candidate_summaries,
+        strict=True,
+    ):
+        expected_eligible = bool(
+            multiplier == 1.0
+            and summary["candidate_qualification_compatible"] is True
+        )
+        if summary.get("formal_parameter_selection_eligible") is not (
+            expected_eligible
+        ):
+            raise RuntimeError(
+                "only compatible nominal candidate may be selection eligible"
+            )
+    nominal_summary = candidate_summaries[1]
+    nominal_ready = bool(
+        nominal_summary.get("candidate_qualification_compatible") is True
+        and nominal_summary.get("formal_parameter_selection_eligible") is True
+    )
+    aggregate_summary = {
+        "workflow_completion_state": "content_strength_sensitivity_complete",
+        "protocol_decision": (
+            "nominal_reference_qualification_compatible"
+            if nominal_ready
+            else "science_blocked"
+        ),
+        "candidate_order": [0.75, 1.0, 1.25],
+        "candidate_summaries": candidate_summaries,
+        "all_candidate_execution_count": 3,
+        "all_calibration_prompt_execution_count": 99,
+        "test_prompt_execution_count": 0,
+        "attack_execution_count": 0,
+        "selected_content_strength_common_multiplier": (
+            1.0 if nominal_ready else None
+        ),
+        "non_nominal_candidates_descriptive_only": True,
+        "supports_paper_claim": False,
+    }
+    return {
+        **results[-1],
+        "workflow_summary": aggregate_summary,
+        "workflow_environment": {
+            **dict(results[-1].get("workflow_environment", {})),
+            "calibration_content_strength_sensitivity": True,
+            "content_strength_candidate_order": [0.75, 1.0, 1.25],
+        },
+        "archive_record": None,
+    }
 
 
 def execute(arguments: argparse.Namespace) -> dict[str, Any]:
@@ -345,6 +477,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workflow", choices=tuple(WORKFLOW_ROUTES))
     parser.add_argument("--persistent-output-dir", default="")
     parser.add_argument("--calibration-only", action="store_true")
+    parser.add_argument(
+        "--calibration-content-strength-sensitivity", action="store_true"
+    )
     parser.add_argument("--package-search-root", default="")
     parser.add_argument("--randomization-repeat-id", default="")
     parser.add_argument("--prompt-id", default="")
@@ -390,6 +525,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 and arguments.randomization_repeat_id
             ):
                 raise ValueError("跨 repeat 不变 GPU 入口不得提供 repeat ID")
+            if arguments.calibration_content_strength_sensitivity and (
+                arguments.workflow != "image_only_dataset"
+                or not arguments.calibration_only
+            ):
+                raise ValueError(
+                    "content strength sensitivity is valid only for image_only calibration-only"
+                )
         if (
             arguments.operation == "repeat_evidence"
             and (

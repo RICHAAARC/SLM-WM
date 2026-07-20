@@ -131,6 +131,7 @@ def test_child_command_covers_gpu_and_cpu_closure_routes(tmp_path: Path) -> None
         "complete_output_dir": "",
         "dry_run": False,
         "calibration_only": False,
+        "calibration_content_strength_sensitivity": False,
         "expected_reference_registry_digest": "1" * 64,
         "expected_reference_registry_file_sha256": "2" * 64,
     }
@@ -184,6 +185,57 @@ def test_child_command_covers_gpu_and_cpu_closure_routes(tmp_path: Path) -> None
     assert "--package-search-root" in repeat_evidence_command
     assert "--randomization-repeat-id" in repeat_evidence_command
     assert "--complete-output-dir" not in repeat_evidence_command
+
+
+@pytest.mark.quick
+def test_child_command_forwards_only_official_calibration_sensitivity(
+    tmp_path: Path,
+) -> None:
+    """宿主只向image-only calibration子入口传递私有三候选开关。"""
+
+    python_executable = tmp_path / "python"
+    arguments = argparse.Namespace(
+        root=".",
+        repository_commit="a" * 40,
+        paper_run_name="probe_paper",
+        result_path="outputs/result.json",
+        persistent_output_dir=str(tmp_path / "persistent"),
+        package_search_root="",
+        complete_output_dir="",
+        dry_run=False,
+        calibration_only=True,
+        calibration_content_strength_sensitivity=True,
+        expected_reference_registry_digest="1" * 64,
+        expected_reference_registry_file_sha256="2" * 64,
+        randomization_repeat_id="seed_00_key_00",
+        operation="gpu",
+        workflow="image_only_dataset",
+    )
+    bootstrap_identity = {
+        "profile_id": "workflow_orchestrator",
+        "python_version": "3.12.13",
+        "complete_hash_lock_digest": "b" * 64,
+        "python_executable": str(python_executable),
+        "python_executable_sha256": "c" * 64,
+    }
+
+    command = host_launcher.build_child_command(
+        arguments,
+        python_executable,
+        Path("/repository"),
+        bootstrap_identity,
+    )
+
+    assert command.count("--calibration-content-strength-sensitivity") == 1
+    arguments.workflow = "external_baseline_tree_ring"
+    arguments.persistent_output_dir = ""
+    with pytest.raises(host_launcher.FormalWorkflowHostError):
+        host_launcher.build_child_command(
+            arguments,
+            python_executable,
+            Path("/repository"),
+            bootstrap_identity,
+        )
 
 
 @pytest.mark.quick

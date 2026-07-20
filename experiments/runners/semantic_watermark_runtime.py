@@ -585,6 +585,35 @@ def _require_full_content_runtime_config(
         )
 
 
+def _require_calibration_content_strength_multiplier(
+    config: SemanticWatermarkRuntimeConfig,
+    *,
+    content_strength_common_multiplier: float,
+    calibration_content_strength_sensitivity: bool,
+) -> None:
+    """只允许正式 calibration-only 路由显式改变内容共同倍率。"""
+
+    if type(calibration_content_strength_sensitivity) is not bool:
+        raise TypeError(
+            "calibration_content_strength_sensitivity must be an exact bool"
+        )
+    if type(content_strength_common_multiplier) is not float:
+        raise TypeError("content_strength_common_multiplier must be an exact float")
+    if not calibration_content_strength_sensitivity:
+        if content_strength_common_multiplier != 1.0:
+            raise ValueError("默认正式 runtime 只允许名义内容倍率 1.0")
+        return
+    if (
+        config.split != "calibration"
+        or config.standard_attack_profiles
+        or config.diffusion_attacks_enabled
+        or content_strength_common_multiplier not in (0.75, 1.0, 1.25)
+    ):
+        raise ValueError(
+            "内容共同倍率敏感性只允许 calibration split 的精确三候选且不得运行攻击"
+        )
+
+
 @dataclass(frozen=True)
 class SemanticWatermarkRuntimeResult:
     """保存真实嵌入、图像输出和仅图像检测摘要。"""
@@ -746,6 +775,7 @@ def _run_content_runtime_generation(
     *,
     components: _ContentRuntimeSmokeComponents,
     include_clean: bool,
+    content_strength_common_multiplier: float = 1.0,
 ) -> tuple[Any | None, Any, dict[str, Any]]:
     """以既有正式组件运行 clean 与索引10单写回生成。"""
 
@@ -861,6 +891,9 @@ def _run_content_runtime_generation(
             lf_template=lf_template,
             hf_tail_template=hf_template,
             method_role="full_dual_chain",
+            content_strength_common_multiplier=(
+                content_strength_common_multiplier
+            ),
         )
         transformer_forward = _transformer_forward_function(
             pipe,
@@ -961,6 +994,13 @@ def _run_content_runtime_generation(
             ),
             "actual_dtype_single_write_count": actual_dtype_single_write_count,
             "common_gamma": write_result.accepted_common_scale,
+            "content_strength_common_multiplier": (
+                content_strength_common_multiplier
+            ),
+            "lf_nominal_strength": content_update.lf_nominal_strength,
+            "hf_tail_nominal_strength": (
+                content_update.hf_tail_nominal_strength
+            ),
             "lf_effective_l2": write_result.lf_effective_l2,
             "hf_tail_effective_l2": write_result.hf_tail_effective_l2,
             "geometry_effective_l2": write_result.geometry_effective_l2,
@@ -6021,13 +6061,15 @@ def _legacy_semantic_watermark_runtime(
     )
 
 
-def run_semantic_watermark_runtime(
+def _run_semantic_watermark_runtime_with_content_strength(
     config: SemanticWatermarkRuntimeConfig,
     *,
     references: ContentRoutingReferenceScalars,
     verified_formal_execution_lock: Mapping[str, Any],
     repository_root: str | Path,
     runtime_context: SemanticWatermarkRuntimeContext | None = None,
+    content_strength_common_multiplier: float,
+    calibration_content_strength_sensitivity: bool,
 ) -> tuple[
     SemanticWatermarkRuntimeResult,
     tuple[dict[str, Any], ...],
@@ -6041,6 +6083,13 @@ def run_semantic_watermark_runtime(
     """执行正式索引10单写回生成与仅图像盲检测。"""
 
     _require_full_content_runtime_config(config)
+    _require_calibration_content_strength_multiplier(
+        config,
+        content_strength_common_multiplier=content_strength_common_multiplier,
+        calibration_content_strength_sensitivity=(
+            calibration_content_strength_sensitivity
+        ),
+    )
     import torch
 
     if type(config) is not SemanticWatermarkRuntimeConfig:
@@ -6089,6 +6138,9 @@ def run_semantic_watermark_runtime(
             references,
             components=components,
             include_clean=True,
+            content_strength_common_multiplier=(
+                content_strength_common_multiplier
+            ),
         )
     )
     if clean_image is None:
@@ -6183,6 +6235,11 @@ def run_semantic_watermark_runtime(
             "combined_effective_l2_ready"
         ],
         "common_gamma": diagnostic["common_gamma"],
+        "content_strength_common_multiplier": diagnostic[
+            "content_strength_common_multiplier"
+        ],
+        "lf_nominal_strength": diagnostic["lf_nominal_strength"],
+        "hf_tail_nominal_strength": diagnostic["hf_tail_nominal_strength"],
         "content_only_postwrite_qk_score": diagnostic[
             "content_only_postwrite_qk_score"
         ],
@@ -6306,13 +6363,45 @@ def run_semantic_watermark_runtime(
     )
 
 
-def write_semantic_watermark_runtime_outputs(
+def run_semantic_watermark_runtime(
+    config: SemanticWatermarkRuntimeConfig,
+    *,
+    references: ContentRoutingReferenceScalars,
+    verified_formal_execution_lock: Mapping[str, Any],
+    repository_root: str | Path,
+    runtime_context: SemanticWatermarkRuntimeContext | None = None,
+) -> tuple[
+    SemanticWatermarkRuntimeResult,
+    tuple[dict[str, Any], ...],
+    tuple[dict[str, Any], ...],
+    tuple[dict[str, Any], ...],
+    Any,
+    Any,
+    Any | None,
+    dict[str, Any],
+]:
+    """以名义内容强度执行公开正式索引10单写回与盲检测。"""
+
+    return _run_semantic_watermark_runtime_with_content_strength(
+        config,
+        references=references,
+        verified_formal_execution_lock=verified_formal_execution_lock,
+        repository_root=repository_root,
+        runtime_context=runtime_context,
+        content_strength_common_multiplier=1.0,
+        calibration_content_strength_sensitivity=False,
+    )
+
+
+def _write_semantic_watermark_runtime_outputs_with_content_strength(
     config: SemanticWatermarkRuntimeConfig,
     root: str | Path = ".",
     *,
     references: ContentRoutingReferenceScalars,
     verified_formal_execution_lock: Mapping[str, Any],
     runtime_context: SemanticWatermarkRuntimeContext | None = None,
+    content_strength_common_multiplier: float,
+    calibration_content_strength_sensitivity: bool,
 ) -> SemanticWatermarkRuntimeResult:
     """运行真实方法并把全部持久化产物写入 outputs。"""
 
@@ -6332,12 +6421,16 @@ def write_semantic_watermark_runtime_outputs(
         watermarked_image,
         carrier_only_image,
         attacked_images,
-    ) = run_semantic_watermark_runtime(
+    ) = _run_semantic_watermark_runtime_with_content_strength(
         config,
         references=references,
         verified_formal_execution_lock=verified_formal_execution_lock,
         repository_root=root_path,
         runtime_context=runtime_context,
+        content_strength_common_multiplier=content_strength_common_multiplier,
+        calibration_content_strength_sensitivity=(
+            calibration_content_strength_sensitivity
+        ),
     )
     detection_key_plan = build_detection_key_plan_record(
         config.key_material
@@ -6527,3 +6620,24 @@ def write_semantic_watermark_runtime_outputs(
             paper_run_name=output_parts[2],
         )
     return resolved_result
+
+
+def write_semantic_watermark_runtime_outputs(
+    config: SemanticWatermarkRuntimeConfig,
+    root: str | Path = ".",
+    *,
+    references: ContentRoutingReferenceScalars,
+    verified_formal_execution_lock: Mapping[str, Any],
+    runtime_context: SemanticWatermarkRuntimeContext | None = None,
+) -> SemanticWatermarkRuntimeResult:
+    """仅以名义内容强度运行公开正式方法并写入 outputs。"""
+
+    return _write_semantic_watermark_runtime_outputs_with_content_strength(
+        config,
+        root=root,
+        references=references,
+        verified_formal_execution_lock=verified_formal_execution_lock,
+        runtime_context=runtime_context,
+        content_strength_common_multiplier=1.0,
+        calibration_content_strength_sensitivity=False,
+    )
