@@ -27,6 +27,8 @@ from experiments.runtime.scientific_content_binding import (
     canonical_rgb_uint8_content_record,
 )
 from main.core.digest import build_stable_digest, tensor_content_sha256
+from main.methods.carrier.content_update import ContentCarrierUpdateResult
+from main.methods.geometry import sync_update as geometry_sync_update
 from scripts import run_content_survival_observation as observation_cli
 from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
@@ -36,6 +38,48 @@ pytestmark = pytest.mark.quick
 
 def _loaded_protocol() -> protocol.ContentSurvivalObservationProtocol:
     return protocol.load_content_survival_observation_protocol(Path("."))
+
+
+@pytest.mark.parametrize(
+    ("carrier_mode", "expected_role", "lf_active", "hf_active"),
+    (
+        ("lf_only", "lf_only_content", True, False),
+        ("hf_only", "hf_tail_only_content", False, True),
+        ("dual", "uniform_content_routing", True, True),
+    ),
+)
+def test_carrier_ablation_preserves_nominal_strength_for_geometry_sync(
+    carrier_mode: str,
+    expected_role: str,
+    lf_active: bool,
+    hf_active: bool,
+) -> None:
+    """单载体消融只停用更新，不把正式名义强度伪装为零。"""
+
+    z10 = torch.ones((1, 4, 2, 2), dtype=torch.float32)
+    lf_update = torch.full_like(z10, 1.0e-4)
+    hf_update = torch.full_like(z10, -5.0e-5)
+    source = ContentCarrierUpdateResult(
+        geometry_capacity_map=torch.full((1, 1, 2, 2), 0.5),
+        lf_direction=torch.ones_like(z10),
+        hf_tail_direction=torch.ones_like(z10),
+        lf_update=lf_update,
+        hf_tail_update=hf_update,
+        content_only_latent_float32=z10 + lf_update + hf_update,
+        latent_l2=float(torch.linalg.vector_norm(z10.reshape(-1)).item()),
+        lf_nominal_strength=0.01,
+        hf_tail_nominal_strength=0.006,
+        method_role="uniform_content_routing",
+    )
+
+    restricted = runtime._restrict_content_update(source, carrier_mode, z10)
+
+    assert restricted.method_role == expected_role
+    assert restricted.lf_nominal_strength == source.lf_nominal_strength
+    assert restricted.hf_tail_nominal_strength == source.hf_tail_nominal_strength
+    assert bool(torch.count_nonzero(restricted.lf_update)) is lf_active
+    assert bool(torch.count_nonzero(restricted.hf_tail_update)) is hf_active
+    geometry_sync_update._validate_content_update_formula(z10, restricted)
 
 
 def _execution_identity(character: str = "3") -> dict[str, object]:

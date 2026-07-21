@@ -236,11 +236,14 @@ def _restrict_content_update(content_update: Any, carrier_mode: str, z10: Any) -
         lf_update=lf_update,
         hf_tail_update=hf_update,
         content_only_latent_float32=z10.detach().float() + lf_update + hf_update,
-        lf_nominal_strength=(
-            content_update.lf_nominal_strength if carrier_mode != "hf_only" else 0.0
-        ),
-        hf_tail_nominal_strength=(
-            content_update.hf_tail_nominal_strength if carrier_mode != "lf_only" else 0.0
+        method_role=(
+            "lf_only_content"
+            if carrier_mode == "lf_only"
+            else (
+                "hf_tail_only_content"
+                if carrier_mode == "hf_only"
+                else content_update.method_role
+            )
         ),
     )
 
