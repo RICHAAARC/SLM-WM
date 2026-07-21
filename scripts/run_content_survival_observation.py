@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from dataclasses import replace
 import hashlib
 import json
@@ -35,9 +36,31 @@ from experiments.runners.content_survival_observation_runtime import (
     run_content_survival_observation,
 )
 from experiments.runners.image_only_dataset_workload import build_method_config
+from experiments.runtime.dependency_profiles import (
+    WORKFLOW_ORCHESTRATOR_PROFILE_ID,
+    require_dependency_profile_ready,
+)
 from experiments.runtime.repository_environment import (
     build_runtime_environment_report,
     require_published_formal_execution_lock,
+)
+from main.core.digest import build_stable_digest
+
+
+_ORCHESTRATOR_INSPECTION_FIELDS = frozenset(
+    {
+        "profile_name",
+        "profile_digest",
+        "complete_hash_lock_digest",
+        "profile_formal_ready",
+        "expected_environment",
+        "observed_environment",
+        "environment_match",
+        "mismatches",
+        "readiness_blockers",
+        "decision",
+        "inspection_digest",
+    }
 )
 
 
@@ -107,6 +130,143 @@ def _prompt_configs(root: Path) -> dict[str, object]:
     return configs
 
 
+def _dependency_report_object_digest(value: Mapping[str, object]) -> str:
+    """Rebuild the byte digest used by the formal dependency report writer."""
+
+    report_bytes = (
+        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    return hashlib.sha256(report_bytes).hexdigest()
+
+
+def _validated_orchestrator_report_identity(
+    root: Path,
+    dependency_report: Mapping[str, object],
+    formal_execution_lock: Mapping[str, object],
+    scientific_runtime_report: Mapping[str, object],
+) -> dict[str, str]:
+    """Read the verified orchestrator identity from the nested provision report."""
+
+    scientific_expected = {
+        "profile_id": scientific_runtime_report.get("dependency_profile_id"),
+        "profile_digest": scientific_runtime_report.get("dependency_profile_digest"),
+        "direct_requirements_digest": scientific_runtime_report.get(
+            "direct_requirements_digest"
+        ),
+        "complete_hash_lock_digest": scientific_runtime_report.get(
+            "complete_hash_lock_digest"
+        ),
+        "complete_hash_lock_dependency_count": scientific_runtime_report.get(
+            "complete_hash_lock_dependency_count"
+        ),
+    }
+    if any(
+        dependency_report.get(field) != expected
+        for field, expected in scientific_expected.items()
+    ):
+        raise RuntimeError("scientific dependency report identity drifted")
+    if any(
+        (
+            dependency_report.get("formal_execution_lock")
+            != dict(formal_execution_lock),
+            dependency_report.get("formal_execution_commit")
+            != formal_execution_lock.get("formal_execution_commit"),
+            dependency_report.get("formal_execution_lock_digest")
+            != formal_execution_lock.get("formal_execution_lock_digest"),
+            dependency_report.get("formal_execution_lock_ready") is not True,
+        )
+    ):
+        raise RuntimeError("scientific dependency report formal lock drifted")
+
+    provision_report = dependency_report.get("provision_report")
+    if type(provision_report) is not dict:
+        raise RuntimeError("scientific dependency provision identity is absent")
+    provision_digest = dependency_report.get("provision_report_digest")
+    if (
+        type(provision_digest) is not str
+        or provision_digest != _dependency_report_object_digest(provision_report)
+    ):
+        raise RuntimeError("scientific dependency provision digest drifted")
+    provision_expected = {
+        "report_schema": "isolated_dependency_python_provision_report",
+        "schema_version": 1,
+        "operation_kind": "isolated_python_provision",
+        "profile_id": dependency_report.get("profile_id"),
+        "profile_digest": dependency_report.get("profile_digest"),
+        "formal_execution_lock": dict(formal_execution_lock),
+        "formal_execution_commit": formal_execution_lock.get(
+            "formal_execution_commit"
+        ),
+        "formal_execution_lock_digest": formal_execution_lock.get(
+            "formal_execution_lock_digest"
+        ),
+        "formal_execution_lock_ready": True,
+        "provisioned": True,
+        "formal_ready": False,
+        "decision": "provisioned",
+        "failure_reasons": [],
+        "supports_paper_claim": False,
+    }
+    if any(
+        provision_report.get(field) != expected
+        for field, expected in provision_expected.items()
+    ):
+        raise RuntimeError("scientific dependency provision identity drifted")
+
+    orchestrator = require_dependency_profile_ready(
+        WORKFLOW_ORCHESTRATOR_PROFILE_ID,
+        root / "configs" / "dependency_profile_registry.json",
+    )
+    if any(
+        (
+            provision_report.get("orchestrator_profile_digest")
+            != orchestrator.profile_digest,
+            provision_report.get("orchestrator_complete_hash_lock_digest")
+            != orchestrator.complete_hash_lock_digest,
+        )
+    ):
+        raise RuntimeError("orchestrator provision identity drifted")
+    orchestrator_inspection = provision_report.get("orchestrator_inspection")
+    if type(orchestrator_inspection) is not dict:
+        raise RuntimeError("orchestrator inspection identity is absent")
+    if set(orchestrator_inspection) != _ORCHESTRATOR_INSPECTION_FIELDS:
+        raise RuntimeError("orchestrator inspection schema drifted")
+    inspection_digest = orchestrator_inspection.get("inspection_digest")
+    inspection_payload = {
+        field: value
+        for field, value in orchestrator_inspection.items()
+        if field != "inspection_digest"
+    }
+    if (
+        type(inspection_digest) is not str
+        or inspection_digest != build_stable_digest(inspection_payload)
+    ):
+        raise RuntimeError("orchestrator inspection digest drifted")
+    if any(
+        (
+            orchestrator_inspection.get("profile_name")
+            != WORKFLOW_ORCHESTRATOR_PROFILE_ID,
+            orchestrator_inspection.get("profile_digest")
+            != orchestrator.profile_digest,
+            orchestrator_inspection.get("complete_hash_lock_digest")
+            != orchestrator.complete_hash_lock_digest,
+            orchestrator_inspection.get("profile_formal_ready") is not True,
+            orchestrator_inspection.get("environment_match") is not True,
+            orchestrator_inspection.get("mismatches") != [],
+            orchestrator_inspection.get("readiness_blockers") != [],
+            orchestrator_inspection.get("decision") != "pass",
+        )
+    ):
+        raise RuntimeError("orchestrator inspection readiness drifted")
+    return {
+        "orchestrator_profile_digest": orchestrator.profile_digest,
+        "orchestrator_complete_hash_lock_digest": str(
+            orchestrator.complete_hash_lock_digest
+        ),
+        "orchestrator_inspection_digest": inspection_digest,
+    }
+
+
 def _execution_environment_identity(
     root: Path,
     formal_execution_lock: dict[str, object],
@@ -128,20 +288,17 @@ def _execution_environment_identity(
     if dependency_digest != context["dependency_environment_report_actual_digest"]:
         raise RuntimeError("scientific dependency report digest drifted")
     dependency_report = json.loads(dependency_bytes.decode("utf-8"))
-    orchestrator_inspection = dependency_report.get("orchestrator_inspection")
-    if type(orchestrator_inspection) is not dict:
-        raise RuntimeError("orchestrator inspection identity is absent")
+    if type(dependency_report) is not dict:
+        raise RuntimeError("scientific dependency report is not an object")
+    orchestrator_identity = _validated_orchestrator_report_identity(
+        root,
+        dependency_report,
+        formal_execution_lock,
+        report,
+    )
     return build_content_survival_execution_environment_identity(
         {
-            "orchestrator_profile_digest": dependency_report[
-                "orchestrator_profile_digest"
-            ],
-            "orchestrator_complete_hash_lock_digest": dependency_report[
-                "orchestrator_complete_hash_lock_digest"
-            ],
-            "orchestrator_inspection_digest": orchestrator_inspection[
-                "inspection_digest"
-            ],
+            **orchestrator_identity,
             "scientific_profile_id": report["dependency_profile_id"],
             "scientific_profile_digest": report["dependency_profile_digest"],
             "scientific_direct_requirements_digest": report[

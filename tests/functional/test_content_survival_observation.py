@@ -27,6 +27,7 @@ from experiments.runtime.scientific_content_binding import (
     canonical_rgb_uint8_content_record,
 )
 from main.core.digest import build_stable_digest, tensor_content_sha256
+from scripts import run_content_survival_observation as observation_cli
 from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
@@ -51,6 +52,291 @@ def _execution_identity(character: str = "3") -> dict[str, object]:
             "scientific_python_executable_sha256": "a" * 64,
         }
     )
+
+
+def _dependency_environment_fixture(
+    tmp_path: Path,
+    formal_lock: dict[str, object],
+) -> tuple[Path, dict[str, object], dict[str, object]]:
+    """Build the minimal sanitized shape observed in the formal failed archive."""
+
+    orchestrator = observation_cli.require_dependency_profile_ready(
+        observation_cli.WORKFLOW_ORCHESTRATOR_PROFILE_ID,
+        Path("configs/dependency_profile_registry.json"),
+    )
+    expected_environment = {
+        "python_implementation": "CPython",
+        "python_version": "3.12.13",
+        "operating_system": "linux",
+        "machine": "x86_64",
+        "accelerator_runtime": "cpu",
+        "cuda_version": None,
+        "torch_version": None,
+        "torchvision_version": None,
+        "direct_dependencies": {"uv": "0.11.28"},
+        "locked_dependencies": {"uv": "0.11.28"},
+    }
+    observed_environment = {
+        "python_implementation": "CPython",
+        "python_version": "3.12.13",
+        "operating_system": "linux",
+        "machine": "x86_64",
+        "torch_module_available": None,
+        "torch_module_version": None,
+        "torch_cuda_version": None,
+        "cuda_available": None,
+        "direct_dependencies": {"uv": "0.11.28"},
+        "locked_dependencies": {"uv": "0.11.28"},
+    }
+    inspection = {
+        "profile_name": observation_cli.WORKFLOW_ORCHESTRATOR_PROFILE_ID,
+        "profile_digest": orchestrator.profile_digest,
+        "complete_hash_lock_digest": orchestrator.complete_hash_lock_digest,
+        "profile_formal_ready": True,
+        "expected_environment": expected_environment,
+        "observed_environment": observed_environment,
+        "environment_match": True,
+        "mismatches": [],
+        "readiness_blockers": [],
+        "decision": "pass",
+    }
+    inspection["inspection_digest"] = build_stable_digest(inspection)
+    scientific_profile = {
+        "profile_id": "sd35_method_runtime_gpu",
+        "profile_digest": "6" * 64,
+        "direct_requirements_digest": "7" * 64,
+        "complete_hash_lock_digest": "8" * 64,
+        "complete_hash_lock_dependency_count": 70,
+    }
+    provision_report = {
+        "report_schema": "isolated_dependency_python_provision_report",
+        "schema_version": 1,
+        "operation_kind": "isolated_python_provision",
+        "profile_id": scientific_profile["profile_id"],
+        "profile_digest": scientific_profile["profile_digest"],
+        "formal_execution_lock": formal_lock,
+        "formal_execution_commit": formal_lock["formal_execution_commit"],
+        "formal_execution_lock_digest": formal_lock[
+            "formal_execution_lock_digest"
+        ],
+        "formal_execution_lock_ready": True,
+        "provisioned": True,
+        "formal_ready": False,
+        "decision": "provisioned",
+        "failure_reasons": [],
+        "supports_paper_claim": False,
+        "orchestrator_profile_digest": orchestrator.profile_digest,
+        "orchestrator_complete_hash_lock_digest": (
+            orchestrator.complete_hash_lock_digest
+        ),
+        "orchestrator_inspection": inspection,
+    }
+    dependency_report = {
+        "report_schema": "isolated_dependency_environment_preparation_report",
+        "schema_version": 1,
+        "operation_kind": "formal_dependency_environment_preparation",
+        **scientific_profile,
+        "formal_execution_lock": formal_lock,
+        "formal_execution_commit": formal_lock["formal_execution_commit"],
+        "formal_execution_lock_digest": formal_lock[
+            "formal_execution_lock_digest"
+        ],
+        "formal_execution_lock_ready": True,
+        "provision_report": provision_report,
+        "provision_report_digest": observation_cli._dependency_report_object_digest(
+            provision_report
+        ),
+    }
+    dependency_path = tmp_path / "isolated_dependency_environment_report.json"
+    dependency_path.write_text(
+        json.dumps(dependency_report, ensure_ascii=False, indent=2, sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
+    runtime_report = {
+        "dependency_environment_ready": True,
+        "isolated_scientific_context_ready": True,
+        "dependency_profile_id": scientific_profile["profile_id"],
+        "dependency_profile_digest": scientific_profile["profile_digest"],
+        "direct_requirements_digest": scientific_profile[
+            "direct_requirements_digest"
+        ],
+        "complete_hash_lock_digest": scientific_profile[
+            "complete_hash_lock_digest"
+        ],
+        "complete_hash_lock_dependency_count": scientific_profile[
+            "complete_hash_lock_dependency_count"
+        ],
+        "isolated_scientific_context": {
+            "dependency_environment_report_path": str(dependency_path),
+            "dependency_environment_report_actual_digest": hashlib.sha256(
+                dependency_path.read_bytes()
+            ).hexdigest(),
+            "reported_python_executable_sha256": "a" * 64,
+        },
+    }
+    return dependency_path, dependency_report, runtime_report
+
+
+def _rewrite_dependency_environment_fixture(
+    dependency_path: Path,
+    dependency_report: dict[str, object],
+    runtime_report: dict[str, object],
+) -> None:
+    dependency_path.write_text(
+        json.dumps(dependency_report, ensure_ascii=False, indent=2, sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
+    context = runtime_report["isolated_scientific_context"]
+    assert isinstance(context, dict)
+    context["dependency_environment_report_actual_digest"] = hashlib.sha256(
+        dependency_path.read_bytes()
+    ).hexdigest()
+
+
+def test_cli_binds_nested_orchestrator_identity_from_formal_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    formal_lock = build_test_formal_execution_lock("b" * 40)
+    _, dependency_report, runtime_report = _dependency_environment_fixture(
+        tmp_path,
+        formal_lock,
+    )
+    monkeypatch.setattr(
+        observation_cli,
+        "build_runtime_environment_report",
+        lambda *_args, **_kwargs: runtime_report,
+    )
+    forbidden_calls = {"model": 0, "pipeline": 0}
+
+    def _forbidden_model(*_args, **_kwargs):
+        forbidden_calls["model"] += 1
+        raise AssertionError("environment identity gate loaded the model")
+
+    def _forbidden_pipeline(*_args, **_kwargs):
+        forbidden_calls["pipeline"] += 1
+        raise AssertionError("environment identity gate called the pipeline")
+
+    monkeypatch.setattr(observation_cli, "build_method_config", _forbidden_model)
+    monkeypatch.setattr(
+        observation_cli,
+        "run_content_survival_observation",
+        _forbidden_pipeline,
+    )
+    identity = observation_cli._execution_environment_identity(
+        Path(".").resolve(),
+        formal_lock,
+    )
+    provision = dependency_report["provision_report"]
+    assert isinstance(provision, dict)
+    inspection = provision["orchestrator_inspection"]
+    assert isinstance(inspection, dict)
+    assert identity["orchestrator_profile_digest"] == provision[
+        "orchestrator_profile_digest"
+    ]
+    assert identity["orchestrator_complete_hash_lock_digest"] == provision[
+        "orchestrator_complete_hash_lock_digest"
+    ]
+    assert identity["orchestrator_inspection_digest"] == inspection[
+        "inspection_digest"
+    ]
+    assert identity["scientific_dependency_environment_report_digest"] == (
+        runtime_report["isolated_scientific_context"]
+        ["dependency_environment_report_actual_digest"]
+    )
+    assert forbidden_calls == {"model": 0, "pipeline": 0}
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        ("missing_inspection", "orchestrator inspection identity is absent"),
+        ("inspection_type", "orchestrator inspection identity is absent"),
+        ("inspection_digest", "orchestrator inspection digest drifted"),
+        ("formal_commit", "scientific dependency provision identity drifted"),
+        ("formal_lock", "scientific dependency provision identity drifted"),
+        ("scientific_identity", "scientific dependency report identity drifted"),
+    ),
+)
+def test_cli_rejects_nested_orchestrator_identity_drift_before_model_load(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    message: str,
+) -> None:
+    formal_lock = build_test_formal_execution_lock("b" * 40)
+    dependency_path, dependency_report, runtime_report = (
+        _dependency_environment_fixture(tmp_path, formal_lock)
+    )
+    provision = dependency_report["provision_report"]
+    assert isinstance(provision, dict)
+    inspection = provision["orchestrator_inspection"]
+    assert isinstance(inspection, dict)
+    if mutation == "missing_inspection":
+        del provision["orchestrator_inspection"]
+    elif mutation == "inspection_type":
+        provision["orchestrator_inspection"] = []
+    elif mutation == "inspection_digest":
+        inspection["inspection_digest"] = "0" * 64
+    elif mutation == "formal_commit":
+        provision["formal_execution_commit"] = "c" * 40
+    elif mutation == "formal_lock":
+        provision["formal_execution_lock_digest"] = "0" * 64
+    elif mutation == "scientific_identity":
+        dependency_report["profile_digest"] = "0" * 64
+    else:
+        raise AssertionError("unregistered test mutation")
+    dependency_report["provision_report_digest"] = (
+        observation_cli._dependency_report_object_digest(provision)
+    )
+    _rewrite_dependency_environment_fixture(
+        dependency_path,
+        dependency_report,
+        runtime_report,
+    )
+    monkeypatch.setattr(
+        observation_cli,
+        "build_runtime_environment_report",
+        lambda *_args, **_kwargs: runtime_report,
+    )
+    monkeypatch.setattr(
+        observation_cli,
+        "build_method_config",
+        lambda *_args, **_kwargs: pytest.fail("identity failure loaded the model"),
+    )
+    monkeypatch.setattr(
+        observation_cli,
+        "run_content_survival_observation",
+        lambda *_args, **_kwargs: pytest.fail("identity failure called the pipeline"),
+    )
+    with pytest.raises(RuntimeError, match=message):
+        observation_cli._execution_environment_identity(
+            Path(".").resolve(),
+            formal_lock,
+        )
+
+
+def test_cli_rejects_dependency_report_file_digest_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    formal_lock = build_test_formal_execution_lock("b" * 40)
+    _, _, runtime_report = _dependency_environment_fixture(tmp_path, formal_lock)
+    context = runtime_report["isolated_scientific_context"]
+    assert isinstance(context, dict)
+    context["dependency_environment_report_actual_digest"] = "0" * 64
+    monkeypatch.setattr(
+        observation_cli,
+        "build_runtime_environment_report",
+        lambda *_args, **_kwargs: runtime_report,
+    )
+    with pytest.raises(RuntimeError, match="scientific dependency report digest drifted"):
+        observation_cli._execution_environment_identity(
+            Path(".").resolve(),
+            formal_lock,
+        )
 
 
 def _config(

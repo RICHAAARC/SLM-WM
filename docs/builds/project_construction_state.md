@@ -21,13 +21,13 @@
 | profile 与等价执行文档修订日期 | `2026-07-17` |
 | 攻击证据职责文档修订日期 | `2026-07-17` |
 | 源代码与已审 GPU 证据基线提交 | `db324b7c86a1bef305114fe83db44dfed04fd706` |
-| GitNexus 索引提交 | `db324b7c86a1bef305114fe83db44dfed04fd706` |
-| GitNexus 索引规模 | 21,284 symbols、42,147 relationships、300 execution flows |
-| 当前活动构建单元 | `content_survival_observation_instrumentation`（GPU HOLD 下的 CPU-only 因果定位实现原子） |
-| 下一目标构建单元 | 本原子独立审计；通过后才决定是否授权独立 GPU diagnostic run |
+| GitNexus 索引提交 | `d4bc5b3c3ed366de2d5c2de73297c641980835ad` |
+| GitNexus 索引规模 | 14,688 symbols、32,677 relationships、300 execution flows |
+| 当前活动构建单元 | `content_survival_environment_identity_interface_repair`（GPU 停止状态下的 CPU-only 最小修复） |
+| 下一目标构建单元 | 本修复独立审计；通过后才重新判断是否授权全新 GPU diagnostic run |
 | 受治理解释器 | 仓库 `.venv` 的 CPython 3.12.13 |
-| 默认测试事实 | observation CPU instrumentation 修订原子：等价无捕获命令为 `2308 passed, 82 deselected, 380 warnings`；精确 `.venv/bin/pytest -q` 在收集前触发宿主 capture 临时文件 `FileNotFoundError`，未运行 runtime-heavy GPU integration |
-| 定向协议/cache/约束检查 | observation、content-survival、routing registry、repository environment 与正式 runtime 相关集合为 `218 passed`；新 observation 单集为 `27 passed` |
+| 默认测试事实 | 当前 CPU 身份接口修复：等价无捕获命令为 `2316 passed, 82 deselected, 380 warnings`；精确 `.venv/bin/pytest -q` 在收集前触发宿主 capture 临时文件 `FileNotFoundError`，未运行 runtime-heavy GPU integration |
+| 定向协议/cache/约束检查 | `tests/functional/test_content_survival_observation.py` 为 `35 passed`；真实失败归档的脱敏 schema 及其正式依赖报告摘要通过直接解析，缺字段、错类型、错摘要、错 commit、错 formal lock 与错 scientific identity 均失败关闭 |
 | harness 与格式检查 | 10项 harness 全部通过；`git diff --check` 通过 |
 | 外部源码 qualification | 显式 integration 运行 `6 failed, 0 skipped`；失败均来自4套登记真实源码目录缺失，符合缺源失败关闭边界，不属于默认测试失败 |
 | 工作树说明 | S3 从已独立审计的 `db324b7` 开始；`.codex/config.toml` 是既有范围外 untracked 文件，本原子不得修改或提交；旧 S1 存储归档保持只读 |
@@ -56,6 +56,7 @@
 - 共享 validator 从实际 `.pt`、PNG 与 score bytes 重算三类 latent、canonical RGB 尺寸/摘要、6×3 observation、registered+32 wrong-key 顺序、blind/oracle score identity、rank/percentile/null/margin、四 probe sign 选择、严格 callback role/sign、完整 scheduler/base/run/Prompt/protocol/roster 父身份与 clean sharing；从持久化 chain/observation 重建的父子关系摘要必须同时匹配 result、binding 和 manifest。即使协调改写 record/result/binding/manifest 摘要，只要 tensor 叶子或六链共同身份未同步变化仍会拒绝。summary 只统计经过该 validator 的24个 complete manifest 和4条共享 clean chain。
 - 因候选 M0 的 full/carrier probe direction 与 common gamma 未共享，修订后的记录分别保存 `nominal_pair_unique_difference_ready`、`selector_confounded`、`confounded_reasons` 与 `causal_conclusion_ready`；当前 `selector_confounded=true` 且 `causal_conclusion_ready=false` 是机械边界，不因 nominal pair 单独一致而改变。
 - 所有 bundle、result、manifest 与 record 固定 `diagnostic_only=true`、`supports_paper_claim=false`、`candidate_promotion_allowed=false`、`qualification_evidence=false`。该原子即使 CPU 测试闭合，也只表示 instrumentation 可运行；GPU仍处于 HOLD，旧 S1 archive 继续只读。
+- `d4bc5b3` 的第一次独立 GPU diagnostic run 在模型加载和首个 cell 之前失败关闭：正式依赖环境本身通过，但 CLI 错把嵌套在 `provision_report` 的已验证 orchestrator identity 当作正式环境报告顶层字段读取，触发 `orchestrator inspection identity is absent`。该记录精确为0个 complete cell、0个 partial cell、0条 diffusion chain、0次评分，不是 M0、方法或科学失败，也不是 observation 结果。当前 CPU 修复只把 CLI 对齐到真实 `isolated_dependency_environment_preparation_report -> provision_report -> orchestrator_inspection` schema，并复算 provision/inspection digest、commit 与 formal lock；不修改正式 producer、模型、方法、routing、检测器或 GPU 工作量。
 
 下文第3节及后续以 `b31ffeb` 为起点的“大迁移差距”保留为历史计划，不再覆盖本节登记的 `db324b7`、S1/S2 与 S3 事实。
 
