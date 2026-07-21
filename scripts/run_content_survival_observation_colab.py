@@ -33,8 +33,11 @@ CONTENT_ROOT = Path("/content")
 RUN_ROOT = CONTENT_ROOT / "slm_wm_content_survival_runs"
 DELIVERY_ROOT = CONTENT_ROOT / "slm_wm_content_survival_deliveries"
 RUN_REQUEST_PATH = CONTENT_ROOT / "slm_wm_content_survival_request.json"
-WATERMARK_SECRET_NAME = "SLM_WM_CONTENT_SURVIVAL_KEY"
 HF_SECRET_NAME = "SLM_WM_HF_TOKEN"
+DRIVE_INPUT_DIRECTORY = Path("drive/MyDrive/SLM/content-survival/inputs")
+DRIVE_RESULTS_DIRECTORY = Path("drive/MyDrive/SLM/content-survival/results")
+DRIVE_RUN_REQUEST_NAME = "run_request.json"
+DRIVE_WATERMARK_KEY_NAME = "watermark_raw_key.txt"
 MINIMUM_GPU_MEMORY_MIB = 40000
 HEARTBEAT_INTERVAL_SECONDS = 1800
 IDLE_TIMEOUT_SECONDS = 1800
@@ -61,6 +64,8 @@ SECRET_USAGE_REQUIRED_STATUSES = frozenset({"running", "success", "scientific_fa
 CommandRunner = Callable[..., subprocess.CompletedProcess[Any]]
 SecretGetter = Callable[[str], str]
 DriveMount = Callable[[str], None]
+DriveUnmount = Callable[[], None]
+DriveReader = Callable[[Path], bytes]
 
 
 class ColabObservationError(RuntimeError):
@@ -71,7 +76,6 @@ class ColabObservationError(RuntimeError):
 class RunRequest:
     run_id: str
     repository_commit: str
-    drive_delivery_directory: Path
     request_sha256: str
 
 
@@ -161,6 +165,16 @@ def _write_json_atomic(path: Path, value: Mapping[str, Any]) -> None:
     partial.replace(path)
 
 
+def _write_bytes_atomic(path: Path, value: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(path.name + ".partial")
+    with partial.open("wb") as handle:
+        handle.write(value)
+        handle.flush()
+        os.fsync(handle.fileno())
+    partial.replace(path)
+
+
 def _read_json(path: Path, label: str) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -200,11 +214,7 @@ def _run_checked(
     return completed
 
 
-def load_run_request(path: Path = RUN_REQUEST_PATH) -> RunRequest:
-    """Read one non-secret request for the currently published main commit."""
-
-    request_path = _under_content(path, "run request")
-    raw = request_path.read_bytes()
+def _parse_run_request(raw: bytes) -> RunRequest:
     try:
         payload = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -214,7 +224,6 @@ def load_run_request(path: Path = RUN_REQUEST_PATH) -> RunRequest:
         "schema_version",
         "run_id",
         "repository_commit",
-        "drive_delivery_directory",
     }
     if type(payload) is not dict or set(payload) != required:
         raise ColabObservationError("run request fields drifted")
@@ -232,18 +241,111 @@ def load_run_request(path: Path = RUN_REQUEST_PATH) -> RunRequest:
         raise ColabObservationError("repository commit is invalid")
     if not run_id.endswith("_" + commit[:7]):
         raise ColabObservationError("run identity does not bind repository commit")
-    drive_directory = Path(str(payload["drive_delivery_directory"])).resolve()
-    drive_root = (CONTENT_ROOT / "drive/MyDrive").resolve()
-    try:
-        drive_directory.relative_to(drive_root)
-    except ValueError as exc:
-        raise ColabObservationError("Drive delivery directory is outside MyDrive") from exc
     return RunRequest(
         run_id=run_id,
         repository_commit=commit,
-        drive_delivery_directory=drive_directory,
         request_sha256=hashlib.sha256(raw).hexdigest(),
     )
+
+
+def load_run_request(path: Path = RUN_REQUEST_PATH) -> RunRequest:
+    """Read one non-secret request for the currently published main commit."""
+
+    request_path = _under_content(path, "run request")
+    return _parse_run_request(request_path.read_bytes())
+
+
+def _drive_mount_root() -> Path:
+    return (CONTENT_ROOT / "drive").resolve()
+
+
+def _drive_input_root() -> Path:
+    return (CONTENT_ROOT / DRIVE_INPUT_DIRECTORY).resolve()
+
+
+def _drive_results_root() -> Path:
+    return (CONTENT_ROOT / DRIVE_RESULTS_DIRECTORY).resolve()
+
+
+def _drive_request_path() -> Path:
+    return _drive_input_root() / DRIVE_RUN_REQUEST_NAME
+
+
+def _drive_watermark_key_path() -> Path:
+    return _drive_input_root() / DRIVE_WATERMARK_KEY_NAME
+
+
+def _default_drive_mount(mount_point: str) -> None:
+    from google.colab import drive  # type: ignore[import-not-found]
+
+    drive.mount(mount_point)
+
+
+def _default_drive_unmount() -> None:
+    from google.colab import drive  # type: ignore[import-not-found]
+
+    drive.flush_and_unmount()
+
+
+def _default_drive_read(path: Path) -> bytes:
+    return path.read_bytes()
+
+
+def prepare_drive_input(
+    request_path: Path = RUN_REQUEST_PATH,
+    *,
+    drive_mount: DriveMount = _default_drive_mount,
+    drive_unmount: DriveUnmount = _default_drive_unmount,
+    drive_read: DriveReader = _default_drive_read,
+) -> dict[str, Any]:
+    """Import the governed non-secret request from the fixed Drive boundary."""
+
+    destination = _under_content(request_path, "run request")
+    raw: bytes
+    drive_mount(str(_drive_mount_root()))
+    try:
+        raw = drive_read(_drive_request_path())
+    except Exception as exc:
+        raise ColabObservationError("Drive run request is unavailable") from exc
+    finally:
+        drive_unmount()
+    request = _parse_run_request(raw)
+    _write_bytes_atomic(destination, raw)
+    return {
+        "decision": "pass",
+        "run_id": request.run_id,
+        "repository_commit": request.repository_commit,
+        "run_request_sha256": request.request_sha256,
+        "local_request_path": str(destination),
+    }
+
+
+def _read_watermark_key_from_drive(
+    *,
+    drive_mount: DriveMount,
+    drive_unmount: DriveUnmount,
+    drive_read: DriveReader,
+) -> str:
+    """Read the fixed private key file and unmount Drive before returning it."""
+
+    drive_mount(str(_drive_mount_root()))
+    try:
+        raw = drive_read(_drive_watermark_key_path())
+    except Exception as exc:
+        raise ColabObservationError("required Drive watermark key is unavailable") from exc
+    finally:
+        drive_unmount()
+    try:
+        value = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ColabObservationError("Drive watermark key is invalid") from exc
+    if value.endswith("\r\n"):
+        value = value[:-2]
+    elif value.endswith("\n"):
+        value = value[:-1]
+    if len(value) < 16 or "\x00" in value or "\n" in value or "\r" in value:
+        raise ColabObservationError("Drive watermark key is invalid")
+    return value
 
 
 def run_paths(request: RunRequest) -> RunPaths:
@@ -523,7 +625,6 @@ def preflight_run(
     *,
     runner: CommandRunner = subprocess.run,
     gpu_probe: Callable[[], GpuIdentity] | None = None,
-    secret_getter: SecretGetter | None = None,
 ) -> dict[str, Any]:
     request = load_run_request(request_path)
     paths = run_paths(request)
@@ -533,7 +634,6 @@ def preflight_run(
         if state.get("run_status") != "bootstrap_ready":
             raise ColabObservationError("preflight requires a fresh bootstrap")
         gpu = gpu_probe() if gpu_probe is not None else probe_gpu_identity(runner)
-        read_colab_secret(WATERMARK_SECRET_NAME, required=True, getter=secret_getter)
         if not (paths.repository_root / "scripts/run_content_survival_observation_host.py").is_file():
             raise ColabObservationError("existing scientific host is absent")
         if not (paths.repository_root / "configs/model_sd35.yaml").is_file():
@@ -787,6 +887,9 @@ def run_observation(
     request_path: Path = RUN_REQUEST_PATH,
     *,
     secret_getter: SecretGetter | None = None,
+    drive_mount: DriveMount = _default_drive_mount,
+    drive_unmount: DriveUnmount = _default_drive_unmount,
+    drive_read: DriveReader = _default_drive_read,
     process_executor: Callable[..., ProcessCapture] = execute_drained_process,
 ) -> dict[str, Any]:
     request = load_run_request(request_path)
@@ -794,9 +897,22 @@ def run_observation(
     state = _read_json(paths.state_path, "controller state")
     if state.get("run_status") != "preflight_ready":
         raise ColabObservationError("observation requires a passing preflight")
-    watermark_secret = read_colab_secret(
-        WATERMARK_SECRET_NAME, required=True, getter=secret_getter
-    )
+    try:
+        watermark_secret = _read_watermark_key_from_drive(
+            drive_mount=drive_mount,
+            drive_unmount=drive_unmount,
+            drive_read=drive_read,
+        )
+    except Exception as exc:
+        _state_event(
+            request,
+            paths,
+            run_status="preflight_failure",
+            operation="drive_watermark_input",
+            error_category="required_watermark_key_unavailable",
+            details={"safe_error": type(exc).__name__},
+        )
+        raise
     hf_secret = read_colab_secret(HF_SECRET_NAME, required=False, getter=secret_getter)
     assert watermark_secret is not None
     _write_json_atomic(
@@ -891,16 +1007,14 @@ def _secret_scan(root: Path, secrets: Sequence[str]) -> dict[str, Any]:
     return {"decision": "pass", "scanned_file_count": len(_file_inventory(root)), "secret_hit_count": 0}
 
 
-def _package_secret_material(
-    request: RunRequest,
+def _package_secret_usage(
     paths: RunPaths,
     state: Mapping[str, Any],
-    secret_getter: SecretGetter | None,
-) -> list[str]:
-    """Require every secret that was exposed to the scientific host."""
+) -> dict[str, bool]:
+    """Validate which secrets were exposed to the scientific host."""
 
     if state.get("run_status") not in SECRET_USAGE_REQUIRED_STATUSES:
-        return []
+        return {"watermark_used": False, "hf_token_used": False}
     usage_path = paths.evidence_root / "secret_usage.json"
     if not usage_path.is_file():
         raise ColabObservationError("scientific secret usage state is absent")
@@ -912,18 +1026,7 @@ def _package_secret_material(
         or type(usage.get("hf_token_used")) is not bool
     ):
         raise ColabObservationError("scientific secret usage state is invalid")
-    watermark = read_colab_secret(
-        WATERMARK_SECRET_NAME, required=True, getter=secret_getter
-    )
-    assert watermark is not None
-    material = [watermark]
-    if usage["hf_token_used"]:
-        hf_token = read_colab_secret(
-            HF_SECRET_NAME, required=True, getter=secret_getter
-        )
-        assert hf_token is not None
-        material.append(hf_token)
-    return material
+    return {"watermark_used": True, "hf_token_used": usage["hf_token_used"]}
 
 
 def _verify_inventory(root: Path, inventory: Sequence[Mapping[str, Any]]) -> None:
@@ -933,17 +1036,13 @@ def _verify_inventory(root: Path, inventory: Sequence[Mapping[str, Any]]) -> Non
         raise ColabObservationError("delivery inventory verification failed")
 
 
-def _default_drive_mount(mount_point: str) -> None:
-    from google.colab import drive  # type: ignore[import-not-found]
-
-    drive.mount(mount_point)
-
-
 def package_and_deliver_to_drive(
     request_path: Path = RUN_REQUEST_PATH,
     *,
     secret_getter: SecretGetter | None = None,
     drive_mount: DriveMount = _default_drive_mount,
+    drive_unmount: DriveUnmount = _default_drive_unmount,
+    drive_read: DriveReader = _default_drive_read,
     copy_file: Callable[[str, str], str] = shutil.copy2,
 ) -> dict[str, Any]:
     """Package from disk, verify locally, then and only then mount Drive."""
@@ -960,7 +1059,20 @@ def package_and_deliver_to_drive(
             error_category="controller_state_absent",
         )
     state = _read_json(paths.state_path, "controller state")
-    secrets = _package_secret_material(request, paths, state, secret_getter)
+    usage = _package_secret_usage(paths, state)
+    secrets: list[str] = []
+    if usage["watermark_used"]:
+        secrets.append(
+            _read_watermark_key_from_drive(
+                drive_mount=drive_mount,
+                drive_unmount=drive_unmount,
+                drive_read=drive_read,
+            )
+        )
+    if usage["hf_token_used"]:
+        hf_token = read_colab_secret(HF_SECRET_NAME, required=True, getter=secret_getter)
+        assert hf_token is not None
+        secrets.append(hf_token)
     scan = _secret_scan(paths.evidence_root, secrets)
     if paths.delivery_root.exists():
         raise ColabObservationError("local delivery root already exists")
@@ -997,16 +1109,24 @@ def package_and_deliver_to_drive(
             raise ColabObservationError("delivery inventory is invalid")
         _verify_inventory(unpacked, files)
     _secret_scan(paths.delivery_root, secrets)
-    drive_mount(str(CONTENT_ROOT / "drive"))
-    request.drive_delivery_directory.mkdir(parents=True, exist_ok=True)
-    archive_target = request.drive_delivery_directory / archive.name
-    checksum_target = request.drive_delivery_directory / checksum.name
-    if archive_target.exists() or checksum_target.exists():
-        raise ColabObservationError("Drive delivery target already exists")
-    copy_file(str(archive), str(archive_target))
-    copy_file(str(checksum), str(checksum_target))
-    if _sha256(archive_target) != _sha256(archive) or checksum_target.read_text(encoding="utf-8") != checksum.read_text(encoding="utf-8"):
-        raise ColabObservationError("Drive delivery verification failed")
+    drive_mount(str(_drive_mount_root()))
+    try:
+        results_root = _drive_results_root()
+        results_root.mkdir(parents=True, exist_ok=True)
+        archive_target = results_root / archive.name
+        checksum_target = results_root / checksum.name
+        if archive_target.exists() or checksum_target.exists():
+            raise ColabObservationError("Drive delivery target already exists")
+        copy_file(str(archive), str(archive_target))
+        copy_file(str(checksum), str(checksum_target))
+        if (
+            _sha256(archive_target) != _sha256(archive)
+            or checksum_target.read_text(encoding="utf-8")
+            != checksum.read_text(encoding="utf-8")
+        ):
+            raise ColabObservationError("Drive delivery verification failed")
+    finally:
+        drive_unmount()
     return {
         "decision": "pass",
         "archive_path": str(archive_target),
@@ -1020,6 +1140,8 @@ def package_and_deliver_to_drive(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the content-survival Colab adapter.")
     subparsers = parser.add_subparsers(dest="operation", required=True)
+    prepare = subparsers.add_parser("prepare-drive-input")
+    prepare.add_argument("--run-request-json", type=Path, default=RUN_REQUEST_PATH)
     for name in ("preflight", "run", "package-drive"):
         command = subparsers.add_parser(name)
         command.add_argument("--run-request-json", type=Path, default=RUN_REQUEST_PATH)
@@ -1031,7 +1153,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     arguments = build_parser().parse_args()
-    if arguments.operation == "bootstrap-public":
+    if arguments.operation == "prepare-drive-input":
+        result = prepare_drive_input(arguments.run_request_json)
+    elif arguments.operation == "bootstrap-public":
         result = bootstrap_public_run(arguments.run_request_json, bootstrap_root=arguments.bootstrap_root)
     elif arguments.operation == "preflight":
         result = preflight_run(arguments.run_request_json)

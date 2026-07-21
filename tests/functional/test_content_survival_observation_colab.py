@@ -15,12 +15,12 @@ from scripts import run_content_survival_observation_colab as colab
 
 
 pytestmark = pytest.mark.quick
-COMMIT = "a3311cca62b6a33131b95fb6247644fa69f476e7"
+COMMIT = "c" * 40
 WATERMARK = "synthetic-watermark-secret-for-cpu-tests"
 HF_TOKEN = "synthetic-huggingface-secret-for-cpu-tests"
 NOTEBOOK_SHA256 = {
     "colab_drive_cold_start_smoke.ipynb": "391466464b776cfc8342e3d5e59ffd04abc1e8e81e7a036076ceb626f7e0bb01",
-    "content_survival_observation_colab.ipynb": "f84ec7d2d889b99516f55aee82f84d6e037cb1b329da76d5b15ce0acf9db164f",
+    "content_survival_observation_colab.ipynb": "c0d95eb610b2d16b816a0525d8777dcbf4b2543b4e9445f68636780fcb1f4ae8",
     "dependency_lock_review_run.ipynb": "ee2fdcfb50b1739f9f79d85c2517336e0432c30d2fb8280d28070c9720a02b2d",
     "external_baseline_gaussian_shading_run.ipynb": "b6d3008d80d3269c97917e8bc89f746d0381826b2ff8dd99755a769a05c9a518",
     "external_baseline_shallow_diffuse_run.ipynb": "861071d48712494559f2b0c4fe4acb8eb55420a52eae3f113cb1ab84156da356",
@@ -79,9 +79,8 @@ def local_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path
             {
                 "request_schema": "content_survival_observation_colab_run_request",
                 "schema_version": 1,
-                "run_id": "content_survival_observation_colab_20260721T180000Z_a3311cc",
+                "run_id": "content_survival_observation_colab_20260721T180000Z_ccccccc",
                 "repository_commit": COMMIT,
-                "drive_delivery_directory": str(content / "drive/MyDrive/SLM/content-survival"),
             }
         ),
         encoding="utf-8",
@@ -92,8 +91,64 @@ def local_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path
 
 
 def _secrets(name: str) -> str:
-    values = {colab.WATERMARK_SECRET_NAME: WATERMARK, colab.HF_SECRET_NAME: HF_TOKEN}
-    return values[name]
+    if name != colab.HF_SECRET_NAME:
+        raise KeyError(name)
+    return HF_TOKEN
+
+
+def _drive_key_reader(path: Path) -> bytes:
+    if path.name != colab.DRIVE_WATERMARK_KEY_NAME:
+        raise FileNotFoundError(path)
+    return (WATERMARK + "\n").encode()
+
+
+def _mount(events: list[str]):
+    def mount(path: str) -> None:
+        events.append("mount")
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+    return mount
+
+
+def _unmount(events: list[str]):
+    return lambda: events.append("unmount")
+
+
+def test_drive_input_import_uses_only_fixed_request_and_unmounts_before_local_copy(
+    local_content: tuple[Path, Path],
+) -> None:
+    request_path, _ = local_content
+    raw = request_path.read_bytes()
+    request_path.unlink()
+    events: list[str] = []
+
+    def read(path: Path) -> bytes:
+        events.append(path.as_posix())
+        assert path == colab._drive_input_root() / "run_request.json"
+        return raw
+
+    report = colab.prepare_drive_input(
+        request_path,
+        drive_mount=_mount(events),
+        drive_unmount=_unmount(events),
+        drive_read=read,
+    )
+    assert report["repository_commit"] == COMMIT
+    assert request_path.read_bytes() == raw
+    assert events[0] == "mount" and events[-1] == "unmount"
+    assert events.index("unmount") > events.index(colab._drive_request_path().as_posix())
+
+
+def test_run_request_cannot_select_drive_results_directory(local_content: tuple[Path, Path]) -> None:
+    request_path, _ = local_content
+    payload = json.loads(request_path.read_text(encoding="utf-8"))
+    payload["drive_delivery_directory"] = "/content/drive/MyDrive/arbitrary"
+    request_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(colab.ColabObservationError, match="fields drifted"):
+        colab.load_run_request(request_path)
+    assert colab._drive_results_root() == (
+        colab.CONTENT_ROOT / "drive/MyDrive/SLM/content-survival/results"
+    ).resolve()
 
 
 def _gpu(name: str = "NVIDIA A100-SXM4-40GB", total: int = 40536, free: int = 40100) -> colab.GpuIdentity:
@@ -177,7 +232,7 @@ def test_preflight_uses_existing_host_and_secret_without_model_governance(
 ) -> None:
     request_path, bootstrap = local_content
     _, paths, fake = _bootstrap_ready(request_path, bootstrap)
-    report = colab.preflight_run(request_path, runner=fake, gpu_probe=_gpu, secret_getter=_secrets)
+    report = colab.preflight_run(request_path, runner=fake, gpu_probe=_gpu)
     assert report["gpu"]["gpu_name"].startswith("NVIDIA A100")
     assert report["workload"] == {"cell_count": 24, "chain_count": 148, "evaluation_count": 29304}
     text = (paths.evidence_root / "preflight_report.json").read_text(encoding="utf-8")
@@ -262,25 +317,62 @@ def test_run_passes_secrets_only_in_memory_and_persists_minimal_failure(
 ) -> None:
     request_path, bootstrap = local_content
     _, paths, fake = _bootstrap_ready(request_path, bootstrap)
-    colab.preflight_run(request_path, runner=fake, gpu_probe=_gpu, secret_getter=_secrets)
+    colab.preflight_run(request_path, runner=fake, gpu_probe=_gpu)
     observed: dict[str, Any] = {}
 
     def execute(command: list[str], **kwargs: Any) -> colab.ProcessCapture:
         observed["command"] = command
         observed["environment"] = kwargs["environment"]
+        observed["drive_events_at_child_start"] = list(events)
         return colab.ProcessCapture(1, 1, 3, "a" * 64, "b" * 64, "", "OOM", False, False, False)
 
-    state = colab.run_observation(request_path, secret_getter=_secrets, process_executor=execute)
+    events: list[str] = []
+    state = colab.run_observation(
+        request_path,
+        secret_getter=_secrets,
+        drive_mount=lambda path: events.append("mount"),
+        drive_unmount=lambda: events.append("unmount"),
+        drive_read=_drive_key_reader,
+        process_executor=execute,
+    )
     assert state["run_status"] == "scientific_failure"
     assert state["error_category"] == "scientific_host_execution_failed"
     assert WATERMARK not in " ".join(observed["command"])
     assert HF_TOKEN not in " ".join(observed["command"])
+    assert "/drive/" not in " ".join(observed["command"])
     assert observed["environment"]["SLM_WM_KEY_MATERIAL"] == WATERMARK
     assert observed["environment"]["HF_TOKEN"] == HF_TOKEN
+    assert events == ["mount", "unmount"]
+    assert observed["drive_events_at_child_start"] == ["mount", "unmount"]
     persisted = "\n".join(path.read_text(encoding="utf-8") for path in paths.evidence_root.rglob("*.json"))
     assert WATERMARK not in persisted and HF_TOKEN not in persisted
     usage = json.loads((paths.evidence_root / "secret_usage.json").read_text(encoding="utf-8"))
     assert usage == {"watermark_used": True, "hf_token_used": True}
+
+
+def test_missing_drive_key_fails_before_child_and_leaves_packageable_state(
+    local_content: tuple[Path, Path],
+) -> None:
+    request_path, bootstrap = local_content
+    _, paths, fake = _bootstrap_ready(request_path, bootstrap)
+    colab.preflight_run(request_path, runner=fake, gpu_probe=_gpu)
+    events: list[str] = []
+    child_calls: list[object] = []
+
+    with pytest.raises(colab.ColabObservationError, match="unavailable"):
+        colab.run_observation(
+            request_path,
+            secret_getter=_secrets,
+            drive_mount=_mount(events),
+            drive_unmount=_unmount(events),
+            drive_read=lambda path: (_ for _ in ()).throw(PermissionError(path)),
+            process_executor=lambda *args, **kwargs: child_calls.append((args, kwargs)),
+        )
+    state = json.loads(paths.state_path.read_text(encoding="utf-8"))
+    assert state["run_status"] == "preflight_failure"
+    assert state["error_category"] == "required_watermark_key_unavailable"
+    assert events == ["mount", "unmount"]
+    assert child_calls == []
 
 
 def test_failure_is_locally_verified_before_drive_mount(local_content: tuple[Path, Path]) -> None:
@@ -294,6 +386,7 @@ def test_failure_is_locally_verified_before_drive_mount(local_content: tuple[Pat
         error_category="synthetic_failure",
     )
     events: list[str] = []
+    targets: list[Path] = []
 
     def mount(path: str) -> None:
         assert (paths.delivery_root / f"{request.run_id}.tar.gz").is_file()
@@ -303,18 +396,24 @@ def test_failure_is_locally_verified_before_drive_mount(local_content: tuple[Pat
 
     def copy(source: str, target: str) -> str:
         events.append(Path(source).suffix or Path(source).name)
+        targets.append(Path(target))
         return str(Path(target).write_bytes(Path(source).read_bytes()))
 
     def unavailable(name: str) -> str:
         raise KeyError(name)
 
     result = colab.package_and_deliver_to_drive(
-        request_path, secret_getter=unavailable, drive_mount=mount, copy_file=copy
+        request_path,
+        secret_getter=unavailable,
+        drive_mount=mount,
+        drive_unmount=lambda: events.append("unmount"),
+        copy_file=copy,
     )
     assert result["decision"] == "pass"
     assert result["run_status"] == "preflight_failure"
     assert events[0] == "mount"
-    assert events[1:] == [".gz", ".sha256"]
+    assert events[1:] == [".gz", ".sha256", "unmount"]
+    assert {path.parent for path in targets} == {colab._drive_results_root()}
 
 
 def test_package_cell_recovers_absent_state_from_disk(local_content: tuple[Path, Path]) -> None:
@@ -331,11 +430,12 @@ def test_package_cell_recovers_absent_state_from_disk(local_content: tuple[Path,
         request_path,
         secret_getter=_secrets,
         drive_mount=mount,
+        drive_unmount=lambda: mounted.append("unmount"),
     )
     state = json.loads(paths.state_path.read_text(encoding="utf-8"))
     assert state["run_status"] == "preflight_failure"
     assert state["error_category"] == "controller_state_absent"
-    assert mounted == [str(colab.CONTENT_ROOT / "drive")]
+    assert mounted == [str(colab.CONTENT_ROOT / "drive"), "unmount"]
 
 
 def test_secret_leak_blocks_drive_mount(local_content: tuple[Path, Path]) -> None:
@@ -355,9 +455,11 @@ def test_secret_leak_blocks_drive_mount(local_content: tuple[Path, Path]) -> Non
         colab.package_and_deliver_to_drive(
             request_path,
             secret_getter=_secrets,
-            drive_mount=mounted.append,
+            drive_mount=_mount(mounted),
+            drive_unmount=_unmount(mounted),
+            drive_read=_drive_key_reader,
         )
-    assert mounted == []
+    assert mounted == ["mount", "unmount"]
 
 
 def test_used_watermark_missing_during_package_blocks_drive_and_copy(
@@ -377,9 +479,6 @@ def test_used_watermark_missing_during_package_blocks_drive_and_copy(
     mounted: list[str] = []
     copied: list[tuple[str, str]] = []
 
-    def unavailable(name: str) -> str:
-        raise KeyError(name)
-
     def copy(source: str, target: str) -> str:
         copied.append((source, target))
         return target
@@ -387,11 +486,13 @@ def test_used_watermark_missing_during_package_blocks_drive_and_copy(
     with pytest.raises(colab.ColabObservationError, match="unavailable"):
         colab.package_and_deliver_to_drive(
             request_path,
-            secret_getter=unavailable,
-            drive_mount=mounted.append,
+            secret_getter=_secrets,
+            drive_mount=_mount(mounted),
+            drive_unmount=_unmount(mounted),
+            drive_read=lambda path: (_ for _ in ()).throw(PermissionError(path)),
             copy_file=copy,
         )
-    assert mounted == []
+    assert mounted == ["mount", "unmount"]
     assert copied == []
 
 
@@ -411,9 +512,7 @@ def test_used_hf_token_missing_during_package_blocks_drive_and_copy(
     mounted: list[str] = []
     copied: list[tuple[str, str]] = []
 
-    def watermark_only(name: str) -> str:
-        if name == colab.WATERMARK_SECRET_NAME:
-            return WATERMARK
+    def unavailable(name: str) -> str:
         raise KeyError(name)
 
     def copy(source: str, target: str) -> str:
@@ -423,11 +522,13 @@ def test_used_hf_token_missing_during_package_blocks_drive_and_copy(
     with pytest.raises(colab.ColabObservationError, match="unavailable"):
         colab.package_and_deliver_to_drive(
             request_path,
-            secret_getter=watermark_only,
-            drive_mount=mounted.append,
+            secret_getter=unavailable,
+            drive_mount=_mount(mounted),
+            drive_unmount=_unmount(mounted),
+            drive_read=_drive_key_reader,
             copy_file=copy,
         )
-    assert mounted == []
+    assert mounted == ["mount", "unmount"]
     assert copied == []
 
 
@@ -443,6 +544,7 @@ def test_scientific_state_without_secret_usage_blocks_package(
             request_path,
             secret_getter=_secrets,
             drive_mount=mounted.append,
+            drive_unmount=lambda: mounted.append("unmount"),
         )
     assert mounted == []
 
@@ -463,16 +565,19 @@ def test_scientific_secret_usage_mismatch_blocks_package(
             request_path,
             secret_getter=_secrets,
             drive_mount=mounted.append,
+            drive_unmount=lambda: mounted.append("unmount"),
         )
     assert mounted == []
 
 
-def test_scientific_failure_with_available_used_secrets_can_package(
+@pytest.mark.parametrize("run_status", ["success", "scientific_failure"])
+def test_completed_or_scientific_failure_with_available_used_secrets_can_package(
     local_content: tuple[Path, Path],
+    run_status: str,
 ) -> None:
     request_path, bootstrap = local_content
     request, paths, _ = _bootstrap_ready(request_path, bootstrap)
-    colab._state_event(request, paths, run_status="scientific_failure", operation="synthetic")
+    colab._state_event(request, paths, run_status=run_status, operation="synthetic")
     colab._write_json_atomic(
         paths.evidence_root / "secret_usage.json",
         {
@@ -483,17 +588,19 @@ def test_scientific_failure_with_available_used_secrets_can_package(
     mounted: list[str] = []
 
     def mount(path: str) -> None:
-        mounted.append(path)
+        mounted.append("mount")
         Path(path).mkdir(parents=True, exist_ok=True)
 
     result = colab.package_and_deliver_to_drive(
         request_path,
         secret_getter=_secrets,
         drive_mount=mount,
+        drive_unmount=lambda: mounted.append("unmount"),
+        drive_read=_drive_key_reader,
     )
     assert result["decision"] == "pass"
-    assert result["run_status"] == "scientific_failure"
-    assert mounted == [str(colab.CONTENT_ROOT / "drive")]
+    assert result["run_status"] == run_status
+    assert mounted == ["mount", "unmount", "mount", "unmount"]
 
 
 def test_notebook_is_thin_output_free_and_package_cell_is_disk_independent() -> None:
@@ -504,11 +611,13 @@ def test_notebook_is_thin_output_free_and_package_cell_is_disk_independent() -> 
     assert all(cell["outputs"] == [] and cell["execution_count"] is None for cell in code_cells)
     combined = "\n".join("".join(cell["source"]) for cell in code_cells)
     assert colab.PUBLIC_REPOSITORY_URL in combined
+    assert "prepare-drive-input" in combined
+    assert "upload" not in combined.lower()
     assert "git\", \"pull" not in combined
-    assert colab.WATERMARK_SECRET_NAME not in combined
     assert colab.HF_SECRET_NAME not in combined
     assert "from_pretrained" not in combined
     assert "torch" not in combined.lower()
+    assert colab.DRIVE_WATERMARK_KEY_NAME not in combined
     last = "".join(code_cells[-1]["source"])
     assert "package-drive" in last
     assert "request_path =" in last and "controller =" in last and "bootstrap_root =" in last

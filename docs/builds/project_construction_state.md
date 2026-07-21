@@ -23,11 +23,11 @@
 | 源代码与已审 GPU 证据基线提交 | `db324b7c86a1bef305114fe83db44dfed04fd706` |
 | GitNexus 索引提交 | `69a23070e3dcec8b4a60bc997446dda1efd4b528` |
 | GitNexus 索引规模 | 14,698 symbols、32,708 relationships、300 execution flows |
-| 当前活动构建单元 | `content_survival_observation_colab_adapter`（基于已发布 `a3311cca62b6a33131b95fb6247644fa69f476e7` 的 CPU-only Colab 执行适配；未启动 Colab GPU） |
+| 当前活动构建单元 | `content_survival_observation_colab_drive_input`（基于已发布 `0bcc0ce7fbd3e34576074deb87c25ed22ebf7343` 的 CPU-only Drive 输入适配；未启动 Colab GPU） |
 | 下一目标构建单元 | 本适配独立审计；通过后仍须由独立阶段授权真实 Colab A100 运行 |
 | 受治理解释器 | 仓库 `.venv` 的 CPython 3.12.13 |
-| 默认测试事实 | `.venv/bin/pytest -q -s` 为 `2350 passed, 82 deselected, 380 warnings`；精确 `.venv/bin/pytest -q` 仍在收集前触发宿主 capture 临时文件 `FileNotFoundError`，未运行 runtime-heavy GPU integration 或真实 Colab/A100 作业 |
-| 定向协议/cache/约束检查 | observation protocol、专用 host 与 Colab 适配合计 `69 passed`；最小验收面覆盖公开 GitHub 提交、薄 Notebook、A100 显存门、secret 隔离、长时 pipe 排空、进程组清理、失败落盘和最终 Drive 交付，不建立模型供应链或通用持久化门禁 |
+| 默认测试事实 | `.venv/bin/pytest -q -s` 为 `2354 passed, 82 deselected, 380 warnings`；精确 `.venv/bin/pytest -q` 仍在收集前触发宿主 capture 临时文件 `FileNotFoundError`，未运行 runtime-heavy GPU integration 或真实 Colab/A100 作业 |
+| 定向协议/cache/约束检查 | observation protocol、专用 host 与 Colab 适配合计 `73 passed`；最小验收面覆盖公开 GitHub 提交、固定 Drive 输入、薄 Notebook、A100 显存门、secret 隔离、长时 pipe 排空、进程组清理、失败落盘和最终固定 Drive 交付，不建立模型供应链或通用持久化门禁 |
 | harness 与格式检查 | 10项 harness 全部通过；`git diff --check` 通过 |
 | 外部源码 qualification | 显式 integration 运行 `6 failed, 0 skipped`；失败均来自4套登记真实源码目录缺失，符合缺源失败关闭边界，不属于默认测试失败 |
 | 工作树说明 | S3 从已独立审计的 `db324b7` 开始；`.codex/config.toml` 是既有范围外 untracked 文件，本原子不得修改或提交；旧 S1 存储归档保持只读 |
@@ -64,13 +64,13 @@
 
 ### 2.3 Colab 执行适配边界
 
-- 当前新增的是 CPU-only 平台适配，不是 Colab/A100 科学运行结果。永久薄 Notebook 只通过匿名 HTTPS 获取已独立审计并发布到 `origin/main` 的提交，控制器再次核对远端 `main` 与 run request 中的40位提交完全一致，随后建立 clean detached checkout；运行期间不执行 `pull`。当前已发布基线为 `a3311cca62b6a33131b95fb6247644fa69f476e7`，本适配补丁尚未提交或 push，必须经过补丁独审、中文提交、提交独审、push 和 `ls-remote` 精确复验后才能用于真实 Colab。
-- Notebook 不实现安装、模型、方法、secret、validator 或打包逻辑，只依次调用稳定的 `bootstrap-public`、`preflight`、`run` 和 `package-drive` 子命令。最后一个 cell 重新从固定 request 与本地磁盘定位控制器，不依赖前面 cell 的运行时变量，可在 success、preflight failure、OOM 或 scientific failure 后单独执行。
+- 当前新增的是 CPU-only 平台适配，不是 Colab/A100 科学运行结果。永久薄 Notebook 只通过匿名 HTTPS 获取已独立审计并发布到 `origin/main` 的提交，控制器再次核对远端 `main` 与 run request 中的40位提交完全一致，随后建立 clean detached checkout；运行期间不执行 `pull`。当前已发布基线为 `0bcc0ce7fbd3e34576074deb87c25ed22ebf7343`；Drive 输入适配补丁尚未提交或 push，控制任务必须在新提交完成独审并精确发布后再生成与该提交绑定的 `run_request.json`，不能复用现有 Drive request。
+- Notebook 不实现安装、模型、方法、secret、validator 或打包逻辑，只依次调用稳定的 `prepare-drive-input`、`bootstrap-public`、`preflight`、`run` 和 `package-drive` 子命令。最后一个 cell 重新从固定 request 与本地磁盘定位控制器，不依赖前面 cell 的运行时变量，可在 success、preflight failure、OOM 或 scientific failure 后单独执行。
 - 所有仓库、隔离运行目录、模型下载 cache、checkpoint、日志和中间结果只写 `/content`。SD3.5 与 CLIP 继续由既有方法 host 按 `configs/model_sd35.yaml` 的普通运行参数通过标准加载入口下载和加载；本适配不新增 revision、snapshot、文件摘要、断链、offline 重载或模型 identity 门禁。下载/加载失败按普通可打包运行失败处理，不宣称供应链增强。
 - 适配控制器只要求 A100 且启动时 total 与 available 显存均不少于40,000 MiB。A100-80G 也可通过但不会自动选择；L4 或不足门禁的 A100 失败。A100-40G 如果真实加载或首 cell OOM，则诚实落盘并打包，后续切换80G需另行授权；不得启用 CPU offload、量化、attention slicing 或降低科学工作量。
-- watermark key 和可选 HF token 只从固定 Colab Secrets 在运行时读取，经内存环境传给既有唯一 host 链；不进入 Notebook、argv、日志、JSON、archive 或 Drive。控制器持续排空长时 stdout/stderr，输出若包含 raw secret 会被阻断；timeout 与异常会终止并确认整个 host/orchestrator/scientific 进程组，避免 GPU 或 key child 遗留。
-- child 启动前只落盘 `watermark_used` 与 `hf_token_used` 非秘密布尔。处于 running、success 或 scientific failure 的运行在打包时必须重新取得每个已使用 secret 才能执行内容扫描；Secret 权限撤销、缺失或 usage 状态缺失均在 Drive mount 前失败关闭。尚未向 child 传递 secret 的 bootstrap/preflight failure 仍可无 secret 独立打包。
-- 运行期间不 mount Drive，也不执行任何 Drive I/O。最后 cell 先在 `/content` 从磁盘状态分类 success/failure，完成 secret scan、文件清单、archive、detached checksum 和独立解包复验；仅全部通过后才 mount Drive，并按 archive 后 checksum 的顺序复制。VM 回收前未执行该 cell 会丢失本地结果，这是当前被接受的运行边界；Drive 仅是用户授权的最终交付面，不是模型 cache、热 I/O、checkpoint 或恢复面。
+- 固定输入目录为 `/content/drive/MyDrive/SLM/content-survival/inputs/`，其中非秘密 `run_request.json` 由控制任务在目标提交发布后生成，raw key 固定来自私有 `watermark_raw_key.txt`。controller 在启动边界短暂挂载 Drive，把 request 复制到固定 `/content` 路径；raw key 仅在 `run` 时从固定文件读入内存并立即卸载 Drive，经既有 single-use 内存环境传给唯一 host 链。可选 HF token 继续来自 Colab Secret。raw key 不进入 Notebook、argv、日志、JSON、archive、controller state 或本地持久文件。
+- child 启动前只落盘 `watermark_used` 与 `hf_token_used` 非秘密布尔。处于 running、success 或 scientific failure 的运行在打包时必须重新从固定 Drive key 文件取得 raw key，并在 HF token 已使用时重新取得该 Secret，才能执行内容扫描；key 缺失、不可读、HF Secret 权限撤销或 usage 状态缺失都失败关闭且不复制结果。尚未向 child 传递 secret 的 bootstrap/preflight failure 仍可无 secret 独立打包。
+- 科学运行期间 Drive 已卸载，不执行 Drive hot I/O，也不写 checkpoint、日志或中间结果。最后 cell 先在 `/content` 从磁盘状态分类 success/failure，完成 secret scan、文件清单、archive、detached checksum 和独立解包复验；仅全部通过后才再次 mount Drive，并按 archive 后 checksum 的顺序复制到固定 `/content/drive/MyDrive/SLM/content-survival/results/`。VM 回收前未执行该 cell 会丢失本地结果，这是当前被接受的运行边界。
 - 固定科学工作量仍由既有 single-use host → scientific child 执行：4个 Prompt、24个 cell、148条 diffusion chain、29,304次评分，且保持 `diagnostic_only=true`、`supports_paper_claim=false`、`candidate_promotion_allowed=false`、`qualification_evidence=false`。CPU 适配验收不证明真实 Colab/A100 运行成功。
 
 ---

@@ -4,7 +4,9 @@
 
 ## 内容存活因果诊断入口
 
-`content_survival_observation_colab.ipynb` 是独立的 diagnostic-only A100 入口。它只通过匿名 HTTPS 获取已审计并发布到 GitHub `main` 的提交，然后调用 `scripts/run_content_survival_observation_colab.py` 的固定 `bootstrap-public`、`preflight`、`run` 和 `package-drive` 子命令。仓库、模型 cache、运行状态和中间结果只写 `/content`；运行期间不挂载 Drive，最后一个可独立执行的 cell 完成本地 secret scan、归档与解包复验后才把 archive 和 detached checksum 复制到 Drive。
+`content_survival_observation_colab.ipynb` 是独立的 diagnostic-only A100 入口。它先通过匿名 HTTPS 获取已审计并发布到 GitHub `main` 的提交，然后只调用 `scripts/run_content_survival_observation_colab.py` 的固定 `prepare-drive-input`、`bootstrap-public`、`preflight`、`run` 和 `package-drive` 子命令。控制任务在新提交发布后生成 `run_request.json`，并把它与私有 `watermark_raw_key.txt` 放入固定输入目录 `/content/drive/MyDrive/SLM/content-survival/inputs/`；Notebook 不要求手动上传任何文件到 `/content`。controller 只把非秘密 request 原子复制到固定 `/content/slm_wm_content_survival_request.json`，raw key 只在内存读取后立即卸载 Drive，可选 HF token 仍来自 Colab Secret。
+
+仓库、模型 cache、运行状态和中间结果只写 `/content`。Drive 只在启动输入读取边界短暂挂载，科学 host 启动前必须已经卸载；运行期间不向 Drive 写 checkpoint、日志或中间结果。最后一个可独立执行的 cell 从固定 Drive key 文件重新取得扫描材料，在本地完成 secret scan、归档与解包复验后，才把 archive 和 detached checksum 顺序复制到固定结果目录 `/content/drive/MyDrive/SLM/content-survival/results/`。key 缺失、不可读或扫描发现泄漏时不得复制任何结果。
 
 现有12个 Notebook 继续承担 dependency review、qualification、主方法、baseline、official-reference 和 repeat 证据职责，全部保留。此前错误创建在根目录 `notebooks/content_survival_observation_colab.ipynb` 的临时入口由本入口取代并删除；该临时文件从未进入 Git，不能从 Git 历史恢复，其职责与必要内容已迁移到正式入口。13个保留入口的 canonical SHA-256 由 `tests/functional/test_content_survival_observation_colab.py` 唯一冻结，任何 Notebook 字节变化都必须显式更新该登记并重新审计。
 
