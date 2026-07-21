@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, replace
 import json
 import math
+import os
 from pathlib import Path
 import sys
 import time
@@ -44,6 +45,20 @@ from experiments.runtime.diffusion.prompt_saliency_model_loader import (
 )
 from experiments.protocol.content_routing_reference_quantile import (
     ContentRoutingReferenceScalars,
+)
+from experiments.protocol.content_survival_direction import (
+    CONTENT_SURVIVAL_ARTIFACT_BINDING_PATH,
+    CONTENT_SURVIVAL_CHAIN_ROLES,
+    CONTENT_SURVIVAL_DIRECTION_RECORD_PATH,
+    CONTENT_SURVIVAL_PROBE_ROLES,
+    build_content_survival_artifact_binding,
+    build_content_survival_direction_record,
+    build_content_survival_runtime_method_identity,
+    build_three_image_content_survival_evidence,
+    load_content_survival_direction_protocol,
+    materialize_content_survival_probe,
+    select_shared_content_survival_sign,
+    validate_content_survival_artifact_bundle,
 )
 from experiments.protocol.attacks import (
     attack_config_digest,
@@ -1968,14 +1983,13 @@ def _formal_content_runtime_artifact_binding_ready(
     *,
     expected_content_strength_common_multiplier: float,
 ) -> bool:
-    """复验新正式单写回运行的持久化诊断、记录与文件身份。"""
+    """只读复验 survival-direction 完成原子与正式科学身份。"""
 
     if (
         type(expected_content_strength_common_multiplier) is not float
         or expected_content_strength_common_multiplier not in (0.75, 1.0, 1.25)
     ):
         return False
-
     metadata = result_payload.get("metadata")
     manifest_config = manifest.get("config")
     manifest_metadata = manifest.get("metadata")
@@ -1984,13 +1998,36 @@ def _formal_content_runtime_artifact_binding_ready(
         for value in (metadata, manifest_config, manifest_metadata)
     ):
         return False
+    try:
+        protocol = load_content_survival_direction_protocol(root_path)
+        core_method_digest = (
+            semantic_conditioned_latent_method_definition_digest()
+        )
+    except (OSError, TypeError, ValueError):
+        return False
+    if not validate_content_survival_artifact_bundle(
+        repository_root=root_path,
+        result_payload=result_payload,
+        manifest=manifest,
+        expected_protocol=protocol,
+        expected_core_method_definition_digest=core_method_digest,
+    ):
+        return False
+
     diagnostic = metadata.get("content_runtime_diagnostic")
     formal_randomization_reference = metadata.get(
         "formal_randomization_reference"
     )
-    if not isinstance(diagnostic, Mapping) or not isinstance(
-        formal_randomization_reference,
-        Mapping,
+    protocol_record = metadata.get("content_survival_direction_record")
+    counterfactual = metadata.get("carrier_only_counterfactual")
+    if not all(
+        isinstance(value, Mapping)
+        for value in (
+            diagnostic,
+            formal_randomization_reference,
+            protocol_record,
+            counterfactual,
+        )
     ):
         return False
     try:
@@ -2002,15 +2039,18 @@ def _formal_content_runtime_artifact_binding_ready(
         )
     except (KeyError, TypeError, ValueError):
         return False
+    expected_key_plan = build_detection_key_plan_record(config.key_material)
     if not (
         metadata.get("method_runtime")
         == "formal_content_dual_chain_single_write"
+        and metadata.get("method_definition_digest") == core_method_digest
         and metadata.get("threshold_free_blind_measurement_ready") is True
         and metadata.get("formal_blind_detection_ready") is False
         and metadata.get("legacy_runtime_dependency_absence_ready") is True
         and metadata.get("reference_source")
         == "fixed_content_routing_reference_registry"
         and metadata.get("supports_paper_claim") is False
+        and metadata.get("old_content_runtime_artifact_compatible") is False
         and dict(formal_randomization_reference)
         == rebuilt_formal_randomization_reference
         and manifest_config.get("formal_randomization_reference")
@@ -2019,75 +2059,130 @@ def _formal_content_runtime_artifact_binding_ready(
         and manifest_metadata.get("protocol_decision") == "pass"
         and manifest_metadata.get("detector_input_access_mode")
         == "image_key_public_model_only"
+        and manifest_metadata.get("detection_key_plan")
+        == expected_key_plan
         and manifest_metadata.get("supports_paper_claim") is False
         and manifest_metadata.get("formal_runtime_chain")
-        == "content_routing_lf_hf_qk_common_gamma_single_write"
+        == "content_survival_registered_probe_nominal_replay"
         and manifest_metadata.get("formal_detection_chain")
         == "threshold_free_lf_hf_tail_measurement_pending_frozen_evidence"
+        and diagnostic.get("content_strength_common_multiplier")
+        == expected_content_strength_common_multiplier
+        and diagnostic.get("chain_count") == 7
+        and diagnostic.get("chain_roles")
+        == list(CONTENT_SURVIVAL_CHAIN_ROLES)
+        and diagnostic.get("selected_survival_direction_sign") in (-1, 1)
+        and diagnostic.get("probe_bundle_digest")
+        == protocol_record.get("probe_bundle_digest")
     ):
         return False
 
     result_paths = {
-        field_name: str(result_payload.get(field_name, ""))
-        for field_name in (
-            "clean_image_path",
-            "watermarked_image_path",
-            "update_record_path",
-            "detection_record_path",
-            "manifest_path",
-        )
+        "clean_image": str(result_payload.get("clean_image_path", "")),
+        "full_image": str(result_payload.get("watermarked_image_path", "")),
+        "full_update": str(result_payload.get("update_record_path", "")),
+        "detections": str(result_payload.get("detection_record_path", "")),
+        "manifest": str(result_payload.get("manifest_path", "")),
+        "carrier_image": str(metadata.get("carrier_only_image_path", "")),
+        "carrier_update": str(
+            metadata.get("carrier_only_update_record_path", "")
+        ),
+        "protocol": str(
+            metadata.get("content_survival_direction_record_path", "")
+        ),
+        "binding": str(
+            metadata.get("content_survival_artifact_binding_path", "")
+        ),
     }
     output_paths = tuple(str(path) for path in manifest.get("output_paths", ()))
-    expected_result_path = (
-        Path(result_paths["manifest_path"]).parent / "runtime_result.json"
+    result_relative = (
+        Path(result_paths["manifest"]).parent / "runtime_result.json"
     ).as_posix()
-    required_paths = (*result_paths.values(), expected_result_path)
     if (
-        any(not path for path in required_paths)
-        or any(path not in output_paths for path in required_paths)
+        any(not value for value in result_paths.values())
         or len(output_paths) != len(set(output_paths))
+        or not {*result_paths.values(), result_relative} <= set(output_paths)
     ):
         return False
     resolved_paths = {
-        role: _resolve_repository_output_path(root_path, path)
-        for role, path in result_paths.items()
+        role: _resolve_repository_output_path(root_path, value)
+        for role, value in result_paths.items()
     }
-    resolved_result_path = _resolve_repository_output_path(
-        root_path,
-        expected_result_path,
-    )
-    if (
-        any(path is None or not path.is_file() for path in resolved_paths.values())
-        or resolved_result_path is None
-        or not resolved_result_path.is_file()
+    if any(
+        path is None or not path.is_file()
+        for path in resolved_paths.values()
+    ):
+        return False
+    if any(
+        path.with_name(f"{path.name}.partial").exists()
+        for path in resolved_paths.values()
     ):
         return False
 
     try:
         update_records = _read_jsonl_object_records(
-            resolved_paths["update_record_path"]
+            resolved_paths["full_update"]
+        )
+        carrier_records = _read_jsonl_object_records(
+            resolved_paths["carrier_update"]
         )
         detection_records = _read_jsonl_object_records(
-            resolved_paths["detection_record_path"]
+            resolved_paths["detections"]
         )
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return False
-    if (
-        result_payload.get("update_count") != 1
-        or len(update_records) != 1
-        or len(detection_records) < 3
+    if not (
+        result_payload.get("update_count") == 1
+        and len(update_records) == 1
+        and len(carrier_records) == 1
+        and len(detection_records) == 3
     ):
         return False
+    full_update = update_records[0]
+    carrier_update = carrier_records[0]
 
-    update_record = update_records[0]
+    def finite_number(value: Any) -> bool:
+        return (
+            type(value) is float
+            and math.isfinite(value)
+        )
+
+    positive_fields = (
+        "lf_nominal_strength",
+        "hf_tail_nominal_strength",
+        "lf_effective_l2",
+        "hf_tail_effective_l2",
+        "combined_effective_l2",
+        "combined_effective_l2_limit",
+    )
+    if any(
+        not finite_number(record.get(field_name))
+        or record[field_name] <= 0.0
+        for record in (full_update, carrier_update)
+        for field_name in positive_fields
+    ):
+        return False
+    if not (
+        finite_number(full_update.get("common_gamma"))
+        and finite_number(carrier_update.get("common_gamma"))
+        and 0.0 < full_update["common_gamma"] <= 1.0
+        and 0.0 < carrier_update["common_gamma"] <= 1.0
+        and finite_number(full_update.get("content_only_postwrite_qk_score"))
+        and finite_number(full_update.get("final_postwrite_qk_score"))
+        and finite_number(full_update.get("geometry_effective_l2"))
+        and full_update["geometry_effective_l2"] > 0.0
+        and finite_number(carrier_update.get("geometry_effective_l2"))
+        and carrier_update["geometry_effective_l2"] == 0.0
+    ):
+        return False
     mirrored_fields = (
-        "method_role",
-        "captured_previous_index",
-        "captured_previous_count",
-        "callback_write_index",
-        "callback_write_count",
-        "current_image_decode_count",
-        "public_probe_additional_decode_count",
+        "role",
+        "step_index",
+        "z10_content_sha256",
+        "written_latent_content_sha256",
+        "selected_sign",
+        "probe_bundle_digest",
+        "nominal_replay_parent_ready",
         "actual_dtype_single_write_count",
         "common_gamma",
         "content_strength_common_multiplier",
@@ -2100,103 +2195,117 @@ def _formal_content_runtime_artifact_binding_ready(
         "combined_effective_l2_limit",
         "combined_effective_l2_ready",
         "actual_dtype_single_write_digest",
-        "content_only_postwrite_qk_score",
-        "final_postwrite_qk_score",
-        "post_write_qk_strict_ready",
-        "content_only_postwrite_qk_digest",
-        "final_postwrite_qk_digest",
         "routing_identity_digest",
-        "geometry_qk_atomic_records_digest",
-        "geometry_update_digest",
+        "attention_geometry_enabled",
     )
     if any(
-        update_record.get(field_name) != diagnostic.get(field_name)
+        full_update.get(field_name) != diagnostic.get(field_name)
         for field_name in mirrored_fields
     ):
         return False
-
-    positive_fields = (
-        "lf_nominal_strength",
-        "hf_tail_nominal_strength",
-        "lf_effective_l2",
-        "hf_tail_effective_l2",
-        "geometry_effective_l2",
-        "combined_effective_l2",
-        "combined_effective_l2_limit",
-    )
-    finite_fields = (
-        *positive_fields,
-        "common_gamma",
-        "content_only_postwrite_qk_score",
-        "final_postwrite_qk_score",
-    )
-    digest_fields = (
-        "actual_dtype_single_write_digest",
-        "content_only_postwrite_qk_digest",
-        "final_postwrite_qk_digest",
-        "routing_identity_digest",
-        "geometry_qk_atomic_records_digest",
-        "geometry_update_digest",
-    )
     if not (
-        update_record.get("run_id") == result_payload.get("run_id")
-        and update_record.get("content_strength_common_multiplier")
+        full_update.get("run_id") == result_payload.get("run_id")
+        and carrier_update.get("run_id") == result_payload.get("run_id")
+        and full_update.get("role") == "full_nominal_replay"
+        and carrier_update.get("role") == "carrier_nominal_replay"
+        and full_update.get("step_index") == 10
+        and carrier_update.get("step_index") == 10
+        and full_update.get("content_strength_common_multiplier")
         == expected_content_strength_common_multiplier
-        and diagnostic.get("content_strength_common_multiplier")
+        and carrier_update.get("content_strength_common_multiplier")
         == expected_content_strength_common_multiplier
-        and update_record.get("step_index") == 10
-        and update_record.get("method_role") == "full_dual_chain"
-        and update_record.get("captured_previous_index") == 9
-        and update_record.get("captured_previous_count") == 1
-        and update_record.get("callback_write_index") == 10
-        and update_record.get("callback_write_count") == 1
-        and update_record.get("current_image_decode_count") == 1
-        and update_record.get("public_probe_additional_decode_count") == 1
-        and update_record.get("actual_dtype_single_write_count") == 1
-        and all(
-            type(update_record.get(field_name)) is float
-            and math.isfinite(update_record[field_name])
-            for field_name in finite_fields
-        )
-        and all(update_record[field_name] > 0.0 for field_name in positive_fields)
-        and 0.0 < update_record["common_gamma"] <= 1.0
-        and update_record["combined_effective_l2"]
-        <= update_record["combined_effective_l2_limit"]
-        and update_record.get("combined_effective_l2_ready") is True
-        and update_record["final_postwrite_qk_score"]
-        > update_record["content_only_postwrite_qk_score"]
-        and update_record.get("post_write_qk_strict_ready") is True
-        and all(_is_sha256_hex(update_record.get(field_name)) for field_name in digest_fields)
-        and update_record.get("attention_module_names")
-        == list(config.attention_module_names)
-        and update_record.get("reference_source")
+        and full_update.get("selected_sign")
+        == carrier_update.get("selected_sign")
+        == diagnostic.get("selected_survival_direction_sign")
+        and full_update.get("probe_bundle_digest")
+        == carrier_update.get("probe_bundle_digest")
+        == protocol_record.get("probe_bundle_digest")
+        and full_update.get("z10_content_sha256")
+        == carrier_update.get("z10_content_sha256")
+        and full_update.get("routing_identity_digest")
+        == carrier_update.get("routing_identity_digest")
+        and full_update.get("lf_update_content_sha256")
+        == carrier_update.get("lf_update_content_sha256")
+        and full_update.get("tail_robust_update_content_sha256")
+        == carrier_update.get("tail_robust_update_content_sha256")
+        and full_update.get("attention_geometry_enabled") is True
+        and carrier_update.get("attention_geometry_enabled") is False
+        and full_update.get("post_write_qk_strict_ready") is True
+        and full_update["final_postwrite_qk_score"]
+        > full_update["content_only_postwrite_qk_score"]
+        and full_update["combined_effective_l2"]
+        <= full_update["combined_effective_l2_limit"]
+        and carrier_update["combined_effective_l2"]
+        <= carrier_update["combined_effective_l2_limit"]
+        and full_update.get("combined_effective_l2_ready") is True
+        and carrier_update.get("combined_effective_l2_ready") is True
+        and full_update.get("actual_dtype_single_write_count") == 1
+        and carrier_update.get("actual_dtype_single_write_count") == 1
+        and full_update.get("reference_source")
         == "fixed_content_routing_reference_registry"
-        and update_record.get("supports_paper_claim") is False
+        and carrier_update.get("reference_source")
+        == "fixed_content_routing_reference_registry"
+        and full_update.get("supports_paper_claim") is False
+        and carrier_update.get("supports_paper_claim") is False
+        and all(
+            _is_sha256_hex(record.get(field_name))
+            for record in (full_update, carrier_update)
+            for field_name in (
+                "z10_content_sha256",
+                "written_latent_content_sha256",
+                "probe_bundle_digest",
+                "actual_dtype_single_write_digest",
+                "routing_identity_digest",
+                "lf_update_content_sha256",
+                "tail_robust_update_content_sha256",
+            )
+        )
     ):
         return False
 
-    base_detection_roles = []
     base_role_paths = {
-        "clean_negative": result_paths["clean_image_path"],
-        "positive_source": result_paths["watermarked_image_path"],
-        "wrong_key_negative": result_paths["watermarked_image_path"],
+        "clean_negative": result_paths["clean_image"],
+        "positive_source": result_paths["full_image"],
+        "wrong_key_negative": result_paths["full_image"],
     }
     base_role_key_roles = {
         "clean_negative": REGISTERED_WATERMARK_KEY_ROLE,
         "positive_source": REGISTERED_WATERMARK_KEY_ROLE,
         "wrong_key_negative": REGISTERED_WRONG_KEY_ROLE,
     }
+    if tuple(
+        record.get("sample_role") for record in detection_records
+    ) != tuple(base_role_paths):
+        return False
     try:
         for record in detection_records:
             validate_image_only_measurement_digest_record(record)
             record_metadata = record.get("metadata")
-            if not isinstance(record_metadata, Mapping):
-                return False
+            sample_role = record.get("sample_role")
+            expected_path = base_role_paths[sample_role]
+            resolved_image_path = _resolve_repository_output_path(
+                root_path,
+                expected_path,
+            )
             if not (
-                record.get("run_id") == result_payload.get("run_id")
+                isinstance(record_metadata, Mapping)
+                and record.get("run_id") == result_payload.get("run_id")
                 and record.get("prompt_id") == config.prompt_id
                 and record.get("split") == config.split
-                and record_metadata.get("method_role") == "full_dual_chain"
+                and record.get("detection_key_role")
+                == base_role_key_roles[sample_role]
+                and record.get("source_image_path") == expected_path
+                and record.get("evaluated_image_path") == expected_path
+                and record.get("source_image_digest")
+                == record.get("evaluated_image_digest")
+                and resolved_image_path is not None
+                and resolved_image_path.is_file()
+                and file_digest(resolved_image_path)
+                == record.get("source_image_digest")
+                and not record.get("attacked_image_path")
+                and not record.get("attacked_image_digest")
+                and record_metadata.get("method_role")
+                == "full_dual_chain"
                 and record_metadata.get("measurement_status")
                 == "threshold_independent_image_only_evidence"
                 and record_metadata.get("reference_source")
@@ -2204,42 +2313,47 @@ def _formal_content_runtime_artifact_binding_ready(
                 and record_metadata.get("supports_paper_claim") is False
             ):
                 return False
-            if not record.get("attacked_image_key"):
-                sample_role = record.get("sample_role")
-                if not (
-                    sample_role in base_role_paths
-                    and record.get("source_image_path")
-                    == base_role_paths[sample_role]
-                    and record.get("evaluated_image_path")
-                    == base_role_paths[sample_role]
-                    and record.get("detection_key_role")
-                    == base_role_key_roles[sample_role]
-                ):
-                    return False
-                base_detection_roles.append(sample_role)
-            for path_field, digest_field in (
-                ("source_image_path", "source_image_digest"),
-                ("evaluated_image_path", "evaluated_image_digest"),
-            ):
-                relative_path = str(record.get(path_field, ""))
-                resolved_path = _resolve_repository_output_path(
-                    root_path,
-                    relative_path,
-                )
-                if not (
-                    relative_path in output_paths
-                    and resolved_path is not None
-                    and resolved_path.is_file()
-                    and file_digest(resolved_path) == record.get(digest_field)
-                ):
-                    return False
-    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+    except (KeyError, OSError, TypeError, ValueError):
         return False
-    return tuple(base_detection_roles) == (
-        "clean_negative",
-        "positive_source",
-        "wrong_key_negative",
+
+    counterfactual_identity = counterfactual.get(
+        "carrier_only_counterfactual_identity_digest"
     )
+    if not (
+        _is_sha256_hex(counterfactual_identity)
+        and counterfactual.get(
+            "carrier_only_counterfactual_image_path"
+        )
+        == result_paths["carrier_image"]
+        and counterfactual.get(
+            "carrier_only_counterfactual_image_digest"
+        )
+        == file_digest(resolved_paths["carrier_image"])
+        and counterfactual.get(
+            "carrier_only_counterfactual_atom_path"
+        )
+        == result_paths["carrier_update"]
+        and counterfactual.get(
+            "carrier_only_counterfactual_atom_file_sha256"
+        )
+        == file_digest(resolved_paths["carrier_update"])
+    ):
+        return False
+    for field_name, ready_field in (
+        ("final_image_preservation", "final_image_preservation_gate_ready"),
+        (
+            "carrier_only_final_image_preservation",
+            "carrier_only_counterfactual_three_way_preservation_gate_ready",
+        ),
+        (
+            "final_image_attention_observability",
+            "final_image_attention_observability_gate_ready",
+        ),
+    ):
+        evidence = metadata.get(field_name)
+        if not isinstance(evidence, Mapping) or evidence.get(ready_field) is not True:
+            return False
+    return True
 
 
 def load_completed_semantic_watermark_runtime_result(
@@ -6382,7 +6496,7 @@ def _run_semantic_watermark_runtime_with_content_strength(
     Any | None,
     dict[str, Any],
 ]:
-    """执行正式索引10单写回生成与仅图像盲检测。"""
+    """执行七条固定生成链并以 registered-only probe 冻结共同方向。"""
 
     _require_full_content_runtime_config(config)
     _require_calibration_content_strength_multiplier(
@@ -6401,20 +6515,29 @@ def _run_semantic_watermark_runtime_with_content_strength(
     if config.injection_step_indices != (10,):
         raise ValueError("正式 runtime 只允许索引10单次写回")
     if config.standard_attack_profiles or config.diffusion_attacks_enabled:
-        raise RuntimeError(
-            "未资格化 reference 的正式单样本链不得启动攻击或实验矩阵"
-        )
+        raise RuntimeError("survival direction calibration 不得启动攻击")
 
     started_at = time.time()
+    repository_root_path = Path(repository_root).resolve()
+    protocol = load_content_survival_direction_protocol(repository_root_path)
+    core_method_digest = semantic_conditioned_latent_method_definition_digest()
+    composite_method_identity = build_content_survival_runtime_method_identity(
+        core_method_definition_digest=core_method_digest,
+        protocol=protocol,
+    )
     context = runtime_context or load_semantic_watermark_runtime_context(
         config,
         verified_formal_execution_lock=verified_formal_execution_lock,
-        repository_root=repository_root,
+        repository_root=repository_root_path,
     )
     serialized_runtime_versions = json.dumps(
         context.runtime_versions,
         ensure_ascii=False,
         sort_keys=True,
+    )
+    forbidden_runtime_modules = (
+        "main.methods.subspace.jacobian_nullspace",
+        "main.methods.semantic.runtime",
     )
     for forbidden in (
         "semantic_feature_operator_contract",
@@ -6426,36 +6549,588 @@ def _run_semantic_watermark_runtime_with_content_strength(
     ):
         if forbidden in serialized_runtime_versions:
             raise RuntimeError("正式 runtime 仍携带旧716/JVP/VJP/PSD-CG身份")
-    components = _ContentRuntimeSmokeComponents(
-        pipeline=context.pipeline,
-        prompt_saliency_runtime=context.prompt_saliency_runtime,
-        attention_modules=context.attention_modules,
-        unconditional_prompt=context.unconditional_prompt,
-        unconditional_pooled=context.unconditional_pooled,
-        runtime_versions=context.runtime_versions,
+
+    pipeline = context.pipeline
+    base_latent_shape = (
+        1,
+        int(pipeline.transformer.config.in_channels),
+        int(config.height) // int(pipeline.vae_scale_factor),
+        int(config.width) // int(pipeline.vae_scale_factor),
     )
-    clean_image, watermarked_image, diagnostic = (
-        _run_content_runtime_generation(
-            config,
-            references,
-            components=components,
-            include_clean=True,
-            content_strength_common_multiplier=(
-                content_strength_common_multiplier
-            ),
+    base_latent, base_identity = build_canonical_sd35_base_latent(
+        shape=base_latent_shape,
+        generation_seed_random=int(config.seed),
+        model_id=config.model_id,
+        model_revision=config.model_revision,
+        device=pipeline._execution_device,
+        dtype=pipeline.transformer.dtype,
+    )
+    prompt_embeds, pooled_prompt_embeds = _content_runtime_prompt_embeddings(
+        pipeline,
+        config.prompt,
+    )
+    model_identity_digest = build_stable_digest(
+        {"model_id": config.model_id, "model_revision": config.model_revision}
+    )
+    public_probe_identity = build_public_probe_identity(config.model_revision)
+    common_kwargs = {
+        "prompt": config.prompt,
+        "negative_prompt": config.negative_prompt,
+        "width": config.width,
+        "height": config.height,
+        "num_inference_steps": config.inference_steps,
+        "guidance_scale": config.guidance_scale,
+        "output_type": "pil",
+    }
+    chain_records: list[dict[str, Any]] = []
+    role_payloads: dict[str, dict[str, Any]] = {}
+
+    def run_chain(
+        role: str,
+        *,
+        probe_sign: int | None = None,
+        replay_sign: int | None = None,
+    ) -> tuple[Any, dict[str, Any]]:
+        """从同一 canonical latent 运行一个固定角色并冻结索引10身份。"""
+
+        if role not in CONTENT_SURVIVAL_CHAIN_ROLES:
+            raise ValueError("generation chain role is not governed")
+        captured_z9: Any | None = None
+        z10_digest = ""
+        callback_count = 0
+        payload: dict[str, Any] = {}
+
+        def callback(
+            pipe: Any,
+            step_index: int,
+            timestep: Any,
+            callback_kwargs: dict[str, Any],
+        ) -> dict[str, Any]:
+            nonlocal captured_z9, z10_digest, callback_count, payload
+            latent = callback_kwargs.get("latents")
+            if latent is None:
+                raise RuntimeError("survival chain callback requires latents")
+            if step_index == 9:
+                if captured_z9 is not None:
+                    raise RuntimeError("survival chain captured z9 more than once")
+                captured_z9 = latent.detach().clone()
+                return callback_kwargs
+            if step_index != 10:
+                return callback_kwargs
+            if captured_z9 is None or callback_count:
+                raise RuntimeError("survival chain requires one z9 and one z10")
+            callback_count += 1
+            z10 = latent
+            z10_digest = tensor_content_sha256(z10.detach().float())
+            payload = {
+                "role": role,
+                "step_index": 10,
+                "scheduler_step_timestep": float(
+                    timestep.detach().float().item()
+                ),
+                "z9_content_sha256": tensor_content_sha256(
+                    captured_z9.detach().float()
+                ),
+                "z10_content_sha256": z10_digest,
+            }
+            if role == "clean_reference":
+                payload["written_latent_content_sha256"] = z10_digest
+                return callback_kwargs
+
+            decoded_x10 = _decode_content_runtime_latent(pipe, z10)
+            additional_decode_count = 0
+
+            def vae_decoder(candidate: Any) -> Any:
+                nonlocal additional_decode_count
+                additional_decode_count += 1
+                if additional_decode_count != 1:
+                    raise RuntimeError("each survival chain permits one public probe decode")
+                return _decode_content_runtime_latent(pipe, candidate)
+
+            observations = build_content_observation_routing(
+                previous_scheduler_latent=captured_z9,
+                current_scheduler_latent=z10,
+                decoded_current_image=decoded_x10,
+                prompt=config.prompt,
+                saliency_runtime=context.prompt_saliency_runtime,
+                vae_decoder=vae_decoder,
+                public_probe_identity=public_probe_identity,
+                reference_gradient=references.reference_gradient,
+                reference_response=references.reference_response,
+                reference_sensitivity=references.reference_sensitivity,
+            )
+            if additional_decode_count != 1:
+                raise RuntimeError("content observation probe decode did not execute")
+            lf_template = build_formal_low_frequency_template(
+                z10,
+                config.key_material,
+                model_identity_digest,
+                prg_version=KEYED_PRG_VERSION,
+            )
+            hf_template = build_high_frequency_tail_template(
+                z10,
+                config.key_material,
+                model_identity_digest,
+                prg_version=KEYED_PRG_VERSION,
+            )
+            content_update = build_content_carrier_update(
+                current_scheduler_latent=z10,
+                routing=observations.routing,
+                lf_template=lf_template,
+                hf_tail_template=hf_template,
+                method_role="full_dual_chain",
+                content_strength_common_multiplier=(
+                    content_strength_common_multiplier
+                ),
+            )
+            transformer_forward = _transformer_forward_function(
+                pipe,
+                timestep,
+                prompt_embeds,
+                pooled_prompt_embeds,
+            )
+            full_role = role.startswith("full_")
+            geometry = None
+            geometry_evidence = None
+            if full_role:
+                recorder = DifferentiableAttentionRecorder(
+                    context.attention_modules,
+                    max_tokens=config.max_attention_tokens,
+                )
+                try:
+                    geometry, geometry_evidence = (
+                        _build_attention_geometry_sync_update_with_evidence(
+                            current_scheduler_latent=z10,
+                            content_update=content_update,
+                            transformer_forward=transformer_forward,
+                            recorder=recorder,
+                            key_material=config.key_material,
+                            prg_version=KEYED_PRG_VERSION,
+                        )
+                    )
+                finally:
+                    recorder.close()
+            geometry_update = (
+                geometry.geometry_update
+                if geometry is not None
+                else torch.zeros_like(z10, dtype=torch.float32)
+            )
+            raw_direction = (
+                content_update.lf_update
+                + content_update.hf_tail_update
+                + geometry_update
+            )
+            payload.update(
+                {
+                    "routing_identity_digest": (
+                        observations.routing.routing_identity_digest
+                    ),
+                    "lf_update_content_sha256": tensor_content_sha256(
+                        content_update.lf_update
+                    ),
+                    "tail_robust_update_content_sha256": tensor_content_sha256(
+                        content_update.hf_tail_update
+                    ),
+                    "attention_geometry_update_content_sha256": (
+                        tensor_content_sha256(geometry_update)
+                        if full_role
+                        else ""
+                    ),
+                    "registered_direction_content_sha256": tensor_content_sha256(
+                        raw_direction
+                    ),
+                    "lf_nominal_strength": content_update.lf_nominal_strength,
+                    "hf_tail_nominal_strength": (
+                        content_update.hf_tail_nominal_strength
+                    ),
+                    "attention_geometry_enabled": full_role,
+                    "attention_module_names": list(
+                        config.attention_module_names
+                    ),
+                }
+            )
+            if probe_sign is not None:
+                written, probe_record = materialize_content_survival_probe(
+                    z10,
+                    raw_direction,
+                    sign=probe_sign,
+                    role=role,
+                    protocol=protocol,
+                )
+                callback_kwargs["latents"] = written
+                payload.update(probe_record)
+                payload["written_latent_content_sha256"] = tensor_content_sha256(
+                    written.detach().float()
+                )
+                return callback_kwargs
+            if replay_sign is None:
+                raise RuntimeError("nominal replay requires the selected sign")
+            signed_lf = content_update.lf_update * float(replay_sign)
+            signed_hf = content_update.hf_tail_update * float(replay_sign)
+            signed_geometry = geometry_update * float(replay_sign)
+            method_role = "full_dual_chain" if full_role else "content_chain_only"
+            write_budget = formal_dual_chain_write_budget()
+            write_result = compose_dual_chain_update_once(
+                z10,
+                signed_lf,
+                signed_hf,
+                signed_geometry,
+                write_budget,
+                method_role=method_role,
+            )
+            callback_kwargs["latents"] = write_result.written_latent
+            payload.update(
+                {
+                    "selected_sign": replay_sign,
+                    "method_role": method_role,
+                    "actual_dtype_single_write_count": 1,
+                    "common_gamma": write_result.accepted_common_scale,
+                    "content_strength_common_multiplier": (
+                        content_strength_common_multiplier
+                    ),
+                    "lf_effective_l2": write_result.lf_effective_l2,
+                    "hf_tail_effective_l2": write_result.hf_tail_effective_l2,
+                    "geometry_effective_l2": write_result.geometry_effective_l2,
+                    "combined_effective_l2": write_result.combined_effective_l2,
+                    "combined_effective_l2_limit": float(
+                        torch.linalg.vector_norm(z10.detach().float().reshape(-1)).item()
+                        * write_budget.combined_relative_l2_limit
+                    ),
+                    "combined_effective_l2_ready": True,
+                    "actual_dtype_single_write_digest": (
+                        write_result.actual_dtype_write_digest
+                    ),
+                    "written_latent_content_sha256": tensor_content_sha256(
+                        write_result.written_latent.detach().float()
+                    ),
+                    "write_identity_digest": write_result.write_identity_digest,
+                    "geometry_update_digest": (
+                        geometry.geometry_update_digest
+                        if geometry is not None
+                        else ""
+                    ),
+                    "geometry_qk_atomic_records_digest": (
+                        geometry.qk_atomic_records_digest
+                        if geometry is not None
+                        else ""
+                    ),
+                }
+            )
+            if full_role:
+                recorder = DifferentiableAttentionRecorder(
+                    context.attention_modules,
+                    max_tokens=config.max_attention_tokens,
+                )
+                try:
+                    content_latent = (
+                        z10.detach().float()
+                        + signed_lf * write_result.accepted_common_scale
+                        + signed_hf * write_result.accepted_common_scale
+                    ).to(dtype=z10.dtype)
+                    content_score, content_qk_digest = (
+                        _evaluate_post_write_geometry_relation(
+                            written_latent=content_latent,
+                            transformer_forward=transformer_forward,
+                            recorder=recorder,
+                            key_material=config.key_material,
+                            runtime_evidence=geometry_evidence,
+                        )
+                    )
+                    full_score, full_qk_digest = (
+                        _evaluate_post_write_geometry_relation(
+                            written_latent=write_result.written_latent,
+                            transformer_forward=transformer_forward,
+                            recorder=recorder,
+                            key_material=config.key_material,
+                            runtime_evidence=geometry_evidence,
+                        )
+                    )
+                finally:
+                    recorder.close()
+                if not full_score > content_score:
+                    raise RuntimeError("nominal full replay failed the strict Q/K gate")
+                payload.update(
+                    {
+                        "content_only_postwrite_qk_score": content_score,
+                        "final_postwrite_qk_score": full_score,
+                        "post_write_qk_strict_ready": True,
+                        "content_only_postwrite_qk_digest": content_qk_digest,
+                        "final_postwrite_qk_digest": full_qk_digest,
+                    }
+                )
+            return callback_kwargs
+
+        output = pipeline(
+            latents=base_latent.detach().clone(),
+            callback_on_step_end=callback,
+            callback_on_step_end_tensor_inputs=["latents"],
+            **common_kwargs,
         )
-    )
-    if clean_image is None:
-        raise RuntimeError("正式 runtime 必须生成共享base latent的clean图像")
+        if callback_count != 1 or not z10_digest or not payload:
+            raise RuntimeError("survival chain did not execute its unique z10 callback")
+        image = output.images[0]
+        image_identity = canonical_rgb_uint8_content_record(image)
+        payload.update(
+            {
+                "chain_index": len(chain_records),
+                "base_latent_content_digest_random": base_identity[
+                    "base_latent_content_digest_random"
+                ],
+                "base_latent_identity_digest_random": base_identity[
+                    "base_latent_identity_digest_random"
+                ],
+                "output_image_rgb_uint8_content_sha256": image_identity[
+                    "image_rgb_uint8_content_sha256"
+                ],
+                "output_image_width": image_identity["image_width"],
+                "output_image_height": image_identity["image_height"],
+                "supports_paper_claim": False,
+            }
+        )
+        payload["chain_record_digest"] = build_stable_digest(payload)
+        chain_records.append(payload)
+        role_payloads[role] = payload
+        return image, payload
+
+    clean_image, _ = run_chain("clean_reference")
+    probe_images: dict[str, Any] = {}
+    for role, sign in (
+        ("full_probe_positive", 1),
+        ("full_probe_negative", -1),
+        ("carrier_probe_positive", 1),
+        ("carrier_probe_negative", -1),
+    ):
+        probe_images[role], _ = run_chain(role, probe_sign=sign)
 
     measurement_config = _build_image_only_measurement_config(config)
-    attention_extractor = _image_attention_extractor(
-        context.pipeline,
+    probe_attention_extractor = _image_attention_extractor(
+        pipeline,
         config,
         context.attention_modules,
         context.unconditional_prompt,
         context.unconditional_pooled,
     )
+    probe_records: list[dict[str, Any]] = []
+    registered_key, _ = resolve_detection_key_material_and_identity(
+        config.key_material,
+        REGISTERED_WATERMARK_KEY_ROLE,
+    )
+    for role in CONTENT_SURVIVAL_PROBE_ROLES:
+        cursor = _public_detection_noise_evidence_cursor(
+            probe_attention_extractor
+        )
+        measurement = measure_image_only_watermark(
+            image=probe_images[role],
+            key_material=registered_key,
+            config=measurement_config,
+            image_latent_encoder=lambda candidate: _encode_image_latent(
+                pipeline,
+                candidate,
+            ),
+            image_attention_extractor=probe_attention_extractor,
+            image_aligner=_align_image if config.image_alignment_enabled else None,
+        )
+        _discard_public_detection_noise_evidence_since(
+            probe_attention_extractor,
+            cursor,
+        )
+        record = {
+            **role_payloads[role],
+            "registered_content_score": float(
+                measurement.to_record()["content_score"]
+            ),
+            "registered_measurement_digest": measurement.to_record()[
+                "measurement_digest"
+            ],
+            "wrong_key_used_for_selection": False,
+            "supports_paper_claim": False,
+        }
+        record["probe_artifact_digest"] = build_stable_digest(record)
+        probe_records.append(record)
+    selection = select_shared_content_survival_sign(
+        probe_records,
+        protocol=protocol,
+    )
+    selected_sign = int(selection["selected_sign"])
+    probe_bundle_payload = {
+        "protocol_identity": protocol.identity_record(),
+        "composite_runtime_method_identity": composite_method_identity,
+        "base_latent_identity_digest_random": base_identity[
+            "base_latent_identity_digest_random"
+        ],
+        "probe_records": probe_records,
+        "selection": selection,
+    }
+    probe_bundle_digest = build_stable_digest(probe_bundle_payload)
+
+    carrier_only_image, carrier_payload = run_chain(
+        "carrier_nominal_replay",
+        replay_sign=selected_sign,
+    )
+    watermarked_image, full_payload = run_chain(
+        "full_nominal_replay",
+        replay_sign=selected_sign,
+    )
+    z10_digests = {record["z10_content_sha256"] for record in chain_records}
+    scheduler_timesteps = {
+        record["scheduler_step_timestep"] for record in chain_records
+    }
+    if len(z10_digests) != 1 or len(scheduler_timesteps) != 1:
+        raise RuntimeError("seven chains did not share scheduler/z10 identity")
+    governed_carrier_records = chain_records[1:]
+    for identity_field in (
+        "routing_identity_digest",
+        "lf_update_content_sha256",
+        "tail_robust_update_content_sha256",
+    ):
+        if len(
+            {record.get(identity_field) for record in governed_carrier_records}
+        ) != 1:
+            raise RuntimeError(
+                "seven-chain carrier identity drifted across scheduler forks"
+            )
+    full_geometry_records = (
+        chain_records[1],
+        chain_records[2],
+        chain_records[6],
+    )
+    if len(
+        {
+            record.get("attention_geometry_update_content_sha256")
+            for record in full_geometry_records
+        }
+    ) != 1:
+        raise RuntimeError("full probe and replay geometry identity drifted")
+    for replay_payload in (carrier_payload, full_payload):
+        replay_payload["probe_bundle_digest"] = probe_bundle_digest
+        replay_payload["nominal_replay_parent_ready"] = True
+        replay_payload.pop("chain_record_digest", None)
+        replay_payload["nominal_replay_record_digest"] = build_stable_digest(
+            replay_payload
+        )
+    for chain_record in chain_records:
+        chain_record.pop("chain_record_digest", None)
+        chain_record["chain_record_digest"] = build_stable_digest(
+            chain_record
+        )
+
+    counterfactual_payload = {
+        "carrier_only_counterfactual_changed_fields": [
+            "attention_geometry_enabled"
+        ],
+        "carrier_only_counterfactual_generation_seed_random": int(config.seed),
+        "carrier_only_counterfactual_initial_latent_identity_ready": True,
+        "carrier_only_counterfactual_scheduler_identity_ready": True,
+        "carrier_only_counterfactual_attention_geometry_enabled": False,
+        "full_method_counterfactual_carrier_branches": [
+            "lf_content",
+            "tail_robust",
+            "attention_geometry",
+        ],
+        "carrier_only_counterfactual_carrier_branches": [
+            "lf_content",
+            "tail_robust",
+        ],
+        "full_method_initial_latent_content_sha256": full_payload[
+            "z10_content_sha256"
+        ],
+        "carrier_only_initial_latent_content_sha256": carrier_payload[
+            "z10_content_sha256"
+        ],
+        "full_method_counterfactual_update_records_digest": build_stable_digest(
+            [full_payload]
+        ),
+        "carrier_only_counterfactual_update_records_digest": build_stable_digest(
+            [carrier_payload]
+        ),
+        "carrier_only_counterfactual_atom_content_digest": build_stable_digest(
+            [carrier_payload]
+        ),
+        "carrier_only_counterfactual_scheduler_trace": [
+            {
+                "step_index": 10,
+                "scheduler_step_timestep": full_payload[
+                    "scheduler_step_timestep"
+                ],
+            }
+        ],
+        "carrier_only_counterfactual_effect_scope": (
+            "attention_geometry_switch_total_mechanism_effect"
+        ),
+        "carrier_only_counterfactual_realized_carrier_equality_assumed": False,
+        "carrier_only_counterfactual_downstream_interactions_included": True,
+        "selected_survival_direction_sign": selected_sign,
+        "probe_bundle_digest": probe_bundle_digest,
+        "composite_runtime_method_identity_digest": composite_method_identity[
+            "composite_runtime_method_identity_digest"
+        ],
+    }
+    counterfactual_identity_digest = build_stable_digest(counterfactual_payload)
+    carrier_only_counterfactual = {
+        **counterfactual_payload,
+        "carrier_only_counterfactual_identity_digest": (
+            counterfactual_identity_digest
+        ),
+        "carrier_only_counterfactual_ready": True,
+    }
+
+    def image_tensor(image: Any) -> Any:
+        pixels = pipeline.image_processor.preprocess(image).to(
+            device=pipeline._execution_device,
+            dtype=torch.float32,
+        )
+        return (pixels / 2.0 + 0.5).clamp(0.0, 1.0)
+
+    clean_tensor = image_tensor(clean_image)
+    carrier_tensor = image_tensor(carrier_only_image)
+    full_tensor = image_tensor(watermarked_image)
+    (
+        final_image_preservation,
+        carrier_only_final_image_preservation,
+        final_image_feature_record,
+    ) = build_three_image_content_survival_evidence(
+        runtime=context.prompt_saliency_runtime,
+        clean_image=clean_tensor,
+        carrier_only_image=carrier_tensor,
+        full_image=full_tensor,
+        minimum_semantic_cosine=config.minimum_semantic_preservation_cosine,
+        maximum_structure_relative_drift=(
+            config.maximum_handcrafted_structure_feature_relative_drift
+        ),
+        counterfactual_identity_digest=counterfactual_identity_digest,
+    )
+    if (
+        final_image_preservation["final_image_preservation_gate_ready"] is not True
+        or carrier_only_final_image_preservation[
+            "carrier_only_counterfactual_three_way_preservation_gate_ready"
+        ]
+        is not True
+    ):
+        raise RuntimeError("nominal replay images failed preservation gates")
+
+    attention_extractor = _image_attention_extractor(
+        pipeline,
+        config,
+        context.attention_modules,
+        context.unconditional_prompt,
+        context.unconditional_pooled,
+    )
+    final_image_attention_observability = (
+        _final_image_attention_observability_record(
+            attention_extractor,
+            clean_image,
+            carrier_only_image,
+            watermarked_image,
+            config,
+            carrier_only_counterfactual=carrier_only_counterfactual,
+            require_gpu_execution=True,
+        )
+    )
+    if final_image_attention_observability[
+        "final_image_attention_observability_gate_ready"
+    ] is not True:
+        raise RuntimeError("nominal replay images failed final-image Q/K observability")
+
     run_id = build_semantic_watermark_run_id(config)
     paired_quality = compute_image_quality_metrics(clean_image, watermarked_image)
     detections: list[dict[str, Any]] = []
@@ -6471,15 +7146,13 @@ def _run_semantic_watermark_runtime_with_content_strength(
                 detection_key_role,
             )
         )
-        noise_cursor = _public_detection_noise_evidence_cursor(
-            attention_extractor
-        )
+        noise_cursor = _public_detection_noise_evidence_cursor(attention_extractor)
         detection = measure_image_only_watermark(
             image=image,
             key_material=detection_key,
             config=measurement_config,
             image_latent_encoder=lambda candidate: _encode_image_latent(
-                context.pipeline,
+                pipeline,
                 candidate,
             ),
             image_attention_extractor=attention_extractor,
@@ -6511,87 +7184,49 @@ def _run_semantic_watermark_runtime_with_content_strength(
         }
         detections.append(record)
 
+    diagnostic = {
+        **full_payload,
+        "captured_previous_index": 9,
+        "captured_previous_count": 1,
+        "callback_write_index": 10,
+        "callback_write_count": 1,
+        "current_image_decode_count": 1,
+        "public_probe_additional_decode_count": 1,
+        "chain_count": 7,
+        "chain_roles": list(CONTENT_SURVIVAL_CHAIN_ROLES),
+        "probe_bundle_digest": probe_bundle_digest,
+        "selected_survival_direction_sign": selected_sign,
+    }
     update_record = {
+        **full_payload,
         "run_id": run_id,
         "step_index": 10,
-        "method_role": diagnostic["method_role"],
-        "captured_previous_index": diagnostic["captured_previous_index"],
-        "captured_previous_count": diagnostic["captured_previous_count"],
-        "callback_write_index": diagnostic["callback_write_index"],
-        "callback_write_count": diagnostic["callback_write_count"],
-        "actual_dtype_single_write_count": diagnostic[
-            "actual_dtype_single_write_count"
-        ],
-        "current_image_decode_count": diagnostic["current_image_decode_count"],
-        "public_probe_additional_decode_count": diagnostic[
-            "public_probe_additional_decode_count"
-        ],
-        "lf_effective_l2": diagnostic["lf_effective_l2"],
-        "hf_tail_effective_l2": diagnostic["hf_tail_effective_l2"],
-        "geometry_effective_l2": diagnostic["geometry_effective_l2"],
-        "combined_effective_l2": diagnostic["combined_effective_l2"],
-        "combined_effective_l2_limit": diagnostic[
-            "combined_effective_l2_limit"
-        ],
-        "combined_effective_l2_ready": diagnostic[
-            "combined_effective_l2_ready"
-        ],
-        "common_gamma": diagnostic["common_gamma"],
-        "content_strength_common_multiplier": diagnostic[
-            "content_strength_common_multiplier"
-        ],
-        "lf_nominal_strength": diagnostic["lf_nominal_strength"],
-        "hf_tail_nominal_strength": diagnostic["hf_tail_nominal_strength"],
-        "content_only_postwrite_qk_score": diagnostic[
-            "content_only_postwrite_qk_score"
-        ],
-        "final_postwrite_qk_score": diagnostic["final_postwrite_qk_score"],
-        "post_write_qk_strict_ready": diagnostic[
-            "post_write_qk_strict_ready"
-        ],
-        "actual_dtype_single_write_digest": diagnostic[
-            "actual_dtype_single_write_digest"
-        ],
-        "routing_identity_digest": diagnostic["routing_identity_digest"],
-        "geometry_update_digest": diagnostic["geometry_update_digest"],
-        "geometry_qk_atomic_records_digest": diagnostic[
-            "geometry_qk_atomic_records_digest"
-        ],
-        "content_only_postwrite_qk_digest": diagnostic[
-            "content_only_postwrite_qk_digest"
-        ],
-        "final_postwrite_qk_digest": diagnostic[
-            "final_postwrite_qk_digest"
-        ],
-        "attention_module_names": list(config.attention_module_names),
         "reference_source": "fixed_content_routing_reference_registry",
         "supports_paper_claim": False,
     }
-    if not all(
-        float(update_record[field_name]) > 0.0
-        for field_name in (
-            "lf_effective_l2",
-            "hf_tail_effective_l2",
-            "geometry_effective_l2",
-            "combined_effective_l2",
+    carrier_only_update_record = {
+        **carrier_payload,
+        "run_id": run_id,
+        "step_index": 10,
+        "reference_source": "fixed_content_routing_reference_registry",
+        "supports_paper_claim": False,
+    }
+    content_survival_direction_record = (
+        build_content_survival_direction_record(
+            protocol=protocol,
+            composite_method_identity=composite_method_identity,
+            base_latent_identity_digest_random=base_identity[
+                "base_latent_identity_digest_random"
+            ],
+            chain_records=chain_records,
+            probe_records=probe_records,
+            selection=selection,
+            probe_bundle_digest=probe_bundle_digest,
+            final_image_feature_record=final_image_feature_record,
         )
-    ):
-        raise RuntimeError("full_dual_chain 三个正式分支必须均产生非零实际写回")
-    if (
-        update_record["combined_effective_l2_ready"] is not True
-        or not float(update_record["combined_effective_l2"])
-        <= float(update_record["combined_effective_l2_limit"])
-        or update_record["post_write_qk_strict_ready"] is not True
-        or not float(update_record["final_postwrite_qk_score"])
-        > float(update_record["content_only_postwrite_qk_score"])
-    ):
-        raise RuntimeError("正式单写回预算或post-write Q/K门禁未闭合")
+    )
 
     runtime_versions = dict(context.runtime_versions)
-    forbidden_runtime_modules = (
-        "main.methods.subspace.jacobian_nullspace",
-        "main.methods.semantic.runtime",
-    )
     legacy_runtime_dependency_absence_ready = not any(
         module_name in sys.modules for module_name in forbidden_runtime_modules
     )
@@ -6610,7 +7245,7 @@ def _run_semantic_watermark_runtime_with_content_strength(
             config
         ),
         runtime_environment=runtime_versions["runtime_environment"],
-        execution_device_name=str(context.pipeline._execution_device),
+        execution_device_name=str(pipeline._execution_device),
         torch_module=torch,
         random_identity_random=random_identity_random,
     )
@@ -6632,8 +7267,10 @@ def _run_semantic_watermark_runtime_with_content_strength(
             "method_runtime": "formal_content_dual_chain_single_write",
             "formal_method_config_digest": config.formal_method_config_digest,
             "method_definition": semantic_conditioned_latent_method_definition(),
-            "method_definition_digest": (
-                semantic_conditioned_latent_method_definition_digest()
+            "method_definition_digest": core_method_digest,
+            "composite_runtime_method_identity": composite_method_identity,
+            "content_survival_direction_record": (
+                content_survival_direction_record
             ),
             "formal_randomization_reference": formal_randomization_reference,
             "detector_input_access_mode": "image_key_public_model_only",
@@ -6645,6 +7282,15 @@ def _run_semantic_watermark_runtime_with_content_strength(
             "forbidden_runtime_modules": list(forbidden_runtime_modules),
             "paired_quality": paired_quality,
             "content_runtime_diagnostic": diagnostic,
+            "carrier_only_counterfactual": carrier_only_counterfactual,
+            "final_image_preservation": final_image_preservation,
+            "carrier_only_final_image_preservation": (
+                carrier_only_final_image_preservation
+            ),
+            "final_image_attention_observability": (
+                final_image_attention_observability
+            ),
+            "old_content_runtime_artifact_compatible": False,
             "reference_source": "fixed_content_routing_reference_registry",
             "supports_paper_claim": False,
             "scientific_unit_config_digest": (
@@ -6656,11 +7302,11 @@ def _run_semantic_watermark_runtime_with_content_strength(
     return (
         result,
         (update_record,),
-        (),
+        (carrier_only_update_record,),
         tuple(detections),
         clean_image,
         watermarked_image,
-        None,
+        carrier_only_image,
         {},
     )
 
@@ -6705,7 +7351,7 @@ def _write_semantic_watermark_runtime_outputs_with_content_strength(
     content_strength_common_multiplier: float,
     calibration_content_strength_sensitivity: bool,
 ) -> SemanticWatermarkRuntimeResult:
-    """运行真实方法并把全部持久化产物写入 outputs。"""
+    """运行真实方法并以 manifest rename-last 原子发布全部产物。"""
 
     _require_full_content_runtime_config(config)
     root_path = Path(root).resolve()
@@ -6734,103 +7380,243 @@ def _write_semantic_watermark_runtime_outputs_with_content_strength(
             calibration_content_strength_sensitivity
         ),
     )
-    detection_key_plan = build_detection_key_plan_record(
-        config.key_material
-    )
+    if carrier_only_image is None or attacked_images:
+        raise RuntimeError(
+            "survival direction publish requires three nominal images only"
+        )
+
     run_dir = output_dir / result.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-
     clean_image_path = run_dir / "clean_image.png"
-    watermarked_image_path = run_dir / "watermarked_image.png"
     carrier_only_image_path = run_dir / "carrier_only_image.png"
-    clean_image.save(clean_image_path)
-    watermarked_image.save(watermarked_image_path)
-    if carrier_only_image is not None:
-        carrier_only_image.save(carrier_only_image_path)
-    attacked_image_dir = run_dir / "attacked_images"
-    attacked_image_dir.mkdir(parents=True, exist_ok=True)
-    attacked_image_paths = []
-    attacked_image_path_by_key: dict[str, Path] = {}
-    for image_key, attacked_image in sorted(attacked_images.items()):
-        attacked_path = attacked_image_dir / f"{image_key}.png"
-        attacked_image.save(attacked_path)
-        attacked_image_path_by_key[image_key] = attacked_path
-        attacked_image_paths.append(attacked_path.relative_to(root_path).as_posix())
+    watermarked_image_path = run_dir / "watermarked_image.png"
     update_path = run_dir / "latent_update_records.jsonl"
     carrier_only_update_path = run_dir / "carrier_only_update_records.jsonl"
     detection_path = run_dir / "image_only_detection_records.jsonl"
+    protocol_record_path = run_dir / CONTENT_SURVIVAL_DIRECTION_RECORD_PATH
+    binding_path = run_dir / CONTENT_SURVIVAL_ARTIFACT_BINDING_PATH
     result_path = run_dir / "runtime_result.json"
+    manifest_path = run_dir / "manifest.local.json"
+    manifest_partial_path = manifest_path.with_name(
+        f"{manifest_path.name}.partial"
+    )
+
+    def require_new_path(path: Path) -> Path:
+        partial = path.with_name(f"{path.name}.partial")
+        if path.exists() or partial.exists():
+            raise FileExistsError(f"artifact path already exists: {path}")
+        return partial
+
+    def fsync_file(path: Path) -> None:
+        with path.open("rb") as handle:
+            os.fsync(handle.fileno())
+
+    def fsync_directory(path: Path) -> None:
+        descriptor = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def atomic_bytes(path: Path, payload: bytes) -> None:
+        partial = require_new_path(path)
+        with partial.open("xb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(partial, path)
+
+    def atomic_image(path: Path, image: Any) -> None:
+        partial = require_new_path(path)
+        image.save(partial, format="PNG")
+        fsync_file(partial)
+        os.replace(partial, path)
+
+    atomic_image(clean_image_path, clean_image)
+    atomic_image(carrier_only_image_path, carrier_only_image)
+    atomic_image(watermarked_image_path, watermarked_image)
+
     governed_detections = []
     for detection in detections:
         record = dict(detection)
         sample_role = str(record.get("sample_role", ""))
-        source_path = clean_image_path if sample_role == "clean_negative" else watermarked_image_path
-        source_image = clean_image if sample_role == "clean_negative" else watermarked_image
-        attacked_image_key = str(record.get("attacked_image_key", ""))
-        evaluated_path = attacked_image_path_by_key.get(attacked_image_key, source_path)
-        evaluated_image = attacked_images.get(attacked_image_key, source_image)
-        source_to_evaluated_quality = compute_image_quality_metrics(source_image, evaluated_image)
-        source_pixel_identity = canonical_rgb_uint8_content_record(
-            source_image
+        source_path = (
+            clean_image_path
+            if sample_role == "clean_negative"
+            else watermarked_image_path
         )
-        evaluated_pixel_identity = canonical_rgb_uint8_content_record(
-            evaluated_image
+        source_image = (
+            clean_image
+            if sample_role == "clean_negative"
+            else watermarked_image
         )
+        source_to_evaluated_quality = compute_image_quality_metrics(
+            source_image,
+            source_image,
+        )
+        pixel_identity = canonical_rgb_uint8_content_record(source_image)
+        relative_source_path = source_path.relative_to(root_path).as_posix()
         record.update(
             {
                 "run_id": result.run_id,
-                "source_image_path": source_path.relative_to(root_path).as_posix(),
+                "source_image_path": relative_source_path,
                 "source_image_digest": file_digest(source_path),
-                "source_image_rgb_uint8_content_sha256": (
-                    source_pixel_identity[
-                        "image_rgb_uint8_content_sha256"
-                    ]
+                "source_image_rgb_uint8_content_sha256": pixel_identity[
+                    "image_rgb_uint8_content_sha256"
+                ],
+                "source_image_width": pixel_identity["image_width"],
+                "source_image_height": pixel_identity["image_height"],
+                "evaluated_image_path": relative_source_path,
+                "evaluated_image_digest": file_digest(source_path),
+                "evaluated_image_rgb_uint8_content_sha256": pixel_identity[
+                    "image_rgb_uint8_content_sha256"
+                ],
+                "evaluated_image_width": pixel_identity["image_width"],
+                "evaluated_image_height": pixel_identity["image_height"],
+                "attacked_image_path": "",
+                "attacked_image_digest": "",
+                "source_to_evaluated_ssim": float(
+                    source_to_evaluated_quality["ssim"]
                 ),
-                "source_image_width": source_pixel_identity[
-                    "image_width"
+                "source_to_evaluated_psnr": source_to_evaluated_quality[
+                    "psnr"
                 ],
-                "source_image_height": source_pixel_identity[
-                    "image_height"
-                ],
-                "evaluated_image_path": evaluated_path.relative_to(root_path).as_posix(),
-                "evaluated_image_digest": file_digest(evaluated_path),
-                "evaluated_image_rgb_uint8_content_sha256": (
-                    evaluated_pixel_identity[
-                        "image_rgb_uint8_content_sha256"
-                    ]
+                "source_to_evaluated_mse": float(
+                    source_to_evaluated_quality["mse"]
                 ),
-                "evaluated_image_width": evaluated_pixel_identity[
-                    "image_width"
-                ],
-                "evaluated_image_height": evaluated_pixel_identity[
-                    "image_height"
-                ],
-                "attacked_image_path": (
-                    evaluated_path.relative_to(root_path).as_posix() if attacked_image_key else ""
-                ),
-                "attacked_image_digest": file_digest(evaluated_path) if attacked_image_key else "",
-                "source_to_evaluated_ssim": float(source_to_evaluated_quality["ssim"]),
-                "source_to_evaluated_psnr": source_to_evaluated_quality["psnr"],
-                "source_to_evaluated_mse": float(source_to_evaluated_quality["mse"]),
             }
         )
         if config.attention_geometry_enabled:
-            record = _bind_detection_qk_to_pixels(
-                record,
-                evaluated_image,
+            record = _bind_detection_qk_to_pixels(record, source_image)
+            record["measurement_digest"] = build_stable_digest(
+                recompute_image_only_measurement_digest_payload(record)
             )
         governed_detections.append(record)
-    update_path.write_text("".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in update_records), encoding="utf-8")
-    if carrier_only_image is not None:
-        carrier_only_update_path.write_text(
-            "".join(
-                json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
-                for row in carrier_only_update_records
+
+    atomic_bytes(
+        update_path,
+        "".join(
+            json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+            for row in update_records
+        ).encode("utf-8"),
+    )
+    atomic_bytes(
+        carrier_only_update_path,
+        "".join(
+            json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+            for row in carrier_only_update_records
+        ).encode("utf-8"),
+    )
+    atomic_bytes(
+        detection_path,
+        "".join(
+            json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+            for row in governed_detections
+        ).encode("utf-8"),
+    )
+    protocol_record = result.metadata["content_survival_direction_record"]
+    atomic_bytes(
+        protocol_record_path,
+        _stable_json(protocol_record).encode("utf-8"),
+    )
+
+    def leaf(role: str, path: Path) -> dict[str, Any]:
+        return {
+            "role": role,
+            "path": path.relative_to(root_path).as_posix(),
+            "size_bytes": path.stat().st_size,
+            "sha256": file_digest(path),
+        }
+
+    leaf_records = [
+        leaf("clean_nominal_image", clean_image_path),
+        leaf("carrier_nominal_image", carrier_only_image_path),
+        leaf("full_nominal_image", watermarked_image_path),
+        leaf("full_nominal_update", update_path),
+        leaf("carrier_nominal_update", carrier_only_update_path),
+        leaf("nominal_detection_records", detection_path),
+        leaf("content_survival_direction_record", protocol_record_path),
+    ]
+    composite_identity = result.metadata[
+        "composite_runtime_method_identity"
+    ]
+    binding = build_content_survival_artifact_binding(
+        run_id=result.run_id,
+        composite_method_identity=composite_identity,
+        protocol_record=protocol_record,
+        leaf_records=leaf_records,
+    )
+    atomic_bytes(binding_path, _stable_json(binding).encode("utf-8"))
+
+    binding_digest = binding[
+        "content_survival_artifact_binding_digest"
+    ]
+    binding_file_sha256 = file_digest(binding_path)
+    carrier_image_relative = carrier_only_image_path.relative_to(
+        root_path
+    ).as_posix()
+    carrier_update_relative = carrier_only_update_path.relative_to(
+        root_path
+    ).as_posix()
+    carrier_image_digest = file_digest(carrier_only_image_path)
+    carrier_update_sha256 = file_digest(carrier_only_update_path)
+    metadata = dict(result.metadata)
+    counterfactual = dict(metadata["carrier_only_counterfactual"])
+    counterfactual.update(
+        {
+            "carrier_only_counterfactual_image_path": carrier_image_relative,
+            "carrier_only_counterfactual_image_digest": carrier_image_digest,
+            "carrier_only_counterfactual_atom_path": carrier_update_relative,
+            "carrier_only_counterfactual_atom_file_sha256": (
+                carrier_update_sha256
             ),
-            encoding="utf-8",
+        }
+    )
+    metadata["carrier_only_counterfactual"] = counterfactual
+    for field_name in (
+        "carrier_only_final_image_preservation",
+        "final_image_attention_observability",
+    ):
+        evidence_record = dict(metadata[field_name])
+        evidence_record.update(
+            {
+                "carrier_only_counterfactual_identity_digest": counterfactual[
+                    "carrier_only_counterfactual_identity_digest"
+                ],
+                "carrier_only_counterfactual_image_path": carrier_image_relative,
+                "carrier_only_counterfactual_image_digest": (
+                    carrier_image_digest
+                ),
+                "carrier_only_counterfactual_atom_path": (
+                    carrier_update_relative
+                ),
+                "carrier_only_counterfactual_atom_file_sha256": (
+                    carrier_update_sha256
+                ),
+                "carrier_only_counterfactual_atom_content_digest": (
+                    counterfactual[
+                        "carrier_only_counterfactual_atom_content_digest"
+                    ]
+                ),
+            }
         )
-    detection_path.write_text("".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in governed_detections), encoding="utf-8")
-    manifest_path = run_dir / "manifest.local.json"
+        metadata[field_name] = evidence_record
+    metadata.update(
+        {
+            "content_survival_direction_record_path": (
+                protocol_record_path.relative_to(root_path).as_posix()
+            ),
+            "content_survival_artifact_binding_path": (
+                binding_path.relative_to(root_path).as_posix()
+            ),
+            "content_survival_artifact_binding_digest": binding_digest,
+            "content_survival_artifact_binding_file_sha256": (
+                binding_file_sha256
+            ),
+            "carrier_only_image_path": carrier_image_relative,
+            "carrier_only_update_record_path": carrier_update_relative,
+        }
+    )
     resolved_result = SemanticWatermarkRuntimeResult(
         **{
             **result.to_dict(),
@@ -6846,32 +7632,33 @@ def _write_semantic_watermark_runtime_outputs_with_content_strength(
             "detection_record_path": detection_path.relative_to(
                 root_path
             ).as_posix(),
-            "manifest_path": manifest_path.relative_to(root_path).as_posix(),
+            "manifest_path": manifest_path.relative_to(
+                root_path
+            ).as_posix(),
+            "metadata": metadata,
         }
     )
-    result_path.write_text(
-        _stable_json(resolved_result.to_dict()),
-        encoding="utf-8",
+    atomic_bytes(
+        result_path,
+        _stable_json(resolved_result.to_dict()).encode("utf-8"),
     )
-    output_paths = (
-        update_path.relative_to(root_path).as_posix(),
-        detection_path.relative_to(root_path).as_posix(),
-        result_path.relative_to(root_path).as_posix(),
-        clean_image_path.relative_to(root_path).as_posix(),
-        watermarked_image_path.relative_to(root_path).as_posix(),
-        *(
-            (carrier_only_image_path.relative_to(root_path).as_posix(),)
-            if carrier_only_image is not None
-            else ()
-        ),
-        *(
-            (carrier_only_update_path.relative_to(root_path).as_posix(),)
-            if carrier_only_image is not None
-            else ()
-        ),
-        *attacked_image_paths,
-        manifest_path.relative_to(root_path).as_posix(),
+
+    output_paths = tuple(
+        path.relative_to(root_path).as_posix()
+        for path in (
+            clean_image_path,
+            carrier_only_image_path,
+            watermarked_image_path,
+            update_path,
+            carrier_only_update_path,
+            detection_path,
+            protocol_record_path,
+            binding_path,
+            result_path,
+            manifest_path,
+        )
     )
+    detection_key_plan = build_detection_key_plan_record(config.key_material)
     manifest = build_artifact_manifest(
         artifact_id=f"{result.run_id}_manifest",
         artifact_type="local_manifest",
@@ -6881,7 +7668,7 @@ def _write_semantic_watermark_runtime_outputs_with_content_strength(
             "scientific_unit_config_digest": (
                 semantic_watermark_runtime_config_digest(config)
             ),
-            "formal_randomization_reference": result.metadata[
+            "formal_randomization_reference": metadata[
                 "formal_randomization_reference"
             ],
         },
@@ -6897,14 +7684,56 @@ def _write_semantic_watermark_runtime_outputs_with_content_strength(
             "detection_key_plan": detection_key_plan,
             "supports_paper_claim": False,
             "formal_runtime_chain": (
-                "content_routing_lf_hf_qk_common_gamma_single_write"
+                "content_survival_registered_probe_nominal_replay"
             ),
             "formal_detection_chain": (
                 "threshold_free_lf_hf_tail_measurement_pending_frozen_evidence"
             ),
+            "composite_runtime_method_identity": composite_identity,
+            "content_survival_artifact_binding_digest": binding_digest,
+            "content_survival_artifact_binding_file_sha256": (
+                binding_file_sha256
+            ),
+            "runtime_result_sha256": file_digest(result_path),
+            "carrier_only_counterfactual_identity_digest": counterfactual[
+                "carrier_only_counterfactual_identity_digest"
+            ],
+            "carrier_only_counterfactual_image_digest": carrier_image_digest,
+            "carrier_only_counterfactual_atom_path": carrier_update_relative,
+            "carrier_only_counterfactual_atom_file_sha256": (
+                carrier_update_sha256
+            ),
+            "carrier_only_counterfactual_atom_content_digest": counterfactual[
+                "carrier_only_counterfactual_atom_content_digest"
+            ],
         },
     ).to_dict()
-    manifest_path.write_text(_stable_json(manifest), encoding="utf-8")
+    if manifest_partial_path.exists() or manifest_path.exists():
+        raise FileExistsError("manifest publish target already exists")
+    with manifest_partial_path.open("xb") as handle:
+        handle.write(_stable_json(manifest).encode("utf-8"))
+        handle.flush()
+        os.fsync(handle.fileno())
+    protocol = load_content_survival_direction_protocol(root_path)
+    if not validate_content_survival_artifact_bundle(
+        repository_root=root_path,
+        result_payload=resolved_result.to_dict(),
+        manifest=manifest,
+        expected_protocol=protocol,
+        expected_core_method_definition_digest=(
+            semantic_conditioned_latent_method_definition_digest()
+        ),
+    ):
+        raise RuntimeError(
+            "content survival artifact pre-publish validation failed"
+        )
+    durable_paths = tuple(root_path / value for value in output_paths[:-1])
+    for path in (*durable_paths, manifest_partial_path):
+        fsync_file(path)
+    fsync_directory(run_dir)
+    os.replace(manifest_partial_path, manifest_path)
+    fsync_directory(run_dir)
+
     output_parts = Path(config.output_dir).parts
     checkpoint_roles = {
         "image_only_dataset_runtime": "image_only_dataset_runtime",

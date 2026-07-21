@@ -1,0 +1,26 @@
+{
+  "$id": "slm_wm_content_survival_direction_protocol",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "chain_protocol": {"type": "object"},
+    "direction": {"type": "object"},
+    "failure_protocol": {"type": "object"},
+    "protocol_schema": {"const": "slm_wm_content_survival_direction_protocol"},
+    "protocol_version": {"const": "content_survival_direction_v1"},
+    "replay_protocol": {"type": "object"},
+    "sign_selection": {"type": "object"},
+    "survival_protocol_semantic_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"}
+  },
+  "required": [
+    "protocol_schema",
+    "protocol_version",
+    "direction",
+    "chain_protocol",
+    "sign_selection",
+    "replay_protocol",
+    "failure_protocol",
+    "survival_protocol_semantic_digest"
+  ],
+  "type": "object"
+}

@@ -16,25 +16,35 @@
 
 | 项目 | 基线 |
 |---|---|
-| 审计日期 | `2026-07-17` |
+| 审计日期 | `2026-07-21` |
 | 重复协议文档修订日期 | `2026-07-17` |
 | profile 与等价执行文档修订日期 | `2026-07-17` |
 | 攻击证据职责文档修订日期 | `2026-07-17` |
-| 源代码基线提交 | `b31ffeb0ecd7a9d47aa36d2e35d6428494593429` |
-| GitNexus 索引提交 | `b31ffeb0ecd7a9d47aa36d2e35d6428494593429` |
-| GitNexus 索引时间 | `2026-07-17T08:10:06.238Z` |
-| GitNexus 索引规模 | 13,210 nodes、29,076 edges、482 clusters、300 flows |
-| 当前活动构建单元 | `core_method_runtime_construction` |
-| 下一目标构建单元 | `experiment_protocol_validation` |
+| 源代码与已审 GPU 证据基线提交 | `db324b7c86a1bef305114fe83db44dfed04fd706` |
+| GitNexus 索引提交 | `db324b7c86a1bef305114fe83db44dfed04fd706` |
+| GitNexus 索引规模 | 21,284 symbols、42,147 relationships、300 execution flows |
+| 当前活动构建单元 | `content_survival_direction_runtime`（S3 CPU-only 实现原子） |
+| 下一目标构建单元 | 本原子独立审计；通过后才决定新的独立 GPU 阶段 |
 | 受治理解释器 | 仓库 `.venv` 的 CPython 3.12.13 |
-| 默认测试事实 | `1646 passed, 76 deselected, 1679 warnings`；默认路径不依赖被 Git 忽略的真实外部 baseline 源码 |
-| 定向文档/schema 检查 | 4个相关 constraint 文件合计 `23 passed` |
+| 默认测试事实 | S3 CPU 原子：`2281 passed, 81 deselected, 380 warnings`；未运行 runtime-heavy GPU qualification |
+| 定向协议/cache/约束检查 | content-survival、formal cache、构建 inventory 与 harness 合约相关检查均通过；定向集合最近一次为 `32 passed`，约束与协议组合为 `23 passed` |
 | harness 与格式检查 | 10项 harness 全部通过；`git diff --check` 通过 |
 | 外部源码 qualification | 显式 integration 运行 `6 failed, 0 skipped`；失败均来自4套登记真实源码目录缺失，符合缺源失败关闭边界，不属于默认测试失败 |
-| 工作树说明 | 本轮治理审计启动时 HEAD 精确匹配上述提交且工作树干净；`4edb1cbd70ee889b8eabc68bb34e34aaa75a9f07` 的文档 schema 闭合与 `b31ffeb0ecd7a9d47aa36d2e35d6428494593429` 的默认测试基线恢复均已提交，但不表示机器协议、核心方法实现或论文证据已经迁移 |
+| 工作树说明 | S3 从已独立审计的 `db324b7` 开始；`.codex/config.toml` 是既有范围外 untracked 文件，本原子不得修改或提交；旧 S1 存储归档保持只读 |
 | 核心实现判断范围 | `main/`、`experiments/`、`configs/model_sd35.yaml`、`configs/method_semantic_registry.json` 及其测试和运行入口 |
 
-当前 GitNexus 索引精确绑定源代码基线；`semantic_conditioned_latent_method_definition` 的现场 upstream impact 为 CRITICAL，具有9个直接依赖、82个累计影响符号和8组受影响流程。该结果只允许用于当前治理排序和后续原子切换规划；进入任何其他符号修改前仍必须对精确符号重跑 impact。正式 GPU 运行必须重新绑定完成核心迁移后的精确 clean detached 提交。本表只用于安排构建，不支持论文主张。
+当前 GitNexus 索引精确绑定 `db324b7`。本原子冻结 `semantic_conditioned_latent_method_definition`、`FormalMethodRuntimeConfig`、routing registry、key plan、检测公式、阈值和候选顺序，只在已联合协调的 H1/H2/H3 与独立窄协议 owner 内实现。正式 GPU 运行必须绑定本原子后续获批的精确 clean detached 提交；本表只用于安排构建，不支持论文主张。
+
+### 2.1 `db324b7` 后的有效状态（覆盖下文历史差距快照）
+
+- `db324b7` 是已审 S1 GPU 证据的代码基线，不是“方法科学通过”。S1 对 `0.75/1.00/1.25` 三个固定倍率各完成33条 calibration，但三档均只有 `11/33` 满足严格 `positive_source.content_score > wrong_key_negative.content_score`，参数裁决为 `no_compatible_candidate`，三个候选均 `science_blocked`。
+- 同一 S1 记录中，`final_image_preservation`、`carrier_only_final_image_preservation`、`final_image_attention_observability` 三类正式 producer 证据均为 `0/33`。S2 因而只关闭了失败事实与根因边界，没有产生新 GPU 科学结果，也没有授权晋升名义 `1.00`。
+- 当前 S3 原子新增独立 `content_survival_direction_v1` 协议：registered-only 对称 probe 仅冻结共同 direction/sign，wrong-key 在 nominal replay 后独立评价；clean/carrier/full 三图由真实 nominal replay 生成，CLIP 官方全局图像特征只承担质量保持，真实最终图像 Q/K 只承担 attention observability。两类质量证据都不得替代 key ownership。
+- S3 writer/loader 使用同一全量 validator 和 manifest rename-last 原子发布；旧 S1 artifact 因缺少新协议、复合方法身份、七链父子记录和三图证据而明确不兼容，不迁移、不补造。
+- 对存储端 S1 正式副本的只读 paired 复算确认已有原子分量足以做诊断：三档 `content_score` 均为11/33胜，均值 registered-wrong delta 约为 `-0.0080`，未配对 AUC 约为 `0.314–0.315`；LF 同为11/33，HF-tail 为5/33，attention-sync 为0/33，attention-geometry 为6–7/33。相同图像的 `embedding_pair_ssim` 与 `source_to_evaluated_ssim` 在 registered/wrong 两侧差值精确为0。八个最困难 Prompt 在三档稳定重合，描述上包含 object-centric、balanced、structured scene；这是旧记录的组件诊断，不是新方法通过证据，也不把 CLIP/语义量解释为 key ownership。
+- 本原子目前只构成 CPU 可运行性与契约实现。survival-direction 是否改善同一水印图的 registered-vs-wrong 归因只能由下一次获批的全新 GPU run 证伪；在该结果形成前不得写成方法有效、GPU qualified 或论文证据。
+
+下文第3节及后续以 `b31ffeb` 为起点的“大迁移差距”保留为历史计划，不再覆盖本节登记的 `db324b7`、S1/S2 与 S3 事实。
 
 ---
 

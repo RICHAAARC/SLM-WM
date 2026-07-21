@@ -1,0 +1,90 @@
+{
+  "chain_protocol": {
+    "chain_count": 7,
+    "probe_supports_paper_claim": false,
+    "registered_key_only_probe": true,
+    "roles": [
+      "clean_reference",
+      "full_probe_positive",
+      "full_probe_negative",
+      "carrier_probe_positive",
+      "carrier_probe_negative",
+      "carrier_nominal_replay",
+      "full_nominal_replay"
+    ],
+    "scheduler_fork": "canonical_base_latent_fresh_scheduler_replay",
+    "shared_z10_identity_required": true
+  },
+  "direction": {
+    "accumulation_dtype": "float64",
+    "allowed_actual_dtypes": {
+      "float16": {
+        "absolute_tolerance": 0.00025,
+        "machine_epsilon": 0.0009765625,
+        "machine_epsilon_source": "ieee_754_binary16"
+      },
+      "bfloat16": {
+        "absolute_tolerance": 0.001,
+        "machine_epsilon": 0.0078125,
+        "machine_epsilon_source": "brain_floating_point_16"
+      },
+      "float32": {
+        "absolute_tolerance": 1e-07,
+        "machine_epsilon": 1.1920928955078125e-07,
+        "machine_epsilon_source": "ieee_754_binary32"
+      }
+    },
+    "axes": [
+      1,
+      2,
+      3
+    ],
+    "comparison": "less_than_or_equal",
+    "materialization_policy": "single_cast_no_rescale_no_retry_no_selection",
+    "norm": "rms_chw",
+    "numerical_floor": 1e-12,
+    "realized_ratio_definition": "rms_chw_float64_materialized_delta_over_rms_chw_float64_z10",
+    "relative_tolerance_multiplier": 8.0,
+    "target_ratio": 0.001
+  },
+  "failure_protocol": {
+    "continue_after_governed_failure": false,
+    "missing_artifact": "fail_closed",
+    "nonfinite": "fail_closed",
+    "ratio_outside_tolerance": "fail_closed",
+    "sign_conflict_or_tie": "fail_closed",
+    "supports_paper_claim": false,
+    "unsupported_dtype": "fail_closed",
+    "zero_direction": "fail_closed"
+  },
+  "protocol_schema": "slm_wm_content_survival_direction_protocol",
+  "protocol_version": "content_survival_direction_v1",
+  "replay_protocol": {
+    "only_full_carrier_difference": "attention_geometry_enabled",
+    "parent_binding": "probe_bundle_digest",
+    "probe_and_nominal_amplitudes_are_distinct": true,
+    "roles": [
+      "carrier_nominal_replay",
+      "full_nominal_replay"
+    ],
+    "same_role_deterministic_replay_requires_byte_identity": true,
+    "shared_canonical_base_latent": true,
+    "shared_registered_direction_and_sign": true,
+    "shared_scheduler_and_z10": true
+  },
+  "sign_selection": {
+    "candidate_signs": [
+      1,
+      -1
+    ],
+    "degenerate_direction_policy": "fail_closed",
+    "nonfinite_policy": "fail_closed",
+    "primary_objective": "maximize_min_registered_content_score",
+    "secondary_objective": "maximize_sum_registered_content_score",
+    "shared_across_full_and_carrier": true,
+    "tie_absolute_tolerance": 0.0,
+    "tie_policy": "fail_closed",
+    "wrong_key_access": "forbidden_until_nominal_replay_complete"
+  },
+  "survival_protocol_semantic_digest": "de2c4d2ea3e67feda1d3d17657af2a686a1d7fff00c6463c7464aa87d08366e2"
+}

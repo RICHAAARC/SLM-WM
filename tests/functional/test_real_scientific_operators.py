@@ -108,6 +108,18 @@ from experiments.protocol.image_only_evidence import (
     frozen_evidence_protocol_digest_payload,
     partition_calibration_clean_negatives,
 )
+from experiments.protocol.content_survival_direction import (
+    CONTENT_SURVIVAL_CHAIN_ROLES,
+    CONTENT_SURVIVAL_DIRECTION_CONFIG_PATH,
+    CONTENT_SURVIVAL_DIRECTION_RECORD_PATH,
+    CONTENT_SURVIVAL_DIRECTION_SCHEMA_PATH,
+    CONTENT_SURVIVAL_PROBE_ROLES,
+    build_content_survival_artifact_binding,
+    build_content_survival_direction_record,
+    build_content_survival_runtime_method_identity,
+    load_content_survival_direction_protocol,
+    select_shared_content_survival_sign,
+)
 from experiments.runners.image_only_dataset_runtime import (
     _write_calibration_protocol_boundary,
     _scientific_update_record_ready,
@@ -137,6 +149,9 @@ from main.methods.semantic.feature_protocol import (
     HANDCRAFTED_STRUCTURE_FEATURE_WIDTH,
 )
 from main.core.digest import build_stable_digest
+from main.methods.method_definition import (
+    semantic_conditioned_latent_method_definition_digest,
+)
 from main.core.digest import (
     TENSOR_CONTENT_DIGEST_VERSION,
     tensor_content_sha256,
@@ -3699,7 +3714,7 @@ def _write_formal_content_runtime_cache_fixture(
     Path,
     dict[str, object],
 ]:
-    """写出不运行模型的最小正式单写回cache夹具。"""
+    """写出不运行模型的 survival-direction 完成原子夹具。"""
 
     if config is None:
         config = SemanticWatermarkRuntimeConfig(
@@ -3709,26 +3724,86 @@ def _write_formal_content_runtime_cache_fixture(
             standard_attack_profiles=(),
             diffusion_attacks_enabled=False,
         )
+    repository_root = Path(runtime_module.__file__).resolve().parents[2]
+    for relative in (
+        CONTENT_SURVIVAL_DIRECTION_CONFIG_PATH,
+        CONTENT_SURVIVAL_DIRECTION_SCHEMA_PATH,
+    ):
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((repository_root / relative).read_bytes())
+    protocol = load_content_survival_direction_protocol(root)
+    core_method_digest = (
+        semantic_conditioned_latent_method_definition_digest()
+    )
+    composite = build_content_survival_runtime_method_identity(
+        core_method_definition_digest=core_method_digest,
+        protocol=protocol,
+    )
+
     run_id = build_semantic_watermark_run_id(config)
     run_dir = root / config.output_dir / run_id
     run_dir.mkdir(parents=True)
     clean_path = run_dir / "clean_image.png"
+    carrier_path = run_dir / "carrier_only_image.png"
     watermarked_path = run_dir / "watermarked_image.png"
     update_path = run_dir / "latent_update_records.jsonl"
+    carrier_update_path = run_dir / "carrier_only_update_records.jsonl"
     detection_path = run_dir / "image_only_detection_records.jsonl"
+    protocol_path = run_dir / CONTENT_SURVIVAL_DIRECTION_RECORD_PATH
+    binding_path = run_dir / "content_survival_artifact_binding.json"
     result_path = run_dir / "runtime_result.json"
     manifest_path = run_dir / "manifest.local.json"
     clean_path.write_bytes(b"formal-cache-clean")
+    carrier_path.write_bytes(b"formal-cache-carrier")
     watermarked_path.write_bytes(b"formal-cache-watermarked")
 
-    diagnostic: dict[str, object] = {
-        "method_role": "full_dual_chain",
-        "captured_previous_index": 9,
-        "captured_previous_count": 1,
-        "callback_write_index": 10,
-        "callback_write_count": 1,
-        "current_image_decode_count": 1,
-        "public_probe_additional_decode_count": 1,
+    base_identity = "8" * 64
+    probe_records: list[dict[str, object]] = []
+    for role, score in zip(
+        CONTENT_SURVIVAL_PROBE_ROLES,
+        (0.9, 0.3, 0.8, 0.2),
+    ):
+        probe = {
+            "probe_role": role,
+            "probe_sign": 1 if role.endswith("positive") else -1,
+            "registered_content_score": score,
+            "probe_ratio_ready": True,
+            "wrong_key_used_for_selection": False,
+            "supports_paper_claim": False,
+        }
+        probe["probe_artifact_digest"] = build_stable_digest(probe)
+        probe_records.append(probe)
+    selection = select_shared_content_survival_sign(
+        probe_records,
+        protocol=protocol,
+    )
+    probe_parent = {
+        "protocol_identity": protocol.identity_record(),
+        "composite_runtime_method_identity": composite,
+        "base_latent_identity_digest_random": base_identity,
+        "probe_records": probe_records,
+        "selection": selection,
+    }
+    probe_bundle_digest = build_stable_digest(probe_parent)
+    chain_records: list[dict[str, object]] = []
+    for index, role in enumerate(CONTENT_SURVIVAL_CHAIN_ROLES):
+        chain_records.append(
+            {
+                "role": role,
+                "chain_index": index,
+                "z10_content_sha256": "7" * 64,
+                "scheduler_step_timestep": 10.0,
+                "attention_geometry_enabled": role.startswith("full_"),
+                "supports_paper_claim": False,
+            }
+        )
+    shared_replay = {
+        "step_index": 10,
+        "written_latent_content_sha256": "9" * 64,
+        "selected_sign": selection["selected_sign"],
+        "probe_bundle_digest": probe_bundle_digest,
+        "nominal_replay_parent_ready": True,
         "actual_dtype_single_write_count": 1,
         "common_gamma": 1.0,
         "content_strength_common_multiplier": (
@@ -3743,34 +3818,75 @@ def _write_formal_content_runtime_cache_fixture(
         "combined_effective_l2_limit": 0.5,
         "combined_effective_l2_ready": True,
         "actual_dtype_single_write_digest": "1" * 64,
-        "content_only_postwrite_qk_score": 0.2,
-        "final_postwrite_qk_score": 0.3,
-        "post_write_qk_strict_ready": True,
-        "content_only_postwrite_qk_digest": "2" * 64,
-        "final_postwrite_qk_digest": "3" * 64,
         "routing_identity_digest": "4" * 64,
-        "geometry_qk_atomic_records_digest": "5" * 64,
-        "geometry_update_digest": "6" * 64,
-        "base_latent_content_digest_random": "7" * 64,
-        "base_latent_identity_digest_random": "8" * 64,
+        "lf_update_content_sha256": "5" * 64,
+        "tail_robust_update_content_sha256": "6" * 64,
     }
-    update_record = {
+    chain_records[-2].update(shared_replay)
+    chain_records[-2]["geometry_effective_l2"] = 0.0
+    chain_records[-1].update(shared_replay)
+    chain_records[-1].update(
+        {
+            "content_only_postwrite_qk_score": 0.2,
+            "final_postwrite_qk_score": 0.3,
+            "post_write_qk_strict_ready": True,
+        }
+    )
+    for replay in chain_records[-2:]:
+        replay["nominal_replay_record_digest"] = build_stable_digest(replay)
+    for chain in chain_records:
+        chain["chain_record_digest"] = build_stable_digest(chain)
+    feature_record = {
+        "feature_source": (
+            "frozen_official_clip_get_image_features_and_real_pixels"
+        ),
+        "clip_model_identity_digest": "a" * 64,
+    }
+    feature_record["feature_record_digest"] = build_stable_digest(
+        feature_record
+    )
+    direction_record = build_content_survival_direction_record(
+        protocol=protocol,
+        composite_method_identity=composite,
+        base_latent_identity_digest_random=base_identity,
+        chain_records=chain_records,
+        probe_records=probe_records,
+        selection=selection,
+        probe_bundle_digest=probe_bundle_digest,
+        final_image_feature_record=feature_record,
+    )
+    protocol_path.write_text(
+        json.dumps(direction_record, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    full_update = {
+        **chain_records[-1],
         "run_id": run_id,
-        "step_index": 10,
-        **diagnostic,
-        "attention_module_names": list(config.attention_module_names),
+        "reference_source": "fixed_content_routing_reference_registry",
+        "supports_paper_claim": False,
+    }
+    carrier_update = {
+        **chain_records[-2],
+        "run_id": run_id,
         "reference_source": "fixed_content_routing_reference_registry",
         "supports_paper_claim": False,
     }
     update_path.write_text(
-        json.dumps(update_record, sort_keys=True) + "\n",
+        json.dumps(full_update, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    carrier_update_path.write_text(
+        json.dumps(carrier_update, sort_keys=True) + "\n",
         encoding="utf-8",
     )
 
     clean_relative = clean_path.relative_to(root).as_posix()
+    carrier_relative = carrier_path.relative_to(root).as_posix()
     watermarked_relative = watermarked_path.relative_to(root).as_posix()
-    image_identities = {
+    image_digests = {
         clean_relative: hashlib.sha256(clean_path.read_bytes()).hexdigest(),
+        carrier_relative: hashlib.sha256(carrier_path.read_bytes()).hexdigest(),
         watermarked_relative: hashlib.sha256(
             watermarked_path.read_bytes()
         ).hexdigest(),
@@ -3795,9 +3911,11 @@ def _write_formal_content_runtime_cache_fixture(
                 ),
                 "attacked_image_key": "",
                 "source_image_path": image_relative,
-                "source_image_digest": image_identities[image_relative],
+                "source_image_digest": image_digests[image_relative],
                 "evaluated_image_path": image_relative,
-                "evaluated_image_digest": image_identities[image_relative],
+                "evaluated_image_digest": image_digests[image_relative],
+                "attacked_image_path": "",
+                "attacked_image_digest": "",
             }
         )
         record_metadata = dict(record["metadata"])
@@ -3827,6 +3945,68 @@ def _write_formal_content_runtime_cache_fixture(
         encoding="utf-8",
     )
 
+    def leaf(role: str, path: Path) -> dict[str, object]:
+        payload = path.read_bytes()
+        return {
+            "role": role,
+            "path": path.relative_to(root).as_posix(),
+            "size_bytes": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }
+
+    leaves = [
+        leaf("clean_nominal_image", clean_path),
+        leaf("carrier_nominal_image", carrier_path),
+        leaf("full_nominal_image", watermarked_path),
+        leaf("full_nominal_update", update_path),
+        leaf("carrier_nominal_update", carrier_update_path),
+        leaf("nominal_detection_records", detection_path),
+        leaf("content_survival_direction_record", protocol_path),
+    ]
+    binding = build_content_survival_artifact_binding(
+        run_id=run_id,
+        composite_method_identity=composite,
+        protocol_record=direction_record,
+        leaf_records=leaves,
+    )
+    binding_path.write_text(
+        json.dumps(binding, sort_keys=True),
+        encoding="utf-8",
+    )
+    binding_file_sha256 = hashlib.sha256(
+        binding_path.read_bytes()
+    ).hexdigest()
+    carrier_update_sha256 = hashlib.sha256(
+        carrier_update_path.read_bytes()
+    ).hexdigest()
+    counterfactual = {
+        "carrier_only_counterfactual_identity_digest": "b" * 64,
+        "carrier_only_counterfactual_image_path": carrier_relative,
+        "carrier_only_counterfactual_image_digest": image_digests[
+            carrier_relative
+        ],
+        "carrier_only_counterfactual_atom_path": (
+            carrier_update_path.relative_to(root).as_posix()
+        ),
+        "carrier_only_counterfactual_atom_file_sha256": (
+            carrier_update_sha256
+        ),
+        "carrier_only_counterfactual_atom_content_digest": "c" * 64,
+    }
+    diagnostic = {
+        **full_update,
+        "captured_previous_index": 9,
+        "captured_previous_count": 1,
+        "callback_write_index": 10,
+        "callback_write_count": 1,
+        "current_image_decode_count": 1,
+        "public_probe_additional_decode_count": 1,
+        "chain_count": 7,
+        "chain_roles": list(CONTENT_SURVIVAL_CHAIN_ROLES),
+        "selected_survival_direction_sign": selection["selected_sign"],
+        "base_latent_content_digest_random": "7" * 64,
+        "base_latent_identity_digest_random": base_identity,
+    }
     config_digest = build_stable_digest(
         semantic_watermark_runtime_config_payload(config)
     )
@@ -3848,6 +4028,37 @@ def _write_formal_content_runtime_cache_fixture(
         "elapsed_seconds": 1.0,
         "metadata": {
             "method_runtime": "formal_content_dual_chain_single_write",
+            "method_definition_digest": core_method_digest,
+            "composite_runtime_method_identity": composite,
+            "content_survival_direction_record": direction_record,
+            "prompt_saliency_model_identity_digest": "a" * 64,
+            "content_survival_direction_record_path": (
+                protocol_path.relative_to(root).as_posix()
+            ),
+            "content_survival_artifact_binding_path": (
+                binding_path.relative_to(root).as_posix()
+            ),
+            "content_survival_artifact_binding_digest": binding[
+                "content_survival_artifact_binding_digest"
+            ],
+            "content_survival_artifact_binding_file_sha256": (
+                binding_file_sha256
+            ),
+            "carrier_only_image_path": carrier_relative,
+            "carrier_only_update_record_path": (
+                carrier_update_path.relative_to(root).as_posix()
+            ),
+            "carrier_only_counterfactual": counterfactual,
+            "final_image_preservation": {
+                "final_image_preservation_gate_ready": True
+            },
+            "carrier_only_final_image_preservation": {
+                "carrier_only_counterfactual_three_way_preservation_gate_ready": True
+            },
+            "final_image_attention_observability": {
+                "final_image_attention_observability_gate_ready": True
+            },
+            "old_content_runtime_artifact_compatible": False,
             "threshold_free_blind_measurement_ready": True,
             "formal_blind_detection_ready": False,
             "legacy_runtime_dependency_absence_ready": True,
@@ -3868,32 +4079,43 @@ def _write_formal_content_runtime_cache_fixture(
         json.dumps(result_payload, sort_keys=True),
         encoding="utf-8",
     )
-    output_paths = (
-        update_path.relative_to(root).as_posix(),
-        detection_path.relative_to(root).as_posix(),
+    output_paths = [
+        *(str(item["path"]) for item in leaves),
+        binding_path.relative_to(root).as_posix(),
         result_path.relative_to(root).as_posix(),
-        clean_relative,
-        watermarked_relative,
         manifest_path.relative_to(root).as_posix(),
-    )
+    ]
     manifest_payload = {
         "config": {
             "scientific_unit_config_digest": config_digest,
             "formal_randomization_reference": formal_randomization_reference,
         },
         "code_version": resolve_code_version(root),
-        "output_paths": list(output_paths),
+        "output_paths": output_paths,
         "metadata": {
             "run_id": run_id,
             "protocol_decision": "pass",
             "detector_input_access_mode": "image_key_public_model_only",
+            "detection_key_plan": runtime_module.build_detection_key_plan_record(
+                config.key_material
+            ),
             "supports_paper_claim": False,
             "formal_runtime_chain": (
-                "content_routing_lf_hf_qk_common_gamma_single_write"
+                "content_survival_registered_probe_nominal_replay"
             ),
             "formal_detection_chain": (
                 "threshold_free_lf_hf_tail_measurement_pending_frozen_evidence"
             ),
+            "composite_runtime_method_identity": composite,
+            "content_survival_artifact_binding_digest": binding[
+                "content_survival_artifact_binding_digest"
+            ],
+            "content_survival_artifact_binding_file_sha256": (
+                binding_file_sha256
+            ),
+            "runtime_result_sha256": hashlib.sha256(
+                result_path.read_bytes()
+            ).hexdigest(),
         },
     }
     manifest_payload["config_digest"] = build_stable_digest(
