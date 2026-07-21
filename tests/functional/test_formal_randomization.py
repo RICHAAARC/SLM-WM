@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -394,18 +396,32 @@ def test_runtime_plan_keeps_full_body_while_sample_reference_is_compact() -> Non
 def test_formal_watermark_key_plan_is_preregistered_and_root_bound() -> None:
     """正式3-key 计划必须在运行前冻结并拒绝结果后选择根密钥."""
 
-    plan = require_formal_watermark_key_plan("slm_wm_paper_key")
+    program = """
+from experiments.protocol.formal_randomization import (
+    formal_watermark_key_plan_record,
+    require_formal_watermark_key_plan,
+)
 
-    assert plan == formal_watermark_key_plan_record()
-    assert len(plan["watermark_key_records"]) == 3
-    assert len(plan["formal_watermark_key_plan_digest"]) == 64
-    with pytest.raises(ValueError, match="预注册正式 key plan"):
-        require_formal_watermark_key_plan("post_selected_alternate_key")
-    with pytest.raises(ValueError, match="预注册正式 key plan"):
-        formal_watermark_key_material(
-            "post_selected_alternate_key",
-            resolve_formal_randomization_repeat("seed_00_key_00"),
-        )
+plan = formal_watermark_key_plan_record()
+assert len(plan["watermark_key_records"]) == 3
+assert plan["formal_watermark_key_plan_digest"] == (
+    "e4c4ac565b4e9c497bbf4a9a2588c242cb5d7323e1e72614056cfd2762130c0b"
+)
+try:
+    require_formal_watermark_key_plan("slm_wm_paper_key")
+except ValueError:
+    pass
+else:
+    raise AssertionError("旧公开测试根密钥不得匹配生产 key plan")
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", program],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 @pytest.mark.parametrize(

@@ -20,11 +20,11 @@
 | 重复协议文档修订日期 | `2026-07-17` |
 | profile 与等价执行文档修订日期 | `2026-07-17` |
 | 攻击证据职责文档修订日期 | `2026-07-17` |
-| 源代码与已审 GPU 证据基线提交 | `db324b7c86a1bef305114fe83db44dfed04fd706` |
-| GitNexus 索引提交 | `69a23070e3dcec8b4a60bc997446dda1efd4b528` |
-| GitNexus 索引规模 | 14,698 symbols、32,708 relationships、300 execution flows |
-| 当前活动构建单元 | `content_survival_observation_colab_kernel_entry`（基于已发布 `c2e63a3c725f8e8826bc8d2078b4f13312d87080` 的最小 Notebook kernel 调用修复；未启动新的 Colab GPU 链） |
-| 下一目标构建单元 | 本适配独立审计；通过后仍须由独立阶段授权真实 Colab A100 运行 |
+| 源代码与已审 GPU 证据基线提交 | S1 证据绑定 `db324b7c86a1bef305114fe83db44dfed04fd706`；当前 Colab 代码基线为已发布 `58ca8f63ac88a23ae92250c93dae3e27700a5fc3` |
+| GitNexus 索引提交 | `58ca8f63ac88a23ae92250c93dae3e27700a5fc3` |
+| GitNexus 索引规模 | 14,961 symbols、33,184 relationships、300 execution flows |
+| 当前活动构建单元 | `content_survival_private_key_plan_binding`（把固定 Drive 私有 raw key 的三个派生身份绑定到正式 key plan；不修改密钥算法、检测器、方法或 Notebook） |
+| 下一目标构建单元 | 提交并发布 key-plan 迁移，更新 Drive request 后重新运行 Colab A100-40G observation |
 | 受治理解释器 | 仓库 `.venv` 的 CPython 3.12.13 |
 | 默认测试事实 | `.venv/bin/pytest -q -s` 为 `2355 passed, 82 deselected, 380 warnings`；精确 `.venv/bin/pytest -q` 仍在收集前触发宿主 capture 临时文件 `FileNotFoundError`，未运行 runtime-heavy GPU integration 或新的真实 Colab/A100 作业 |
 | 定向协议/cache/约束检查 | observation protocol、专用 host 与 Colab 适配合计 `74 passed`；最小验收面覆盖公开 GitHub 提交、固定 Drive 输入、kernel 内 controller 调用、薄 Notebook、A100 显存门、secret 隔离、长时 pipe 排空、进程组清理、失败落盘和最终固定 Drive 交付，不建立模型供应链或通用持久化门禁 |
@@ -33,7 +33,7 @@
 | 工作树说明 | S3 从已独立审计的 `db324b7` 开始；`.codex/config.toml` 是既有范围外 untracked 文件，本原子不得修改或提交；旧 S1 存储归档保持只读 |
 | 核心实现判断范围 | `main/`、`experiments/`、`configs/model_sd35.yaml`、`configs/method_semantic_registry.json` 及其测试和运行入口 |
 
-已审 GPU 证据继续精确绑定 `db324b7`；`0b6abdc` 只登记为尚未科学验证的候选 M0。当前 CPU instrumentation 原子不修改 H1-H5、`semantic_conditioned_latent_method_definition`、`FormalMethodRuntimeConfig`、routing registry、key plan、检测公式、阈值或候选顺序。未来如获批运行，必须绑定本原子后续形成的精确 clean detached 提交；本表只用于安排构建，不支持论文主张。
+已审 GPU 证据继续精确绑定 `db324b7`；`0b6abdc` 只登记为尚未科学验证的候选 M0。当前修复仅旋转 `FORMAL_WATERMARK_KEY_PLAN` 及其摘要，使它绑定已经生成并固定保存在 Drive 的私有 raw key；H1-H5、`semantic_conditioned_latent_method_definition`、`FormalMethodRuntimeConfig`、routing registry、派生算法、检测公式、阈值和候选顺序均不变。公开 CPU 测试使用独立测试 plan，不读取或提交私有 raw key。本表只用于安排构建，不支持论文主张。
 
 ### 2.1 `db324b7` 后的有效状态（覆盖下文历史差距快照）
 
@@ -64,7 +64,7 @@
 
 ### 2.3 Colab 执行适配边界
 
-- 当前新增的是 CPU-only 平台适配，不是 Colab/A100 科学运行结果。永久薄 Notebook 只通过匿名 HTTPS 获取已独立审计并发布到 `origin/main` 的提交，控制器再次核对远端 `main` 与 run request 中的40位提交完全一致，随后建立 clean detached checkout；运行期间不执行 `pull`。当前已发布基线为 `c2e63a3c725f8e8826bc8d2078b4f13312d87080`；本次 kernel 调用修复尚未提交或 push，控制任务必须在新提交完成独审并精确发布后再生成与该提交绑定的 `run_request.json`，不能复用现有 Drive request。
+- 永久薄 Notebook 只通过匿名 HTTPS 获取已发布到 `origin/main` 的提交，控制器再次核对远端 `main` 与 run request 中的40位提交完全一致，随后建立 clean detached checkout；运行期间不执行 `pull`。当前已发布基线为 `58ca8f63ac88a23ae92250c93dae3e27700a5fc3`。key-plan 修复形成新提交后，控制任务必须更新 Drive `run_request.json` 的 commit 与 run ID，不能复用绑定 `58ca8f6` 的旧 request。
 - `c2e63a3` 的首次真实 Colab 尝试在 `git clone` 成功后，由首个 cell 以 `/usr/bin/python3 -I controller.py ...` 启动 `prepare-drive-input`；`google.colab.drive.mount`/`flush_and_unmount` 缺少 Notebook kernel 交互上下文，因此在 `before_request_import` 失败，形成0条 scientific chain。该事实是 Notebook 调用环境错误，不是方法、M0、GPU资源或科学结果失败。
 - Notebook 不实现安装、模型、方法、secret、validator 或打包逻辑。只有匿名 HTTPS `git clone` 使用子进程；随后从固定 bootstrap 路径把 controller 加载到 Notebook kernel，并直接调用 `prepare_drive_input`、`bootstrap_public_run`、`preflight_run`、`run_observation` 与 `package_and_deliver_to_drive`，使三处 Drive mount/unmount 保持 kernel 交互上下文。最后一个 cell 会从固定路径重新加载 controller，不依赖前面 cell 的运行时变量，可在 success、preflight failure、OOM 或 scientific failure 后单独执行。
 - 所有仓库、隔离运行目录、模型下载 cache、checkpoint、日志和中间结果只写 `/content`。SD3.5 与 CLIP 继续由既有方法 host 按 `configs/model_sd35.yaml` 的普通运行参数通过标准加载入口下载和加载；本适配不新增 revision、snapshot、文件摘要、断链、offline 重载或模型 identity 门禁。下载/加载失败按普通可打包运行失败处理，不宣称供应链增强。
@@ -73,6 +73,7 @@
 - child 启动前只落盘 `watermark_used` 与 `hf_token_used` 非秘密布尔。处于 running、success 或 scientific failure 的运行在打包时必须重新从固定 Drive key 文件取得 raw key，并在 HF token 已使用时重新取得该 Secret，才能执行内容扫描；key 缺失、不可读、HF Secret 权限撤销或 usage 状态缺失都失败关闭且不复制结果。尚未向 child 传递 secret 的 bootstrap/preflight failure 仍可无 secret 独立打包。
 - 科学运行期间 Drive 已卸载，不执行 Drive hot I/O，也不写 checkpoint、日志或中间结果。最后 cell 先在 `/content` 从磁盘状态分类 success/failure，完成 secret scan、文件清单、archive、detached checksum 和独立解包复验；仅全部通过后才再次 mount Drive，并按 archive 后 checksum 的顺序复制到固定 `/content/drive/MyDrive/SLM/content-survival/results/`。VM 回收前未执行该 cell 会丢失本地结果，这是当前被接受的运行边界。
 - 固定科学工作量仍由既有 single-use host → scientific child 执行：4个 Prompt、24个 cell、148条 diffusion chain、29,304次评分，且保持 `diagnostic_only=true`、`supports_paper_claim=false`、`candidate_promotion_allowed=false`、`qualification_evidence=false`。CPU 适配验收不证明真实 Colab/A100 运行成功。
+- `58ca8f6` 的首个完整 Notebook/Drive 尝试已经证明 A100-40G preflight、依赖环境、唯一 scientific child、secret 隔离及失败包 Drive 交付正常；scientific child 在模型加载和首个 cell 前因固定 Drive raw key 未匹配仍绑定旧公开根密钥的 `FORMAL_WATERMARK_KEY_PLAN` 失败，精确为0/24 cell、0/148 chain、0/29,304 evaluation。这不是 OOM、模型加载、M0 或方法科学失败。失败包经检查后已从 Drive `results/` 删除，避免与后续有效 observation 混淆。
 
 ---
 

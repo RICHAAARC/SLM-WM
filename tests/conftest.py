@@ -7,11 +7,14 @@ from pathlib import Path
 import tempfile
 from typing import Any
 
+from tests.helpers.formal_key_plan import install_public_test_key_plan
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PYTEST_TEMP_ROOT = REPOSITORY_ROOT / "outputs" / "pytest_work"
 PYTEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
 tempfile.tempdir = str(PYTEST_TEMP_ROOT)
+install_public_test_key_plan()
 
 _ORIGINAL_MKDIR = os.mkdir
 
