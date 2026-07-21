@@ -2,6 +2,12 @@
 
 本目录仅保存 Colab 入口。Notebook 不得定义函数、类或直接导入 `main` 与 `experiments` 实现方法。
 
+## 内容存活因果诊断入口
+
+`content_survival_observation_colab.ipynb` 是独立的 diagnostic-only A100 入口。它只通过匿名 HTTPS 获取已审计并发布到 GitHub `main` 的提交，然后调用 `scripts/run_content_survival_observation_colab.py` 的固定 `bootstrap-public`、`preflight`、`run` 和 `package-drive` 子命令。仓库、模型 cache、运行状态和中间结果只写 `/content`；运行期间不挂载 Drive，最后一个可独立执行的 cell 完成本地 secret scan、归档与解包复验后才把 archive 和 detached checksum 复制到 Drive。
+
+现有12个 Notebook 继续承担 dependency review、qualification、主方法、baseline、official-reference 和 repeat 证据职责，全部保留。此前错误创建在根目录 `notebooks/content_survival_observation_colab.ipynb` 的临时入口由本入口取代并删除；该临时文件从未进入 Git，不能从 Git 历史恢复，其职责与必要内容已迁移到正式入口。13个保留入口的 canonical SHA-256 由 `tests/functional/test_content_survival_observation_colab.py` 唯一冻结，任何 Notebook 字节变化都必须显式更新该登记并重新审计。
+
 ## 依赖准备边界
 
 每个正式结果 Notebook 在检出精确 detached commit 后, 只能调用仓库统一宿主入口:

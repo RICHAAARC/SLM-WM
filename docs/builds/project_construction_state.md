@@ -23,11 +23,11 @@
 | 源代码与已审 GPU 证据基线提交 | `db324b7c86a1bef305114fe83db44dfed04fd706` |
 | GitNexus 索引提交 | `69a23070e3dcec8b4a60bc997446dda1efd4b528` |
 | GitNexus 索引规模 | 14,698 symbols、32,708 relationships、300 execution flows |
-| 当前活动构建单元 | `content_survival_host_key_input_repair`（GPU 停止状态下的 CPU-only 显式输入修复） |
-| 下一目标构建单元 | 本修复独立审计；通过后才重新判断是否授权全新 GPU diagnostic run |
+| 当前活动构建单元 | `content_survival_observation_colab_adapter`（基于已发布 `a3311cca62b6a33131b95fb6247644fa69f476e7` 的 CPU-only Colab 执行适配；未启动 Colab GPU） |
+| 下一目标构建单元 | 本适配独立审计；通过后仍须由独立阶段授权真实 Colab A100 运行 |
 | 受治理解释器 | 仓库 `.venv` 的 CPython 3.12.13 |
-| 默认测试事实 | 当前 CPU 显式 key 输入修复：等价无捕获命令为 `2329 passed, 82 deselected, 380 warnings`；精确 `.venv/bin/pytest -q` 仍在收集前触发宿主 capture 临时文件 `FileNotFoundError`，未运行 runtime-heavy GPU integration |
-| 定向协议/cache/约束检查 | observation protocol 35项与专用 host 13项合计 `48 passed`；显式输入只到唯一 scientific child，重复 target 调用在第二个 key 环境构造前拒绝，首发 `OSError` 登记 attempt=1/completed=0，缺失、非目标 argv、父环境泄漏、输出泄漏与 orchestrator identity 漂移均失败关闭 |
+| 默认测试事实 | `.venv/bin/pytest -q -s` 为 `2350 passed, 82 deselected, 380 warnings`；精确 `.venv/bin/pytest -q` 仍在收集前触发宿主 capture 临时文件 `FileNotFoundError`，未运行 runtime-heavy GPU integration 或真实 Colab/A100 作业 |
+| 定向协议/cache/约束检查 | observation protocol、专用 host 与 Colab 适配合计 `69 passed`；最小验收面覆盖公开 GitHub 提交、薄 Notebook、A100 显存门、secret 隔离、长时 pipe 排空、进程组清理、失败落盘和最终 Drive 交付，不建立模型供应链或通用持久化门禁 |
 | harness 与格式检查 | 10项 harness 全部通过；`git diff --check` 通过 |
 | 外部源码 qualification | 显式 integration 运行 `6 failed, 0 skipped`；失败均来自4套登记真实源码目录缺失，符合缺源失败关闭边界，不属于默认测试失败 |
 | 工作树说明 | S3 从已独立审计的 `db324b7` 开始；`.codex/config.toml` 是既有范围外 untracked 文件，本原子不得修改或提交；旧 S1 存储归档保持只读 |
@@ -61,6 +61,17 @@
 - CPU-only 修复新增 observation 专用 host 入口：从受控宿主环境显式取得 raw key 后立即从宿主环境移除，在准备精确父编排和科学依赖时不传播；精确父编排只在内存接收输入，并由 single-use command runner 仅向唯一 `run_content_survival_observation.py` scientific child 的进程环境注入。runner 在第一次合法 launch attempt 前消费能力，后续相同 target 也必须在第二个 key 环境构造前拒绝；持久化状态从真实 invocation/attempt/completed/non-target rejection 计数生成，首发 `OSError` 不得宣称 child 已启动完成。argv、父环境、命令记录、stdout/stderr、JSON/manifest、状态与异常均不得出现 raw key；持久化 host identity 只包含域隔离 SHA-256 与 `registered_watermark_key_material` 角色。缺失输入继续在 checkout、依赖准备和模型加载前失败关闭，非目标 child 或身份漂移均拒绝。该修复只闭合程序输入接口，不构成 GPU diagnostic 或科学通过。
 
 下文第3节及后续以 `b31ffeb` 为起点的“大迁移差距”保留为历史计划，不再覆盖本节登记的 `db324b7`、S1/S2 与 S3 事实。
+
+### 2.3 Colab 执行适配边界
+
+- 当前新增的是 CPU-only 平台适配，不是 Colab/A100 科学运行结果。永久薄 Notebook 只通过匿名 HTTPS 获取已独立审计并发布到 `origin/main` 的提交，控制器再次核对远端 `main` 与 run request 中的40位提交完全一致，随后建立 clean detached checkout；运行期间不执行 `pull`。当前已发布基线为 `a3311cca62b6a33131b95fb6247644fa69f476e7`，本适配补丁尚未提交或 push，必须经过补丁独审、中文提交、提交独审、push 和 `ls-remote` 精确复验后才能用于真实 Colab。
+- Notebook 不实现安装、模型、方法、secret、validator 或打包逻辑，只依次调用稳定的 `bootstrap-public`、`preflight`、`run` 和 `package-drive` 子命令。最后一个 cell 重新从固定 request 与本地磁盘定位控制器，不依赖前面 cell 的运行时变量，可在 success、preflight failure、OOM 或 scientific failure 后单独执行。
+- 所有仓库、隔离运行目录、模型下载 cache、checkpoint、日志和中间结果只写 `/content`。SD3.5 与 CLIP 继续由既有方法 host 按 `configs/model_sd35.yaml` 的普通运行参数通过标准加载入口下载和加载；本适配不新增 revision、snapshot、文件摘要、断链、offline 重载或模型 identity 门禁。下载/加载失败按普通可打包运行失败处理，不宣称供应链增强。
+- 适配控制器只要求 A100 且启动时 total 与 available 显存均不少于40,000 MiB。A100-80G 也可通过但不会自动选择；L4 或不足门禁的 A100 失败。A100-40G 如果真实加载或首 cell OOM，则诚实落盘并打包，后续切换80G需另行授权；不得启用 CPU offload、量化、attention slicing 或降低科学工作量。
+- watermark key 和可选 HF token 只从固定 Colab Secrets 在运行时读取，经内存环境传给既有唯一 host 链；不进入 Notebook、argv、日志、JSON、archive 或 Drive。控制器持续排空长时 stdout/stderr，输出若包含 raw secret 会被阻断；timeout 与异常会终止并确认整个 host/orchestrator/scientific 进程组，避免 GPU 或 key child 遗留。
+- child 启动前只落盘 `watermark_used` 与 `hf_token_used` 非秘密布尔。处于 running、success 或 scientific failure 的运行在打包时必须重新取得每个已使用 secret 才能执行内容扫描；Secret 权限撤销、缺失或 usage 状态缺失均在 Drive mount 前失败关闭。尚未向 child 传递 secret 的 bootstrap/preflight failure 仍可无 secret 独立打包。
+- 运行期间不 mount Drive，也不执行任何 Drive I/O。最后 cell 先在 `/content` 从磁盘状态分类 success/failure，完成 secret scan、文件清单、archive、detached checksum 和独立解包复验；仅全部通过后才 mount Drive，并按 archive 后 checksum 的顺序复制。VM 回收前未执行该 cell 会丢失本地结果，这是当前被接受的运行边界；Drive 仅是用户授权的最终交付面，不是模型 cache、热 I/O、checkpoint 或恢复面。
+- 固定科学工作量仍由既有 single-use host → scientific child 执行：4个 Prompt、24个 cell、148条 diffusion chain、29,304次评分，且保持 `diagnostic_only=true`、`supports_paper_claim=false`、`candidate_promotion_allowed=false`、`qualification_evidence=false`。CPU 适配验收不证明真实 Colab/A100 运行成功。
 
 ---
 
