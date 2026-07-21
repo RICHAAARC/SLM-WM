@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import time
+import types
 from typing import Any
 
 import pytest
@@ -20,7 +22,7 @@ WATERMARK = "synthetic-watermark-secret-for-cpu-tests"
 HF_TOKEN = "synthetic-huggingface-secret-for-cpu-tests"
 NOTEBOOK_SHA256 = {
     "colab_drive_cold_start_smoke.ipynb": "391466464b776cfc8342e3d5e59ffd04abc1e8e81e7a036076ceb626f7e0bb01",
-    "content_survival_observation_colab.ipynb": "c0d95eb610b2d16b816a0525d8777dcbf4b2543b4e9445f68636780fcb1f4ae8",
+    "content_survival_observation_colab.ipynb": "384349a88e8a8cd90df57f36d45bd9bb20f726e3313f9642b6ef258c7326ebf9",
     "dependency_lock_review_run.ipynb": "ee2fdcfb50b1739f9f79d85c2517336e0432c30d2fb8280d28070c9720a02b2d",
     "external_baseline_gaussian_shading_run.ipynb": "b6d3008d80d3269c97917e8bc89f746d0381826b2ff8dd99755a769a05c9a518",
     "external_baseline_shallow_diffuse_run.ipynb": "861071d48712494559f2b0c4fe4acb8eb55420a52eae3f113cb1ab84156da356",
@@ -611,16 +613,50 @@ def test_notebook_is_thin_output_free_and_package_cell_is_disk_independent() -> 
     assert all(cell["outputs"] == [] and cell["execution_count"] is None for cell in code_cells)
     combined = "\n".join("".join(cell["source"]) for cell in code_cells)
     assert colab.PUBLIC_REPOSITORY_URL in combined
-    assert "prepare-drive-input" in combined
     assert "upload" not in combined.lower()
     assert "git\", \"pull" not in combined
     assert colab.HF_SECRET_NAME not in combined
     assert "from_pretrained" not in combined
     assert "torch" not in combined.lower()
     assert colab.DRIVE_WATERMARK_KEY_NAME not in combined
+    assert combined.count("subprocess.run(") == 1
+    assert "git\", \"clone" in combined
+    assert "sys.executable" not in combined
+    assert "controller.prepare_drive_input(request_path)" in combined
+    assert "controller.bootstrap_public_run(request_path, bootstrap_root=bootstrap_root)" in combined
+    assert "controller.preflight_run(request_path)" in combined
+    assert "controller.run_observation(request_path)" in combined
+    assert "controller.package_and_deliver_to_drive(request_path)" in combined
     last = "".join(code_cells[-1]["source"])
-    assert "package-drive" in last
-    assert "request_path =" in last and "controller =" in last and "bootstrap_root =" in last
+    assert "spec_from_file_location" in last and "exec_module" in last
+    assert "request_path =" in last and "controller_path =" in last and "bootstrap_root =" in last
+
+
+def test_notebook_package_cell_reimports_controller_without_prior_variables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = json.loads(
+        Path("paper_workflow/notebooks/content_survival_observation_colab.ipynb").read_text(
+            encoding="utf-8"
+        )
+    )
+    last = "".join([cell for cell in payload["cells"] if cell["cell_type"] == "code"][-1]["source"])
+    calls: list[Path] = []
+    module = types.SimpleNamespace(
+        package_and_deliver_to_drive=lambda path: calls.append(path)
+    )
+    loader = types.SimpleNamespace(exec_module=lambda loaded: None)
+    spec = types.SimpleNamespace(
+        name="slm_wm_content_survival_colab_controller_package_test",
+        loader=loader,
+    )
+    monkeypatch.setattr(importlib.util, "spec_from_file_location", lambda name, path: spec)
+    monkeypatch.setattr(importlib.util, "module_from_spec", lambda loaded_spec: module)
+    try:
+        exec(compile(last, "<package-cell>", "exec"), {})
+    finally:
+        sys.modules.pop(spec.name, None)
+    assert calls == [Path("/content/slm_wm_content_survival_request.json")]
 
 
 def test_notebook_set_has_one_canonical_hash_per_retained_entrypoint() -> None:
