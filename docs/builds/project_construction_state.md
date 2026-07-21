@@ -23,17 +23,17 @@
 | 源代码与已审 GPU 证据基线提交 | `db324b7c86a1bef305114fe83db44dfed04fd706` |
 | GitNexus 索引提交 | `db324b7c86a1bef305114fe83db44dfed04fd706` |
 | GitNexus 索引规模 | 21,284 symbols、42,147 relationships、300 execution flows |
-| 当前活动构建单元 | `content_survival_direction_runtime`（S3 CPU-only 实现原子） |
-| 下一目标构建单元 | 本原子独立审计；通过后才决定新的独立 GPU 阶段 |
+| 当前活动构建单元 | `content_survival_observation_instrumentation`（GPU HOLD 下的 CPU-only 因果定位实现原子） |
+| 下一目标构建单元 | 本原子独立审计；通过后才决定是否授权独立 GPU diagnostic run |
 | 受治理解释器 | 仓库 `.venv` 的 CPython 3.12.13 |
-| 默认测试事实 | S3 CPU 原子：`2281 passed, 81 deselected, 380 warnings`；未运行 runtime-heavy GPU qualification |
-| 定向协议/cache/约束检查 | content-survival、formal cache、构建 inventory 与 harness 合约相关检查均通过；定向集合最近一次为 `32 passed`，约束与协议组合为 `23 passed` |
+| 默认测试事实 | observation CPU instrumentation 修订原子：等价无捕获命令为 `2308 passed, 82 deselected, 380 warnings`；精确 `.venv/bin/pytest -q` 在收集前触发宿主 capture 临时文件 `FileNotFoundError`，未运行 runtime-heavy GPU integration |
+| 定向协议/cache/约束检查 | observation、content-survival、routing registry、repository environment 与正式 runtime 相关集合为 `218 passed`；新 observation 单集为 `27 passed` |
 | harness 与格式检查 | 10项 harness 全部通过；`git diff --check` 通过 |
 | 外部源码 qualification | 显式 integration 运行 `6 failed, 0 skipped`；失败均来自4套登记真实源码目录缺失，符合缺源失败关闭边界，不属于默认测试失败 |
 | 工作树说明 | S3 从已独立审计的 `db324b7` 开始；`.codex/config.toml` 是既有范围外 untracked 文件，本原子不得修改或提交；旧 S1 存储归档保持只读 |
 | 核心实现判断范围 | `main/`、`experiments/`、`configs/model_sd35.yaml`、`configs/method_semantic_registry.json` 及其测试和运行入口 |
 
-当前 GitNexus 索引精确绑定 `db324b7`。本原子冻结 `semantic_conditioned_latent_method_definition`、`FormalMethodRuntimeConfig`、routing registry、key plan、检测公式、阈值和候选顺序，只在已联合协调的 H1/H2/H3 与独立窄协议 owner 内实现。正式 GPU 运行必须绑定本原子后续获批的精确 clean detached 提交；本表只用于安排构建，不支持论文主张。
+已审 GPU 证据继续精确绑定 `db324b7`；`0b6abdc` 只登记为尚未科学验证的候选 M0。当前 CPU instrumentation 原子不修改 H1-H5、`semantic_conditioned_latent_method_definition`、`FormalMethodRuntimeConfig`、routing registry、key plan、检测公式、阈值或候选顺序。未来如获批运行，必须绑定本原子后续形成的精确 clean detached 提交；本表只用于安排构建，不支持论文主张。
 
 ### 2.1 `db324b7` 后的有效状态（覆盖下文历史差距快照）
 
@@ -43,6 +43,19 @@
 - S3 writer/loader 使用同一全量 validator 和 manifest rename-last 原子发布；旧 S1 artifact 因缺少新协议、复合方法身份、七链父子记录和三图证据而明确不兼容，不迁移、不补造。
 - 对存储端 S1 正式副本的只读 paired 复算确认已有原子分量足以做诊断：三档 `content_score` 均为11/33胜，均值 registered-wrong delta 约为 `-0.0080`，未配对 AUC 约为 `0.314–0.315`；LF 同为11/33，HF-tail 为5/33，attention-sync 为0/33，attention-geometry 为6–7/33。相同图像的 `embedding_pair_ssim` 与 `source_to_evaluated_ssim` 在 registered/wrong 两侧差值精确为0。八个最困难 Prompt 在三档稳定重合，描述上包含 object-centric、balanced、structured scene；这是旧记录的组件诊断，不是新方法通过证据，也不把 CLIP/语义量解释为 key ownership。
 - 本原子目前只构成 CPU 可运行性与契约实现。survival-direction 是否改善同一水印图的 registered-vs-wrong 归因只能由下一次获批的全新 GPU run 证伪；在该结果形成前不得写成方法有效、GPU qualified 或论文证据。
+
+### 2.2 候选 M0 的定位边界与独立 observation 原子
+
+- `0b6abdc` 冻结为候选 M0，不是科学通过状态，也不得直接进入33条 calibration 或 qualification。其已知实现偏差包括：full/carrier direction 与 common gamma 未机械共享；counterfactual 身份为手工构造；partial manifest 写入后未从实际字节重读验证；bfloat16 realized-ratio tolerance 过宽；scheduler 身份只覆盖 z10 与 timestep。本 observation 原子只登记并暴露这些混杂，不修改候选 M0。
+- 新增的独立 `content_survival_observation_v1` 固定4个 Prompt：`prompt_e6db4109e01246bc`、`prompt_d026a34e14f1806b`、`prompt_4ba678eb7a3abc94`、`prompt_184d2cc052881c3e`。前两者是 S1 稳定 winner，后两者是 S1 稳定 loser；顺序、选择职责和摘要均不可在运行中调整。
+- observation matrix 固定为 semantic/uniform × LF-only/HF-only/dual 的6个 cell。每个 cell 固定执行 full±、carrier± 四条 registered-only probe，以及 fixed-positive before、selected-sign after 两条 nominal chain；每 Prompt 另有一条共享 clean chain，总计37条/Prompt、148条 diffusion chain。registered 与32个预登记 domain-separated wrong key 只复用既有图像/latent评分，不增加 diffusion chain。
+- 每条 chain 真实保留 post-write z10、`output_type=latent` 的 terminal pre-VAE latent，以及手工 decode 最终图像后由冻结 `_encode_image_latent` 产生的 re-encode latent。三个 latent 位置直接调用正式 `build_low_frequency_template`、`build_high_frequency_tail_template` 与 `compute_blind_content_score`；图像检测器不承担 latent 评分。独立 routed-template oracle 只用于定位损失，不进入 sign、wrong-key gate、阈值、正式盲检或主张。
+- 固定计算上界为148 chain × 3 latent位置 × 33 key × blind/oracle = 29,304次评分。24个 cell 各自采用 manifest rename-last；partial cell 不算完成，只能重做相同 roster identity，冲突或篡改失败关闭。公共 checkpoint/restore primitive 不变。
+- canonical protocol 固定绑定 S1 正式 source run `content_strength_sensitivity_20260721T012732CST_db324b7`、`db324b7` 完整 commit、archive checksum/manifest/run-manifest 三项 SHA、routing registry 双摘要，以及按三档 minimum/maximum registered-minus-wrong margin 排序得到的四条 Prompt 选择证据；Prompt roster 另有独立 semantic digest 与 canonical artifact SHA。
+- 每个 cell 的 result、binding 与 complete manifest 传播同一完整身份：已验证 formal execution lock、实际 orchestrator/scientific profile 与 hash-lock 身份、SD3.5/vision model revision、semantic runtime config digest、Prompt text/config digest、routing 双摘要、Prompt/key roster digest 与实际 commit。CLI 只从 observation protocol 读取固定 routing 双摘要，不接受环境变量替换。
+- 共享 validator 从实际 `.pt`、PNG 与 score bytes 重算三类 latent、canonical RGB 尺寸/摘要、6×3 observation、registered+32 wrong-key 顺序、blind/oracle score identity、rank/percentile/null/margin、四 probe sign 选择、严格 callback role/sign、完整 scheduler/base/run/Prompt/protocol/roster 父身份与 clean sharing；从持久化 chain/observation 重建的父子关系摘要必须同时匹配 result、binding 和 manifest。即使协调改写 record/result/binding/manifest 摘要，只要 tensor 叶子或六链共同身份未同步变化仍会拒绝。summary 只统计经过该 validator 的24个 complete manifest 和4条共享 clean chain。
+- 因候选 M0 的 full/carrier probe direction 与 common gamma 未共享，修订后的记录分别保存 `nominal_pair_unique_difference_ready`、`selector_confounded`、`confounded_reasons` 与 `causal_conclusion_ready`；当前 `selector_confounded=true` 且 `causal_conclusion_ready=false` 是机械边界，不因 nominal pair 单独一致而改变。
+- 所有 bundle、result、manifest 与 record 固定 `diagnostic_only=true`、`supports_paper_claim=false`、`candidate_promotion_allowed=false`、`qualification_evidence=false`。该原子即使 CPU 测试闭合，也只表示 instrumentation 可运行；GPU仍处于 HOLD，旧 S1 archive 继续只读。
 
 下文第3节及后续以 `b31ffeb` 为起点的“大迁移差距”保留为历史计划，不再覆盖本节登记的 `db324b7`、S1/S2 与 S3 事实。
 

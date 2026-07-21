@@ -1,0 +1,134 @@
+{
+  "claim_boundary": {
+    "candidate_promotion_allowed": false,
+    "diagnostic_only": true,
+    "qualification_evidence": false,
+    "supports_paper_claim": false
+  },
+  "evaluation_protocol": {
+    "evaluation_count": 29304,
+    "observation_roles": [
+      "post_write_z10",
+      "pre_vae_terminal_latent",
+      "image_reencoded_latent"
+    ],
+    "score_families": [
+      "blind_full_template",
+      "routed_template_oracle"
+    ]
+  },
+  "known_m0_deviations": [
+    "full_and_carrier_directions_and_common_gamma_are_not_mechanically_shared",
+    "counterfactual_identity_is_manually_constructed",
+    "partial_manifest_bytes_are_not_reloaded_before_validation",
+    "bfloat16_realized_ratio_tolerance_is_too_wide",
+    "scheduler_identity_is_limited_to_z10_and_timestep"
+  ],
+  "matrix": {
+    "carrier_modes": [
+      "lf_only",
+      "hf_only",
+      "dual"
+    ],
+    "cell_chain_count": 6,
+    "cell_count": 24,
+    "chain_count": 148,
+    "chain_roles": [
+      "full_probe_positive",
+      "full_probe_negative",
+      "carrier_probe_positive",
+      "carrier_probe_negative",
+      "nominal_before_positive",
+      "nominal_after_selected"
+    ],
+    "clean_chain_count_per_prompt": 1,
+    "routing_modes": [
+      "semantic",
+      "uniform"
+    ]
+  },
+  "protocol_schema": "slm_wm_content_survival_observation",
+  "protocol_semantic_digest": "0485f0cb842950a10b85aaaa55a720fa784911df5369694628b189ef965336c5",
+  "protocol_version": "content_survival_observation_v1",
+  "publish_protocol": {
+    "complete_marker": "cell_manifest.json",
+    "partial_marker": "cell_manifest.partial.json",
+    "partial_resume_policy": "redo_same_cell_only",
+    "publish_order": [
+      "immutable_observations",
+      "leaf_digests",
+      "result",
+      "binding",
+      "partial_manifest",
+      "full_validation",
+      "fsync",
+      "complete_marker_atomic_rename"
+    ]
+  },
+  "roster": {
+    "prompt_ids": [
+      "prompt_e6db4109e01246bc",
+      "prompt_d026a34e14f1806b",
+      "prompt_4ba678eb7a3abc94",
+      "prompt_184d2cc052881c3e"
+    ],
+    "roster_artifact_file_sha256": "16a19b1f42624e23c033f255717bf07d9bf4ae49efd7065d27e29b541e73bae5",
+    "roster_semantic_digest": "3956bf27e1657f65e35ad90b6e32b6d28449329601b691c693a02771cfc1f096",
+    "selection_policy": "two_stable_winners_by_descending_minimum_margin_then_two_stable_losers_by_ascending_maximum_margin",
+    "selection_records": [
+      {
+        "maximum_registered_minus_wrong_margin": 0.0239117,
+        "minimum_registered_minus_wrong_margin": 0.023721,
+        "prompt_id": "prompt_e6db4109e01246bc",
+        "selection_role": "stable_winner"
+      },
+      {
+        "maximum_registered_minus_wrong_margin": 0.0171455,
+        "minimum_registered_minus_wrong_margin": 0.0168801,
+        "prompt_id": "prompt_d026a34e14f1806b",
+        "selection_role": "stable_winner"
+      },
+      {
+        "maximum_registered_minus_wrong_margin": -0.0389263,
+        "minimum_registered_minus_wrong_margin": -0.0391,
+        "prompt_id": "prompt_4ba678eb7a3abc94",
+        "selection_role": "stable_loser"
+      },
+      {
+        "maximum_registered_minus_wrong_margin": -0.0381536,
+        "minimum_registered_minus_wrong_margin": -0.0383577,
+        "prompt_id": "prompt_184d2cc052881c3e",
+        "selection_role": "stable_loser"
+      }
+    ],
+    "wrong_key_count": 32,
+    "wrong_key_domain": "slm_wm_content_survival_observation_wrong_key_v1"
+  },
+  "routing_reference_registry": {
+    "file_sha256": "af2c56004667abf96ca6d1b14d5a58fa3d1ac5935e59dbc3c0de3b55138920c6",
+    "semantic_digest": "58f84f0d9456806091971fcecb3a06cf980d8e64fd626752b494d46d4170bc8b"
+  },
+  "selection_protocol": {
+    "candidate_signs": [
+      1,
+      -1
+    ],
+    "primary_objective": "maximize_min_registered_blind_content_score",
+    "probe_roles": [
+      "full_probe_positive",
+      "full_probe_negative",
+      "carrier_probe_positive",
+      "carrier_probe_negative"
+    ],
+    "secondary_objective": "maximize_sum_registered_blind_content_score",
+    "tie_policy": "fail_closed",
+    "wrong_key_access": "forbidden_until_sign_selected"
+  },
+  "source_evidence": {
+    "archive_file_manifest_sha256": "0b1f13bebaf5473a54ae19a8e93a3d23be0514fc20339437cd2f39e2a0739312",
+    "archive_sha256_file_sha256": "039f1be0264f1162c8789d43da5af1eb624c8e3eb00c78cc819019910c0de964",
+    "formal_execution_commit": "db324b7c86a1bef305114fe83db44dfed04fd706",
+    "run_id": "content_strength_sensitivity_20260721T012732CST_db324b7",
+    "run_manifest_sha256": "35cf0042f85b13b9e03f1a98adc9b1d622cb3f9e34dc9505514ce07a09428338"
+  }
+}
