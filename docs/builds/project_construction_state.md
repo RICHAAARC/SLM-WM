@@ -20,11 +20,11 @@
 | 重复协议文档修订日期 | `2026-07-17` |
 | profile 与等价执行文档修订日期 | `2026-07-17` |
 | 攻击证据职责文档修订日期 | `2026-07-17` |
-| 源代码与已审 GPU 证据基线提交 | S1 证据绑定 `db324b7c86a1bef305114fe83db44dfed04fd706`；当前 Colab 代码基线为已发布 `58ca8f63ac88a23ae92250c93dae3e27700a5fc3` |
-| GitNexus 索引提交 | `58ca8f63ac88a23ae92250c93dae3e27700a5fc3` |
-| GitNexus 索引规模 | 14,961 symbols、33,184 relationships、300 execution flows |
-| 当前活动构建单元 | `content_survival_private_key_plan_binding`（把固定 Drive 私有 raw key 的三个派生身份绑定到正式 key plan；不修改密钥算法、检测器、方法或 Notebook） |
-| 下一目标构建单元 | 提交并发布 key-plan 迁移，更新 Drive request 后重新运行 Colab A100-40G observation |
+| 源代码与已审 GPU 证据基线提交 | S1 证据绑定 `db324b7c86a1bef305114fe83db44dfed04fd706`；当前 Colab 代码基线为已发布 `5831bae5552e79b1b2ab87609564ed53e4ee7ad8` |
+| GitNexus 索引提交 | `5831bae5552e79b1b2ab87609564ed53e4ee7ad8` |
+| GitNexus 索引规模 | 14,966 symbols、33,187 relationships、300 execution flows |
+| 当前活动构建单元 | `content_survival_colab_hugging_face_access`（把 Colab 已有标准 `HF_TOKEN` Secret 传给模型下载子进程；不修改模型、方法或 Notebook） |
+| 下一目标构建单元 | 提交并发布 Secret 名称对齐，更新 Drive request 后重新运行 Colab A100-40G observation |
 | 受治理解释器 | 仓库 `.venv` 的 CPython 3.12.13 |
 | 默认测试事实 | `.venv/bin/pytest -q -s` 为 `2355 passed, 82 deselected, 380 warnings`；精确 `.venv/bin/pytest -q` 仍在收集前触发宿主 capture 临时文件 `FileNotFoundError`，未运行 runtime-heavy GPU integration 或新的真实 Colab/A100 作业 |
 | 定向协议/cache/约束检查 | observation protocol、专用 host 与 Colab 适配合计 `74 passed`；最小验收面覆盖公开 GitHub 提交、固定 Drive 输入、kernel 内 controller 调用、薄 Notebook、A100 显存门、secret 隔离、长时 pipe 排空、进程组清理、失败落盘和最终固定 Drive 交付，不建立模型供应链或通用持久化门禁 |
@@ -74,6 +74,7 @@
 - 科学运行期间 Drive 已卸载，不执行 Drive hot I/O，也不写 checkpoint、日志或中间结果。最后 cell 先在 `/content` 从磁盘状态分类 success/failure，完成 secret scan、文件清单、archive、detached checksum 和独立解包复验；仅全部通过后才再次 mount Drive，并按 archive 后 checksum 的顺序复制到固定 `/content/drive/MyDrive/SLM/content-survival/results/`。VM 回收前未执行该 cell 会丢失本地结果，这是当前被接受的运行边界。
 - 固定科学工作量仍由既有 single-use host → scientific child 执行：4个 Prompt、24个 cell、148条 diffusion chain、29,304次评分，且保持 `diagnostic_only=true`、`supports_paper_claim=false`、`candidate_promotion_allowed=false`、`qualification_evidence=false`。CPU 适配验收不证明真实 Colab/A100 运行成功。
 - `58ca8f6` 的首个完整 Notebook/Drive 尝试已经证明 A100-40G preflight、依赖环境、唯一 scientific child、secret 隔离及失败包 Drive 交付正常；scientific child 在模型加载和首个 cell 前因固定 Drive raw key 未匹配仍绑定旧公开根密钥的 `FORMAL_WATERMARK_KEY_PLAN` 失败，精确为0/24 cell、0/148 chain、0/29,304 evaluation。这不是 OOM、模型加载、M0 或方法科学失败。失败包经检查后已从 Drive `results/` 删除，避免与后续有效 observation 混淆。
+- `5831bae` 已证明新的私有 key plan 与 Drive raw key 匹配并推进到 SD3.5 下载，但 controller 查找 `SLM_WM_HF_TOKEN`，而 Colab 已配置的标准 Secret 名称是 `HF_TOKEN`；因此记录为 `hf_token_used=false`，Hugging Face gated repo 返回401，仍是0个 cell/chain/evaluation。当前修复只把固定 Secret 名称对齐为 `HF_TOKEN`；token 由 Notebook controller 读取后仅通过内存环境传给隔离 host，再由 orchestrator 传到 scientific child，并在最终打包时重新读取用于 secret scan；它不进入 argv、日志、仓库或结果包。
 
 ---
 
