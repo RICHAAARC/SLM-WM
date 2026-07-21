@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 import hashlib
 import json
@@ -128,6 +128,41 @@ def _prompt_configs(root: Path) -> dict[str, object]:
         )
         configs[prompt_id] = config
     return configs
+
+
+def _prepare_prompt_saliency_model_cache(
+    configs: Mapping[str, object],
+    *,
+    snapshot_downloader: Callable[..., str] | None = None,
+) -> Path:
+    """Download the fixed CLIP snapshot before its local-only formal load."""
+
+    identities = {
+        (
+            str(getattr(config, "vision_model_id")),
+            str(getattr(config, "vision_model_revision")),
+        )
+        for config in configs.values()
+    }
+    if len(identities) != 1:
+        raise RuntimeError("prompt saliency model identity is not unique")
+    model_id, model_revision = identities.pop()
+    if snapshot_downloader is None:
+        from huggingface_hub import snapshot_download
+
+        snapshot_downloader = snapshot_download
+    download_arguments: dict[str, object] = {
+        "repo_id": model_id,
+        "revision": model_revision,
+        "token": os.environ.get("HF_TOKEN") or None,
+    }
+    hf_home = os.environ.get("HF_HOME")
+    if hf_home:
+        download_arguments["cache_dir"] = str(Path(hf_home) / "hub")
+    snapshot_path = Path(snapshot_downloader(**download_arguments)).resolve()
+    if not snapshot_path.is_dir():
+        raise RuntimeError("prompt saliency model snapshot was not materialized")
+    return snapshot_path
 
 
 def _dependency_report_object_digest(value: Mapping[str, object]) -> str:
@@ -330,13 +365,14 @@ def main() -> int:
         expected_registry_digest=routing_identity["semantic_digest"],
         expected_file_sha256=routing_identity["file_sha256"],
     )
+    execution_environment_identity = _execution_environment_identity(root, lock)
+    prompt_configs = _prompt_configs(root)
+    _prepare_prompt_saliency_model_cache(prompt_configs)
     summary = run_content_survival_observation(
-        _prompt_configs(root),
+        prompt_configs,
         references=references,
         verified_formal_execution_lock=lock,
-        verified_execution_environment_identity=(
-            _execution_environment_identity(root, lock)
-        ),
+        verified_execution_environment_identity=execution_environment_identity,
         repository_root=root,
         output_dir=output_dir,
     )

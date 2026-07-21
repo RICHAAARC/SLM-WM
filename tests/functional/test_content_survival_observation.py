@@ -339,6 +339,50 @@ def test_cli_rejects_dependency_report_file_digest_drift(
         )
 
 
+def test_cli_prefetches_prompt_saliency_snapshot_for_local_only_loader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hf_home = tmp_path / "huggingface"
+    snapshot = hf_home / "hub" / "snapshots" / "clip"
+    snapshot.mkdir(parents=True)
+    calls: list[dict[str, object]] = []
+
+    def _download(**kwargs: object) -> str:
+        calls.append(dict(kwargs))
+        return str(snapshot)
+
+    monkeypatch.setenv("HF_HOME", str(hf_home))
+    monkeypatch.setenv("HF_TOKEN", "synthetic-hf-token")
+    configs = {
+        prompt_id: _config(prompt_id)
+        for prompt_id in protocol.CONTENT_SURVIVAL_PROMPT_IDS
+    }
+    resolved = observation_cli._prepare_prompt_saliency_model_cache(
+        configs,
+        snapshot_downloader=_download,
+    )
+    assert resolved == snapshot.resolve()
+    assert calls == [
+        {
+            "repo_id": "openai/clip-vit-base-patch32",
+            "revision": "3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268",
+            "token": "synthetic-hf-token",
+            "cache_dir": str(hf_home / "hub"),
+        }
+    ]
+
+
+def test_cli_prefetches_clip_after_identity_gate_and_before_gpu_runtime() -> None:
+    main_source = inspect.getsource(observation_cli.main)
+    identity_index = main_source.index("_execution_environment_identity(root, lock)")
+    prefetch_index = main_source.index(
+        "_prepare_prompt_saliency_model_cache(prompt_configs)"
+    )
+    runtime_index = main_source.index("summary = run_content_survival_observation(")
+    assert identity_index < prefetch_index < runtime_index
+
+
 def _config(
     prompt_id: str = protocol.CONTENT_SURVIVAL_PROMPT_IDS[0],
 ) -> SemanticWatermarkRuntimeConfig:
