@@ -1557,6 +1557,158 @@ def test_runner_level_complete_cell_resume_makes_zero_pipeline_calls(
     assert all(len(row["key_score_records"]) == 33 for row in result["observation_records"])
 
 
+def test_geometry_backtracking_failure_is_terminal_and_resume_uses_zero_pipeline_calls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, loaded, lock, environment, roster, identity = _identity_bundle()
+    output_root = tmp_path / "outputs" / "observation"
+    calls = 0
+
+    def fail_geometry(*_args: object, **_kwargs: object) -> None:
+        nonlocal calls
+        calls += 1
+        raise ValueError(runtime._GEOMETRY_FAILURE_MESSAGE)
+
+    monkeypatch.setattr(runtime, "_run_observed_chain", fail_geometry)
+    failure = runtime._run_observation_cell(
+        config,
+        ContentRoutingReferenceScalars(1.0, 1.0, 1.0),
+        context=object(),
+        base_latent=object(),
+        base_identity={},
+        clean_chain=object(),
+        routing_mode="uniform",
+        carrier_mode="lf_only",
+        roster=roster,
+        protocol=loaded,
+        formal_execution_lock=lock,
+        execution_environment_identity=environment,
+        observation_run_identity=identity["observation_run_identity"],
+        output_root=output_root,
+    )
+    assert calls == 1
+    assert failure["failure_code"] == (
+        protocol.CONTENT_SURVIVAL_GEOMETRY_FAILURE_CODE
+    )
+    assert failure["failed_chain_role"] == "full_probe_positive"
+    assert failure["successful_chain_count"] == 0
+    assert failure["attempted_chain_count"] == 1
+    assert failure["fallback_chain_materialized"] is False
+    assert not list(output_root.rglob("*.pt"))
+    assert not list(output_root.rglob("*.png"))
+
+    monkeypatch.setattr(
+        runtime,
+        "_run_observed_chain",
+        lambda *_args, **_kwargs: pytest.fail("failure resume called the pipeline"),
+    )
+    resumed = runtime._run_observation_cell(
+        config,
+        ContentRoutingReferenceScalars(1.0, 1.0, 1.0),
+        context=object(),
+        base_latent=object(),
+        base_identity={},
+        clean_chain=object(),
+        routing_mode="uniform",
+        carrier_mode="lf_only",
+        roster=roster,
+        protocol=loaded,
+        formal_execution_lock=lock,
+        execution_environment_identity=environment,
+        observation_run_identity=identity["observation_run_identity"],
+        output_root=output_root,
+    )
+    assert resumed == failure
+
+
+def test_attempt_summary_accepts_24_terminal_method_failures_without_fallback(
+    tmp_path: Path,
+) -> None:
+    _, loaded, lock, environment, roster, identity = _identity_bundle()
+    run_identity = protocol.build_content_survival_observation_run_identity(
+        formal_execution_lock=lock,
+        execution_environment_identity=environment,
+        model_id=identity["model_id"],
+        model_revision=identity["model_revision"],
+        vision_model_id=identity["vision_model_id"],
+        vision_model_revision=identity["vision_model_revision"],
+        key_roster=roster,
+        protocol=loaded,
+    )
+    output_root = tmp_path / "outputs" / "observation"
+    expected_cells = []
+    for prompt_id in protocol.CONTENT_SURVIVAL_PROMPT_IDS:
+        for routing_mode in protocol.CONTENT_SURVIVAL_ROUTING_MODES:
+            for carrier_mode in protocol.CONTENT_SURVIVAL_CARRIER_MODES:
+                relative = Path(prompt_id) / routing_mode / carrier_mode
+                cell_identity = {
+                    "prompt_id": prompt_id,
+                    "routing_mode": routing_mode,
+                    "carrier_mode": carrier_mode,
+                    "observation_run_identity": run_identity,
+                }
+                cell_identity["cell_identity_digest"] = build_stable_digest(
+                    cell_identity
+                )
+                failure = protocol.build_content_survival_cell_failure_record(
+                    cell_identity=cell_identity,
+                    failed_chain_role="full_probe_positive",
+                    successful_chain_count=0,
+                )
+                protocol.publish_content_survival_cell_failure(
+                    output_root / relative,
+                    failure_record=failure,
+                )
+                expected_cells.append(
+                    {
+                        "relative_path": relative.as_posix(),
+                        "cell_identity_digest": cell_identity[
+                            "cell_identity_digest"
+                        ],
+                    }
+                )
+    summary = protocol.build_content_survival_observation_attempt_summary(
+        output_root,
+        expected_cells=expected_cells,
+        observation_run_identity=run_identity,
+        protocol=loaded,
+    )
+    assert summary["terminal_cell_count"] == 24
+    assert summary["complete_cell_count"] == 0
+    assert summary["failed_cell_count"] == 24
+    assert summary["attempted_chain_count"] == 24
+    assert summary["successful_chain_count"] == 0
+    assert summary["validated_clean_chain_count"] == 0
+    assert summary["evaluation_count"] == 0
+    assert summary["matrix_execution_complete"] is True
+    assert summary["method_failures_present"] is True
+    assert summary["supports_paper_claim"] is False
+
+
+def test_cell_failure_rejects_coordinated_internal_identity_tamper(
+    tmp_path: Path,
+) -> None:
+    *_, identity = _identity_bundle()
+    failure = protocol.build_content_survival_cell_failure_record(
+        cell_identity=identity,
+        failed_chain_role="full_probe_positive",
+        successful_chain_count=0,
+    )
+    tampered = json.loads(json.dumps(failure))
+    tampered["cell_identity"]["prompt_id"] = "prompt_coordinated_tamper"
+    payload = {
+        key: value for key, value in tampered.items() if key != "failure_digest"
+    }
+    tampered["failure_digest"] = build_stable_digest(payload)
+    with pytest.raises(ValueError, match="cell failure identity"):
+        protocol.validate_content_survival_cell_failure_record(
+            tampered,
+            expected_cell_identity_digest=identity["cell_identity_digest"],
+        )
+    assert not (tmp_path / "cell_failure.json").exists()
+
+
 def test_runner_keeps_three_latents_and_fixed_registry_boundary_visible() -> None:
     source = inspect.getsource(runtime)
     cli_source = Path("scripts/run_content_survival_observation.py").read_text()

@@ -54,6 +54,9 @@ CONTENT_SURVIVAL_WRONG_KEY_COUNT = 32
 CONTENT_SURVIVAL_CELL_COUNT = 24
 CONTENT_SURVIVAL_CHAIN_COUNT = 148
 CONTENT_SURVIVAL_EVALUATION_COUNT = 29_304
+CONTENT_SURVIVAL_GEOMETRY_FAILURE_CODE = (
+    "attention_geometry_no_strict_actual_dtype_improvement"
+)
 CONTENT_SURVIVAL_CLAIM_BOUNDARY = {
     "diagnostic_only": True,
     "supports_paper_claim": False,
@@ -2117,6 +2120,224 @@ def build_content_survival_observation_summary(
     return {**payload, "summary_digest": build_stable_digest(payload)}
 
 
+def build_content_survival_cell_failure_record(
+    *,
+    cell_identity: Mapping[str, Any],
+    failed_chain_role: str,
+    successful_chain_count: int,
+) -> dict[str, Any]:
+    """Materialize one terminal diagnostic cell failure without a fallback chain."""
+
+    identity = dict(cell_identity)
+    _required_sha256(identity.get("cell_identity_digest"), "cell_identity_digest")
+    if failed_chain_role not in CONTENT_SURVIVAL_CHAIN_ROLES:
+        raise ValueError("failed observation chain role is not governed")
+    expected_index = CONTENT_SURVIVAL_CHAIN_ROLES.index(failed_chain_role)
+    if successful_chain_count != expected_index:
+        raise ValueError("failed cell chain count does not match the governed role order")
+    payload = {
+        "failure_schema": "slm_wm_content_survival_observation_cell_failure",
+        "cell_identity": identity,
+        "failure_code": CONTENT_SURVIVAL_GEOMETRY_FAILURE_CODE,
+        "failure_boundary": "attention_geometry_actual_dtype_backtracking",
+        "failed_chain_role": failed_chain_role,
+        "successful_chain_count": successful_chain_count,
+        "attempted_chain_count": successful_chain_count + 1,
+        "evaluation_count": 0,
+        "fallback_chain_materialized": False,
+        **CONTENT_SURVIVAL_CLAIM_BOUNDARY,
+    }
+    return {**payload, "failure_digest": build_stable_digest(payload)}
+
+
+def validate_content_survival_cell_failure_record(
+    record: Mapping[str, Any],
+    *,
+    expected_cell_identity_digest: str,
+) -> dict[str, Any]:
+    resolved = dict(record)
+    digest = resolved.pop("failure_digest", None)
+    if digest != build_stable_digest(resolved):
+        raise ValueError("cell failure digest mismatch")
+    expected_fields = {
+        "failure_schema",
+        "cell_identity",
+        "failure_code",
+        "failure_boundary",
+        "failed_chain_role",
+        "successful_chain_count",
+        "attempted_chain_count",
+        "evaluation_count",
+        "fallback_chain_materialized",
+        *CONTENT_SURVIVAL_CLAIM_BOUNDARY,
+    }
+    if set(resolved) != expected_fields:
+        raise ValueError("cell failure fields drifted")
+    rebuilt = build_content_survival_cell_failure_record(
+        cell_identity=resolved["cell_identity"],
+        failed_chain_role=resolved["failed_chain_role"],
+        successful_chain_count=resolved["successful_chain_count"],
+    )
+    if rebuilt != record:
+        raise ValueError("cell failure record is not canonically rebuildable")
+    identity = resolved["cell_identity"]
+    expected_identity_digest = _required_sha256(
+        expected_cell_identity_digest, "expected_cell_identity_digest"
+    )
+    if (
+        type(identity) is not dict
+        or identity.get("cell_identity_digest") != expected_identity_digest
+        or build_stable_digest(
+            {
+                key: value
+                for key, value in identity.items()
+                if key != "cell_identity_digest"
+            }
+        )
+        != expected_identity_digest
+    ):
+        raise ValueError("cell failure identity mismatch")
+    return dict(record)
+
+
+def publish_content_survival_cell_failure(
+    cell_dir: str | Path,
+    *,
+    failure_record: Mapping[str, Any],
+) -> dict[str, Any]:
+    directory = Path(cell_dir).resolve()
+    directory.mkdir(parents=True, exist_ok=True)
+    complete_path = directory / "cell_manifest.json"
+    if complete_path.exists():
+        raise ValueError("successful cell already exists at failure path")
+    path = directory / "cell_failure.json"
+    record = validate_content_survival_cell_failure_record(
+        failure_record,
+        expected_cell_identity_digest=failure_record["cell_identity"][
+            "cell_identity_digest"
+        ],
+    )
+    payload = _canonical_json_bytes(record)
+    if path.exists():
+        if path.read_bytes() != payload:
+            raise ValueError("existing cell failure conflicts with this attempt")
+        return record
+    _atomic_bytes(path, payload)
+    _fsync_directory(directory)
+    return record
+
+
+def build_content_survival_observation_attempt_summary(
+    output_root: str | Path,
+    *,
+    expected_cells: Sequence[Mapping[str, Any]],
+    observation_run_identity: Mapping[str, Any],
+    protocol: ContentSurvivalObservationProtocol,
+) -> dict[str, Any]:
+    """Close a complete diagnostic matrix containing terminal method failures."""
+
+    root = Path(output_root).resolve()
+    cells = [dict(cell) for cell in expected_cells]
+    if len(cells) != CONTENT_SURVIVAL_CELL_COUNT:
+        raise ValueError("attempt summary requires the frozen 24-cell roster")
+    paths = [str(cell.get("relative_path")) for cell in cells]
+    if len(set(paths)) != CONTENT_SURVIVAL_CELL_COUNT:
+        raise ValueError("attempt summary cell paths must be unique")
+    outcome_records: list[dict[str, Any]] = []
+    complete_count = 0
+    failure_count = 0
+    successful_chain_count = 0
+    attempted_chain_count = 0
+    evaluation_count = 0
+    clean_chain_count = 0
+    for cell in cells:
+        relative_path = Path(cell["relative_path"])
+        directory = (root / relative_path).resolve()
+        directory.relative_to(root)
+        identity_digest = _required_sha256(
+            cell.get("cell_identity_digest"), "attempt summary cell identity digest"
+        )
+        manifest_path = directory / "cell_manifest.json"
+        failure_path = directory / "cell_failure.json"
+        if manifest_path.is_file() == failure_path.is_file():
+            raise ValueError("each diagnostic cell requires exactly one terminal outcome")
+        if manifest_path.is_file():
+            validate_content_survival_cell_bundle(
+                directory,
+                expected_cell_identity_digest=identity_digest,
+                complete=True,
+            )
+            result_path = directory / "cell_result.json"
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            complete_count += 1
+            successful_chain_count += int(result["cell_chain_count"])
+            attempted_chain_count += int(result["cell_chain_count"])
+            evaluation_count += int(result["cell_evaluation_count"]) + (
+                len(result["clean_observation_records"])
+                * (CONTENT_SURVIVAL_WRONG_KEY_COUNT + 1)
+                * 2
+            )
+            if result["clean_observation_records"]:
+                clean_chain_count += 1
+            outcome_records.append(
+                {
+                    "relative_path": relative_path.as_posix(),
+                    "outcome": "complete",
+                    "cell_identity_digest": identity_digest,
+                    "outcome_file_sha256": hashlib.sha256(
+                        manifest_path.read_bytes()
+                    ).hexdigest(),
+                    "result_digest": result["result_digest"],
+                }
+            )
+        else:
+            failure = validate_content_survival_cell_failure_record(
+                json.loads(failure_path.read_text(encoding="utf-8")),
+                expected_cell_identity_digest=identity_digest,
+            )
+            failure_count += 1
+            successful_chain_count += int(failure["successful_chain_count"])
+            attempted_chain_count += int(failure["attempted_chain_count"])
+            evaluation_count += int(failure["evaluation_count"])
+            outcome_records.append(
+                {
+                    "relative_path": relative_path.as_posix(),
+                    "outcome": "method_failure",
+                    "cell_identity_digest": identity_digest,
+                    "outcome_file_sha256": hashlib.sha256(
+                        failure_path.read_bytes()
+                    ).hexdigest(),
+                    "failure_code": failure["failure_code"],
+                    "failed_chain_role": failure["failed_chain_role"],
+                    "failure_digest": failure["failure_digest"],
+                }
+            )
+    if failure_count == 0:
+        raise ValueError("attempt summary requires at least one terminal method failure")
+    payload = {
+        "summary_schema": "slm_wm_content_survival_observation_attempt_summary",
+        "protocol_identity": protocol.identity_record(),
+        "observation_run_identity": dict(observation_run_identity),
+        "observation_run_identity_digest": observation_run_identity[
+            "observation_run_identity_digest"
+        ],
+        "cell_count": CONTENT_SURVIVAL_CELL_COUNT,
+        "terminal_cell_count": len(outcome_records),
+        "complete_cell_count": complete_count,
+        "failed_cell_count": failure_count,
+        "successful_chain_count": successful_chain_count,
+        "attempted_chain_count": attempted_chain_count,
+        "validated_clean_chain_count": clean_chain_count,
+        "evaluation_count": evaluation_count,
+        "matrix_execution_complete": True,
+        "method_failures_present": True,
+        "outcome_records": outcome_records,
+        "outcome_records_digest": build_stable_digest(outcome_records),
+        **CONTENT_SURVIVAL_CLAIM_BOUNDARY,
+    }
+    return {**payload, "summary_digest": build_stable_digest(payload)}
+
+
 def publish_content_survival_cell(
     cell_dir: str | Path,
     *,
@@ -2240,6 +2461,7 @@ __all__ = [
     "CONTENT_SURVIVAL_CHAIN_ROLES",
     "CONTENT_SURVIVAL_CLAIM_BOUNDARY",
     "CONTENT_SURVIVAL_EVALUATION_COUNT",
+    "CONTENT_SURVIVAL_GEOMETRY_FAILURE_CODE",
     "CONTENT_SURVIVAL_M0_DEVIATIONS",
     "CONTENT_SURVIVAL_OBSERVATION_ROLES",
     "CONTENT_SURVIVAL_PROMPT_IDS",
@@ -2255,6 +2477,8 @@ __all__ = [
     "build_content_survival_observation_roster",
     "build_content_survival_observation_run_identity",
     "build_content_survival_observation_summary",
+    "build_content_survival_observation_attempt_summary",
+    "build_content_survival_cell_failure_record",
     "build_content_survival_parent_child_binding_digest",
     "build_registered_rank_record",
     "compute_blind_observation_score",
@@ -2263,8 +2487,10 @@ __all__ = [
     "content_survival_observation_roster_semantic_digest",
     "load_content_survival_observation_protocol",
     "publish_content_survival_cell",
+    "publish_content_survival_cell_failure",
     "select_content_survival_observation_sign",
     "validate_content_survival_cell_bundle",
+    "validate_content_survival_cell_failure_record",
     "validate_content_survival_observation_payload",
     "validate_content_survival_observation_record",
     "validate_content_survival_execution_environment_identity",

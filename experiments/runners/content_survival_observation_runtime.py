@@ -23,6 +23,7 @@ from experiments.protocol.content_survival_observation import (
     CONTENT_SURVIVAL_CHAIN_ROLES,
     CONTENT_SURVIVAL_CLAIM_BOUNDARY,
     CONTENT_SURVIVAL_EVALUATION_COUNT,
+    CONTENT_SURVIVAL_GEOMETRY_FAILURE_CODE,
     CONTENT_SURVIVAL_M0_DEVIATIONS,
     CONTENT_SURVIVAL_OBSERVATION_ROLES,
     CONTENT_SURVIVAL_PROMPT_IDS,
@@ -32,16 +33,23 @@ from experiments.protocol.content_survival_observation import (
     build_content_survival_observation_roster,
     build_content_survival_observation_run_identity,
     build_content_survival_observation_summary,
+    build_content_survival_observation_attempt_summary,
+    build_content_survival_cell_failure_record,
     build_content_survival_parent_child_binding_digest,
     build_registered_rank_record,
     compute_blind_observation_score,
     compute_routed_template_oracle_score,
     load_content_survival_observation_protocol,
     publish_content_survival_cell,
+    publish_content_survival_cell_failure,
     select_content_survival_observation_sign,
     validate_content_survival_cell_bundle,
+    validate_content_survival_cell_failure_record,
     validate_content_survival_observation_record,
 )
+
+
+_GEOMETRY_FAILURE_MESSAGE = "9项几何回溯均未产生actual-dtype严格关系分数改善"
 from experiments.protocol.formal_randomization import (
     build_canonical_sd35_base_latent,
 )
@@ -815,6 +823,9 @@ def _run_observation_cell(
     )
     cell_dir = output_root / config.prompt_id / routing_mode / carrier_mode
     complete_path = cell_dir / "cell_manifest.json"
+    failure_path = cell_dir / "cell_failure.json"
+    if complete_path.exists() and failure_path.exists():
+        raise ValueError("observation cell has conflicting terminal outcomes")
     if complete_path.exists():
         validate_content_survival_cell_bundle(
             cell_dir,
@@ -822,6 +833,11 @@ def _run_observation_cell(
             complete=True,
         )
         return json.loads((cell_dir / "cell_result.json").read_text(encoding="utf-8"))
+    if failure_path.exists():
+        return validate_content_survival_cell_failure_record(
+            json.loads(failure_path.read_text(encoding="utf-8")),
+            expected_cell_identity_digest=cell_identity["cell_identity_digest"],
+        )
 
     chains: list[_ObservedChain] = []
     early_blind: dict[str, Mapping[str, Any]] = {}
@@ -829,56 +845,16 @@ def _run_observation_cell(
         {"model_id": config.model_id, "model_revision": config.model_revision}
     )
     score_role = _score_method_role(routing_mode, carrier_mode)
-    for role, sign in (
-        ("full_probe_positive", 1),
-        ("full_probe_negative", -1),
-        ("carrier_probe_positive", 1),
-        ("carrier_probe_negative", -1),
-    ):
-        chain = _run_observed_chain(
-            config,
-            references,
-            context=context,
-            base_latent=base_latent,
-            base_identity=base_identity,
-            routing_mode=routing_mode,
-            carrier_mode=carrier_mode,
-            role=role,
-            probe_sign=sign,
-            replay_sign=None,
-            observation_run_identity_digest=observation_run_identity[
-                "observation_run_identity_digest"
-            ],
-            prompt_text_digest=prompt_text_digest,
-            prompt_config_digest=prompt_config_digest,
-            key_roster_digest_random=roster["roster_digest_random"],
-            cell_identity=cell_identity,
-        )
-        chains.append(chain)
-        cache_key = f"{role}:image_reencoded_latent"
-        early_blind[cache_key] = compute_blind_observation_score(
-            chain.image_reencoded_latent,
-            key_material=config.key_material,
-            model_identity_digest=model_identity_digest,
-            prg_version=KEYED_PRG_VERSION,
-            method_role=score_role,
-        )
-    selection = select_content_survival_observation_sign(
-        {
-            role: float(
-                early_blind[f"{role}:image_reencoded_latent"][
-                    "blind_content_score"
-                ]
-            )
-            for role in CONTENT_SURVIVAL_CHAIN_ROLES[:4]
-        }
-    )
-    for role, sign in (
-        ("nominal_before_positive", 1),
-        ("nominal_after_selected", int(selection["selected_sign"])),
-    ):
-        chains.append(
-            _run_observed_chain(
+    active_role = CONTENT_SURVIVAL_CHAIN_ROLES[0]
+    try:
+        for role, sign in (
+            ("full_probe_positive", 1),
+            ("full_probe_negative", -1),
+            ("carrier_probe_positive", 1),
+            ("carrier_probe_negative", -1),
+        ):
+            active_role = role
+            chain = _run_observed_chain(
                 config,
                 references,
                 context=context,
@@ -887,8 +863,8 @@ def _run_observation_cell(
                 routing_mode=routing_mode,
                 carrier_mode=carrier_mode,
                 role=role,
-                probe_sign=None,
-                replay_sign=sign,
+                probe_sign=sign,
+                replay_sign=None,
                 observation_run_identity_digest=observation_run_identity[
                     "observation_run_identity_digest"
                 ],
@@ -897,6 +873,64 @@ def _run_observation_cell(
                 key_roster_digest_random=roster["roster_digest_random"],
                 cell_identity=cell_identity,
             )
+            chains.append(chain)
+            cache_key = f"{role}:image_reencoded_latent"
+            early_blind[cache_key] = compute_blind_observation_score(
+                chain.image_reencoded_latent,
+                key_material=config.key_material,
+                model_identity_digest=model_identity_digest,
+                prg_version=KEYED_PRG_VERSION,
+                method_role=score_role,
+            )
+        selection = select_content_survival_observation_sign(
+            {
+                role: float(
+                    early_blind[f"{role}:image_reencoded_latent"][
+                        "blind_content_score"
+                    ]
+                )
+                for role in CONTENT_SURVIVAL_CHAIN_ROLES[:4]
+            }
+        )
+        for role, sign in (
+            ("nominal_before_positive", 1),
+            ("nominal_after_selected", int(selection["selected_sign"])),
+        ):
+            active_role = role
+            chains.append(
+                _run_observed_chain(
+                    config,
+                    references,
+                    context=context,
+                    base_latent=base_latent,
+                    base_identity=base_identity,
+                    routing_mode=routing_mode,
+                    carrier_mode=carrier_mode,
+                    role=role,
+                    probe_sign=None,
+                    replay_sign=sign,
+                    observation_run_identity_digest=observation_run_identity[
+                        "observation_run_identity_digest"
+                    ],
+                    prompt_text_digest=prompt_text_digest,
+                    prompt_config_digest=prompt_config_digest,
+                    key_roster_digest_random=roster["roster_digest_random"],
+                    cell_identity=cell_identity,
+                )
+            )
+    except ValueError as exc:
+        if str(exc) != _GEOMETRY_FAILURE_MESSAGE:
+            raise
+        failure = build_content_survival_cell_failure_record(
+            cell_identity=cell_identity,
+            failed_chain_role=active_role,
+            successful_chain_count=len(chains),
+        )
+        if failure["failure_code"] != CONTENT_SURVIVAL_GEOMETRY_FAILURE_CODE:
+            raise RuntimeError("geometry failure classification drifted")
+        return publish_content_survival_cell_failure(
+            cell_dir,
+            failure_record=failure,
         )
 
     observation_records: list[dict[str, Any]] = []
@@ -986,7 +1020,7 @@ def _run_observation_cell(
     return result_payload
 
 
-def _load_complete_observation_cells(
+def _load_terminal_observation_cells(
     configs: tuple[SemanticWatermarkRuntimeConfig, ...],
     *,
     roster: Mapping[str, Any],
@@ -1011,22 +1045,34 @@ def _load_complete_observation_cells(
                 cell_dir = (
                     output_root / config.prompt_id / routing_mode / carrier_mode
                 )
-                if not (cell_dir / "cell_manifest.json").is_file():
+                manifest_path = cell_dir / "cell_manifest.json"
+                failure_path = cell_dir / "cell_failure.json"
+                if manifest_path.is_file() == failure_path.is_file():
                     return None
-                validate_content_survival_cell_bundle(
-                    cell_dir,
-                    expected_cell_identity_digest=identity[
-                        "cell_identity_digest"
-                    ],
-                    complete=True,
-                )
-                results.append(
-                    json.loads(
-                        (cell_dir / "cell_result.json").read_text(
-                            encoding="utf-8"
+                if manifest_path.is_file():
+                    validate_content_survival_cell_bundle(
+                        cell_dir,
+                        expected_cell_identity_digest=identity[
+                            "cell_identity_digest"
+                        ],
+                        complete=True,
+                    )
+                    results.append(
+                        json.loads(
+                            (cell_dir / "cell_result.json").read_text(
+                                encoding="utf-8"
+                            )
                         )
                     )
-                )
+                else:
+                    results.append(
+                        validate_content_survival_cell_failure_record(
+                            json.loads(failure_path.read_text(encoding="utf-8")),
+                            expected_cell_identity_digest=identity[
+                                "cell_identity_digest"
+                            ],
+                        )
+                    )
     return results
 
 
@@ -1037,6 +1083,31 @@ def _finalize_observation_summary(
     observation_run_identity: Mapping[str, Any],
     protocol: Any,
 ) -> dict[str, Any]:
+    failed_cells = [
+        result for result in cell_results if "failure_schema" in result
+    ]
+    if failed_cells:
+        expected_cells = [
+            {
+                "relative_path": (
+                    Path(result["cell_identity"]["prompt_id"])
+                    / result["cell_identity"]["routing_mode"]
+                    / result["cell_identity"]["carrier_mode"]
+                ).as_posix(),
+                "cell_identity_digest": result["cell_identity"][
+                    "cell_identity_digest"
+                ],
+            }
+            for result in cell_results
+        ]
+        summary = build_content_survival_observation_attempt_summary(
+            output_root,
+            expected_cells=expected_cells,
+            observation_run_identity=observation_run_identity,
+            protocol=protocol,
+        )
+        _publish_summary(output_root, summary)
+        return summary
     chain_count = len(CONTENT_SURVIVAL_PROMPT_IDS) + sum(
         int(result["cell_chain_count"]) for result in cell_results
     )
@@ -1128,7 +1199,7 @@ def run_content_survival_observation(
         for config in configs
     ):
         raise ValueError("all observation prompts must share one model identity")
-    completed_results = _load_complete_observation_cells(
+    completed_results = _load_terminal_observation_cells(
         configs,
         roster=roster,
         protocol=protocol,

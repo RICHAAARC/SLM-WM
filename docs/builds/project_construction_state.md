@@ -16,17 +16,17 @@
 
 | 项目 | 基线 |
 |---|---|
-| 审计日期 | `2026-07-21` |
+| 审计日期 | `2026-07-22` |
 | 重复协议文档修订日期 | `2026-07-17` |
 | profile 与等价执行文档修订日期 | `2026-07-17` |
 | 攻击证据职责文档修订日期 | `2026-07-17` |
-| 源代码与已审 GPU 证据基线提交 | S1 证据绑定 `db324b7c86a1bef305114fe83db44dfed04fd706`；当前 Colab 代码基线为已发布 `556ea31e9ec251fa00bf32b55fc9ba10f5785bbb` |
-| GitNexus 索引提交 | `556ea31e9ec251fa00bf32b55fc9ba10f5785bbb` |
-| GitNexus 索引规模 | 14,974 nodes、33,196 edges、300 execution flows |
-| 当前活动构建单元 | `content_survival_single_carrier_geometry_sync`（修复 observation 单载体消融错误清零名义强度并保留精确活动角色；不修改正式载体 producer、Q/K 算子或 Notebook） |
-| 下一目标构建单元 | 提交并发布单载体 Q/K 接线修复，更新 Drive request 后继续 Colab A100-40G observation |
+| 源代码与已审 GPU 证据基线提交 | S1 证据绑定 `db324b7c86a1bef305114fe83db44dfed04fd706`；当前已发布 Colab 代码基线为 `98e9b790ac0094e26bbf9f20f00ce8b9fd1f8afa` |
+| GitNexus 索引提交 | `98e9b790ac0094e26bbf9f20f00ce8b9fd1f8afa` |
+| GitNexus 索引规模 | 14,975 nodes、33,199 edges、300 execution flows |
+| 当前活动构建单元 | `content_survival_method_failure_continuation`（把单个 observation cell 的真实 Q/K actual-dtype 回溯失败保存为终止失败结果并继续矩阵；不修改正式 Q/K 算法、载体 producer 或 Notebook） |
+| 下一目标构建单元 | 提交并发布 diagnostic failure continuation，更新 Drive request 后在 Colab A100-80G 重新执行完整 observation 矩阵 |
 | 受治理解释器 | 仓库 `.venv` 的 CPython 3.12.13 |
-| 默认测试事实 | `.venv/bin/pytest -q -s` 为 `2357 passed, 82 deselected, 380 warnings`；精确 `.venv/bin/pytest -q` 仍在收集前触发宿主 capture 临时文件 `FileNotFoundError`，未运行 runtime-heavy GPU integration 或新的真实 Colab/A100 作业 |
+| 默认测试事实 | `.venv/bin/pytest -q -s` 为 `2362 passed, 82 deselected, 380 warnings`；精确 `.venv/bin/pytest -q` 仍在收集前触发宿主 capture 临时文件 `FileNotFoundError`；真实 Colab A100-40G 与 A100-80G 诊断结果按下文边界登记 |
 | 定向协议/cache/约束检查 | observation protocol、专用 host 与 Colab 适配合计 `74 passed`；最小验收面覆盖公开 GitHub 提交、固定 Drive 输入、kernel 内 controller 调用、薄 Notebook、A100 显存门、secret 隔离、长时 pipe 排空、进程组清理、失败落盘和最终固定 Drive 交付，不建立模型供应链或通用持久化门禁 |
 | harness 与格式检查 | 10项 harness 全部通过；`git diff --check` 通过 |
 | 外部源码 qualification | 显式 integration 运行 `6 failed, 0 skipped`；失败均来自4套登记真实源码目录缺失，符合缺源失败关闭边界，不属于默认测试失败 |
@@ -77,6 +77,10 @@
 - `5831bae` 已证明新的私有 key plan 与 Drive raw key 匹配并推进到 SD3.5 下载，但 controller 查找 `SLM_WM_HF_TOKEN`，而 Colab 已配置的标准 Secret 名称是 `HF_TOKEN`；因此记录为 `hf_token_used=false`，Hugging Face gated repo 返回401，仍是0个 cell/chain/evaluation。当前修复只把固定 Secret 名称对齐为 `HF_TOKEN`；token 由 Notebook controller 读取后仅通过内存环境传给隔离 host，再由 orchestrator 传到 scientific child，并在最终打包时重新读取用于 secret scan；它不进入 argv、日志、仓库或结果包。
 - `3f5696c` 已证明标准 `HF_TOKEN` 进入科学链，SD3.5 的26个文件下载完成且pipeline 9/9组件加载完成；随后固定 `openai/clip-vit-base-patch32` loader 因 `local_files_only=True` 且全新 Colab cache 中没有该快照失败，仍是0个 cell/chain/evaluation。这不是401、OOM或方法科学失败。当前最小修复只在 execution identity 通过后、GPU runtime 前用固定model id/revision准备同一个 `HF_HOME` cache；共享HIGH loader和CRITICAL组件加载器保持不变，也不新增模型文件hash门。
 - `556ea31` 已在 A100-40G 完成 SD3.5 与 CLIP 下载/加载，完整执行第一条20步扩散链并进入第二条链第10步，证明 Colab、显存、模型与GPU执行边界均已打通。随后 semantic×LF-only cell 将停用 HF 分支的名义强度错误改写为0，触发 Q/K 同步更新的正式正强度门禁；这是 observation runner 的单载体接线错误，不是环境、OOM或科学结论。当前修复保持正式 producer 生成的两个正名义强度，只把停用分支 update/direction 置零并登记精确单分支角色。
+- `98e9b79` 在 A100-40G 上完成模型加载和第一条 diffusion chain，但第二条链的真实 Q/K autograd 使39.49 GiB显存仅余约3.44 MiB并触发 OOM；因此40G不再作为该固定工作量的运行设备，后续使用 A100-80G，不启用 offload、量化或缩减矩阵。
+- 同一 `98e9b79` 在 A100-80G 上没有 OOM，并完成第一个 Prompt 的 semantic×LF-only、semantic×HF-only、semantic×dual 三个完整 cell。三者 selected sign 均为 `+1`，所以 nominal before/after 完全相同；最终 re-encode latent 的 registered key 在32个 wrong key加 registered 的33键集合中，blind rank 分别为19、12、17，routed-template oracle rank 分别为20、30、20。该结果表明 routed oracle 也没有恢复稳定 key ownership，当前载体归因仍弱；它是诊断事实，不是候选通过。
+- A100-80G 随后在 uniform×LF-only 的 `full_probe_positive` step10 触发正式门禁：9个 Q/K geometry 回溯候选都不能在 actual dtype 上严格改善关系分数。正式 `main/methods/geometry/sync_update.py` 的失败关闭保持不变；问题在于 observation runner 把一个 cell 的方法失败升级为整个24-cell矩阵的进程失败。
+- 当前最小修复为失败 cell 写入摘要绑定的 `cell_failure.json`，固定失败边界、稳定 failure code、失败角色、已成功/已尝试链数、零 evaluation 和 `fallback_chain_materialized=false`，然后继续下一 cell。成功 cell 仍使用原 full validator 与 manifest-last；24个 cell 全部形成成功 bundle 或方法失败记录后输出 attempt summary。该修复不把零 geometry、随机方向或 content-only 图像冒充 full 方法结果，也不改变正式 Q/K 接受条件。
 
 ---
 
