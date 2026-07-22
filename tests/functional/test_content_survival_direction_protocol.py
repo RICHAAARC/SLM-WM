@@ -180,6 +180,19 @@ def test_content_survival_config_rejects_unknown_and_digest_drift() -> None:
 
 
 @pytest.mark.quick
+def test_content_survival_config_rejects_late_hf_generation_drift() -> None:
+    protocol = load_content_survival_direction_protocol(REPOSITORY_ROOT)
+    drifted = json.loads(json.dumps(protocol.payload))
+    drifted["late_hf_generation"]["callback_step_index"] = 17
+    drifted["survival_protocol_semantic_digest"] = (
+        content_survival_protocol_semantic_digest(drifted)
+    )
+
+    with pytest.raises(ValueError, match="late HF generation"):
+        validate_content_survival_direction_payload(drifted)
+
+
+@pytest.mark.quick
 @pytest.mark.parametrize(
     ("field_name", "replacement"),
     (

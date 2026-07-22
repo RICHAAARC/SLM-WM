@@ -58,7 +58,7 @@
     "zero_direction": "fail_closed"
   },
   "protocol_schema": "slm_wm_content_survival_direction_protocol",
-  "protocol_version": "content_survival_direction_v1",
+  "protocol_version": "content_survival_direction_late_hf_generation",
   "replay_protocol": {
     "only_full_carrier_difference": "attention_geometry_enabled",
     "parent_binding": "probe_bundle_digest",
@@ -86,27 +86,21 @@
     "tie_policy": "fail_closed",
     "wrong_key_access": "forbidden_until_nominal_replay_complete"
   },
-  "terminal_qk_sync": {
-    "acceptance_rule": "first_nonzero_candidate_with_strict_zero_baseline_improvement_and_both_full_vs_carrier_gains_above_runtime_minimum",
-    "candidate_scale_fractions": [
-      0.0,
-      0.0625,
-      0.125,
-      0.25,
-      0.5,
-      1.0
+  "late_hf_generation": {
+    "callback_step_index": 18,
+    "carrier_mode": "hf_only",
+    "expected_inference_step_count": 20,
+    "non_replay_write": "forbidden",
+    "post_pipeline_write": "forbidden",
+    "remaining_transformer_scheduler_step_count": 1,
+    "roles": [
+      "carrier_nominal_replay",
+      "full_nominal_replay"
     ],
-    "combined_actual_dtype_relative_l2_limit": 0.014,
-    "direction_mask": "semantic_writable_capacity_map",
-    "direction_source": "differentiable_vae_roundtrip_public_noise_registered_qk",
-    "failure_policy": "retain_zero_baseline_and_fail_final_image_attention_gate",
-    "full_replay_only": true,
-    "geometry_actual_dtype_relative_l2_limit": 0.001,
-    "public_detection_schedule_index": 7,
-    "score_source": "image_reencoded_public_noise_real_qk",
-    "selection_key_access": "registered_only_wrong_key_forbidden",
-    "terminal_hf_update": "unchanged_before_independent_qk_sync",
-    "zero_baseline_required": true
+    "routing_mode": "semantic_unit_energy",
+    "strength_multiplier": 8.0,
+    "write_count_per_role": 1,
+    "wrong_key_access": "forbidden_until_output_frozen"
   },
-  "survival_protocol_semantic_digest": "25bacdd85953553992e4a90bd82ac6ca4c8098d1896b514c45112249c08dae89"
+  "survival_protocol_semantic_digest": "85693eccb4764cc6619d4b1099da3a0e32c64d0c5ca036df18d3a439e53218d2"
 }

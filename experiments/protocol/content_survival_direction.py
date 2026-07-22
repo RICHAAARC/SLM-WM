@@ -166,14 +166,17 @@ def validate_content_survival_direction_payload(
             "sign_selection",
             "replay_protocol",
             "failure_protocol",
-            "terminal_qk_sync",
+            "late_hf_generation",
             _SEMANTIC_DIGEST_FIELD,
         ),
         "protocol",
     )
     if resolved["protocol_schema"] != CONTENT_SURVIVAL_DIRECTION_SCHEMA:
         raise ValueError("content survival protocol schema mismatch")
-    if resolved["protocol_version"] != "content_survival_direction_v1":
+    if (
+        resolved["protocol_version"]
+        != "content_survival_direction_late_hf_generation"
+    ):
         raise ValueError("unsupported content survival protocol version")
 
     direction = resolved["direction"]
@@ -284,30 +287,21 @@ def validate_content_survival_direction_payload(
         "supports_paper_claim": False,
     }:
         raise ValueError("content survival failure protocol drifted")
-    terminal_qk_sync = resolved["terminal_qk_sync"]
-    if type(terminal_qk_sync) is not dict or terminal_qk_sync != {
-        "full_replay_only": True,
-        "terminal_hf_update": "unchanged_before_independent_qk_sync",
-        "direction_source": (
-            "differentiable_vae_roundtrip_public_noise_registered_qk"
-        ),
-        "direction_mask": "semantic_writable_capacity_map",
-        "score_source": "image_reencoded_public_noise_real_qk",
-        "public_detection_schedule_index": 7,
-        "selection_key_access": "registered_only_wrong_key_forbidden",
-        "candidate_scale_fractions": [0.0, 0.0625, 0.125, 0.25, 0.5, 1.0],
-        "geometry_actual_dtype_relative_l2_limit": 0.001,
-        "combined_actual_dtype_relative_l2_limit": 0.014,
-        "zero_baseline_required": True,
-        "acceptance_rule": (
-            "first_nonzero_candidate_with_strict_zero_baseline_improvement_"
-            "and_both_full_vs_carrier_gains_above_runtime_minimum"
-        ),
-        "failure_policy": (
-            "retain_zero_baseline_and_fail_final_image_attention_gate"
-        ),
+    late_hf_generation = resolved["late_hf_generation"]
+    if type(late_hf_generation) is not dict or late_hf_generation != {
+        "callback_step_index": 18,
+        "expected_inference_step_count": 20,
+        "remaining_transformer_scheduler_step_count": 1,
+        "roles": list(CONTENT_SURVIVAL_REPLAY_ROLES),
+        "non_replay_write": "forbidden",
+        "routing_mode": "semantic_unit_energy",
+        "carrier_mode": "hf_only",
+        "strength_multiplier": 8.0,
+        "write_count_per_role": 1,
+        "post_pipeline_write": "forbidden",
+        "wrong_key_access": "forbidden_until_output_frozen",
     }:
-        raise ValueError("terminal Q/K sync protocol drifted")
+        raise ValueError("late HF generation protocol drifted")
     claimed = _required_sha256(
         resolved[_SEMANTIC_DIGEST_FIELD],
         _SEMANTIC_DIGEST_FIELD,

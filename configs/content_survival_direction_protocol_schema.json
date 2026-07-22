@@ -7,10 +7,10 @@
     "direction": {"type": "object"},
     "failure_protocol": {"type": "object"},
     "protocol_schema": {"const": "slm_wm_content_survival_direction_protocol"},
-    "protocol_version": {"const": "content_survival_direction_v1"},
+    "protocol_version": {"const": "content_survival_direction_late_hf_generation"},
     "replay_protocol": {"type": "object"},
     "sign_selection": {"type": "object"},
-    "terminal_qk_sync": {"type": "object"},
+    "late_hf_generation": {"type": "object"},
     "survival_protocol_semantic_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"}
   },
   "required": [

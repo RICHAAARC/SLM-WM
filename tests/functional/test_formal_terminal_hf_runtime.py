@@ -43,7 +43,6 @@ def _configs() -> dict[str, SemanticWatermarkRuntimeConfig]:
     [
         None,
         "final_image_attention_observability",
-        "terminal_qk_sync_not_ready",
     ],
 )
 def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
@@ -131,9 +130,6 @@ def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
                 "final_image_attention_blind_attribution_gain": -0.0002,
                 "final_image_attention_carrier_paired_attribution_gain": -0.0001,
             },
-            "terminal_qk_sync_ready": (
-                scientific_failure_reason != "terminal_qk_sync_not_ready"
-            ),
         }
         if scientific_failure_reason is not None:
             failed_runtime = SemanticWatermarkRuntimeResult(

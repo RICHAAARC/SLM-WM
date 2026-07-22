@@ -20,11 +20,11 @@
 | 重复协议文档修订日期 | `2026-07-17` |
 | profile 与等价执行文档修订日期 | `2026-07-17` |
 | 攻击证据职责文档修订日期 | `2026-07-17` |
-| 源代码与已审 GPU 证据基线提交 | S1 证据绑定 `db324b7c86a1bef305114fe83db44dfed04fd706`；terminal 因果结果绑定 `33cf96661fe1c0a54935b3a4e5730405bb8fdb4f` |
-| GitNexus 索引提交 | `65f0be002ed74971286e916fd1cfb81b3c9dcf4b` |
-| GitNexus 索引规模 | 15,114 nodes、33,501 edges、300 execution flows |
-| 当前活动构建单元 | `formal_terminal_hf_colab_screen`（固定 Notebook 不变；正式 writer 保持最终证据失败关闭，诊断 runner 对4个冻结Prompt记录完整7链的最终证据门结果与32 wrong-key排名） |
-| 下一目标构建单元 | Colab A100-80G 的4 Prompt正式链通过后，扩大到33条 calibration，不再重复旧compact terminal矩阵 |
+| 源代码与已审 GPU 证据基线提交 | S1 证据绑定 `db324b7c86a1bef305114fe83db44dfed04fd706`；迁移前 terminal-HF 四 Prompt 筛选绑定 `ceb74b30b7b0341f9d52d2fa47ced27630dd4bd1` |
+| GitNexus 索引提交 | `ceb74b30b7b0341f9d52d2fa47ced27630dd4bd1` |
+| GitNexus 索引规模 | 15,176 nodes、33,626 edges、300 execution flows |
+| 当前活动构建单元 | `late_hf_generation_runtime_construction`（固定20步流程在callback index 18对carrier/full nominal replay写入一次HF-only载体；输出冻结后才评价wrong key） |
+| 下一目标构建单元 | 以新提交和全新run在Colab A100-80G先执行1 Prompt正式入口smoke，再执行4 Prompt筛选；迁移后结果不得沿用`ceb74b3`基线结论 |
 | 受治理解释器 | 仓库 `.venv` 的 CPython 3.12.13 |
 | 默认测试事实 | `.venv/bin/pytest -q -s` 为 `2378 passed, 82 deselected`；精确 `.venv/bin/pytest -q` 仍在收集前触发宿主 capture 临时文件 `FileNotFoundError`；真实 Colab A100-40G 与 A100-80G 诊断结果按下文边界登记 |
 | 定向协议/cache/约束检查 | observation protocol、专用 host 与 Colab 适配合计 `74 passed`；最小验收面覆盖公开 GitHub 提交、固定 Drive 输入、kernel 内 controller 调用、薄 Notebook、A100 显存门、secret 隔离、长时 pipe 排空、进程组清理、失败落盘和最终固定 Drive 交付，不建立模型供应链或通用持久化门禁 |
@@ -88,6 +88,8 @@
 - `af65332` 已完成旧矩阵并证明 M0 sign 选择、routed oracle 和中段微弱载体都没有恢复 key ownership，因此不再继续扩展该矩阵。当前最小修复直接测试 terminal/pre-VAE 固定能量载体；每 Prompt 的候选图像、质量、terminal/re-encode 33-key完整分数和摘要落盘，Prompt manifest 最后发布。它不修改固定 Notebook，也不把 CPU 合成可分性冒充 GPU 方法通过。
 - `content_survival_observation_colab_20260722T071036Z_1f0058c` 已在 A100 完成4个冻结Prompt、28条diffusion chain和132次key评分：terminal HF registered 在33-key集合中4/4 rank-1，三图质量门均通过；但最终图像Q/K attribution gain依次约为`5.78e-5`、`4.34e-5`、`-3.85e-6`、`4.26e-5`，均未达到固定`1e-4`门，因此仍为方法未通过。当前未验证候选只在full nominal replay的terminal HF之后执行registered-only Q/K方向搜索，用真实PIL解码、VAE重编码、公开噪声、scheduler索引7和冻结两层Q/K正式评分选择最小严格改善候选；carrier-only/clean不写该分量，wrong-key仅在候选冻结后评价，阈值和最终Q/K门不变。CPU测试只证明接线与失败关闭，不构成GPU结果。
 - `ba2c2d5` 的真实 A100-80G 失败包已通过Drive checksum与secret scan复验：依赖、formal lock、模型与pipeline加载均通过，首个Prompt完成7条20步扩散日志，但在首个cell manifest发布前因terminal Q/K固定候选中出现actual-dtype预算超限而抛出host异常。该控制流与协议规定的“保留zero baseline并由最终图像Q/K门失败关闭”不一致；当前CPU修复只把超限/nonfinite候选记录为不可选并继续固定候选顺序，zero baseline本身超限时返回未追加Q/K的terminal HF结果。`0.001`/`0.014`预算、`1e-4`最终门、registered-only选择和wrong-key隔离均未改变。Drive run request可在同一正式CLI/runner入口中固定选择首个Prompt smoke或完整4 Prompt筛选；两者必须使用不同run id和独立outputs，smoke只验证完整HF结果与loader/manifest闭合。HF筛选结论只消费registered在32个wrong key中的严格rank-1及既有fixed-wrong正margin；最终Q/K治理字段继续如实记录但不替代HF密钥归因。上述修复和最小工作量入口尚未经过新的GPU运行，不构成方法通过。
+- `content_survival_observation_colab_20260722T163359Z_ceb74b3` 在A100-SXM4-80GB完成4个冻结Prompt、28条diffusion chain与132次key评分：四个Prompt的registered HF分数均在registered+32 wrong集合严格rank-1，registered减max-wrong margin依次约为`0.00320/0.00330/0.00248/0.00211`，三图preservation均通过，因此迁移前terminal-HF screening为4/4。最终图像Q/K gain仅3/4达到固定`1e-4`，d026约为`-3.85e-6`并以`final_image_attention_observability`失败关闭；四个screening cell均完整，但只有三个formal runtime artifact完整。该结果只建立迁移前诊断基线，不支持论文、promotion或qualification。
+- 当前CPU原子把HF-only 8×写入从pipeline返回后的latent改到固定20步流程的`callback_on_step_end` index 18，仅carrier/full nominal replay各写一次，并让更新继续经过最后一次真实Transformer/scheduler步骤；clean和四条probe不写，wrong key仍只在输出冻结后评分。full输出不再运行registered-only post-generation Q/K optimizer；真实clean/carrier/full Q/K observability与固定`1e-4`门保持不变，失败仍阻断formal runtime artifact但不替代HF rank/margin筛选。该接线尚未经过GPU验证，不能继承迁移前4/4结论。
 
 ---
 

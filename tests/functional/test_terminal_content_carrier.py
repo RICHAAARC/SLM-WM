@@ -106,17 +106,24 @@ def test_formal_runtime_applies_terminal_hf_x8_and_scores_hf_only() -> None:
     source = inspect.getsource(
         semantic_runtime._run_semantic_watermark_runtime_with_content_strength
     )
+    helper_source = inspect.getsource(
+        semantic_runtime._build_late_hf_generation_update
+    )
 
     assert measurement.method_role == "hf_tail_only_content"
     assert measurement.lf_weight == 0.0
     assert measurement.tail_robust_weight == 1.0
     assert '"output_type": "latent"' in source
-    assert 'carrier_mode="hf_only"' in source
-    assert "strength_multiplier=8.0" in source
+    assert "if step_index == late_hf_callback_step_index:" in source
     assert "role in CONTENT_SURVIVAL_REPLAY_ROLES" in source
-    assert source.index("terminal_update = build_terminal_content_carrier_update") < (
-        source.index("image = _decode_content_runtime_latent_image")
+    assert source.count("_build_late_hf_generation_update(") == 1
+    assert 'carrier_mode=settings["carrier_mode"]' in helper_source
+    assert (
+        'strength_multiplier=float(settings["strength_multiplier"])'
+        in helper_source
     )
+    assert "build_terminal_content_carrier_update(" in helper_source
+    assert '"post_generation_qk_optimizer_applied": False' in source
 
 
 def test_formal_terminal_decode_returns_persistable_pil_image() -> None:

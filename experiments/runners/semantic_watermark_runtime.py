@@ -4513,6 +4513,58 @@ def _extract_terminal_pipeline_latent(output: Any) -> Any:
     raise RuntimeError("formal pipeline did not return one terminal latent")
 
 
+def _build_late_hf_generation_update(
+    latent: Any,
+    *,
+    routing: Any,
+    key_material: str,
+    model_identity_digest: str,
+    protocol: ContentSurvivalDirectionProtocol,
+) -> tuple[Any, dict[str, Any]]:
+    """在固定生成内后段构造一次 HF-only actual-dtype 写入。"""
+
+    settings = protocol.payload["late_hf_generation"]
+    lf_template = build_formal_low_frequency_template(
+        latent,
+        key_material,
+        model_identity_digest,
+        prg_version=KEYED_PRG_VERSION,
+    )
+    hf_template = build_high_frequency_tail_template(
+        latent,
+        key_material,
+        model_identity_digest,
+        prg_version=KEYED_PRG_VERSION,
+    )
+    update = build_terminal_content_carrier_update(
+        latent,
+        routing,
+        lf_template,
+        hf_template,
+        routing_mode=settings["routing_mode"],
+        carrier_mode=settings["carrier_mode"],
+        strength_multiplier=float(settings["strength_multiplier"]),
+    )
+    return update.written_latent, {
+        "terminal_pre_vae_carrier_applied": True,
+        "terminal_pre_vae_routing_mode": update.routing_mode,
+        "terminal_pre_vae_carrier_mode": update.carrier_mode,
+        "terminal_pre_vae_strength_multiplier": update.strength_multiplier,
+        "terminal_pre_vae_input_latent_content_sha256": (
+            tensor_content_sha256(latent)
+        ),
+        "terminal_pre_vae_written_latent_content_sha256": (
+            tensor_content_sha256(update.written_latent)
+        ),
+        "terminal_pre_vae_hf_update_content_sha256": (
+            tensor_content_sha256(update.hf_tail_update)
+        ),
+        "terminal_pre_vae_hf_effective_l2": update.hf_tail_effective_l2,
+        "terminal_pre_vae_combined_effective_l2": update.combined_effective_l2,
+        "terminal_pre_vae_combined_relative_l2": update.combined_relative_l2,
+    }
+
+
 def _public_detection_noise_evidence_cursor(extractor: Any | None) -> int:
     """返回 extractor 当前公开检测噪声证据条数。"""
 
@@ -7040,6 +7092,14 @@ def _run_semantic_watermark_runtime_with_content_strength(
     started_at = time.time()
     repository_root_path = Path(repository_root).resolve()
     protocol = load_content_survival_direction_protocol(repository_root_path)
+    late_hf_generation = protocol.payload["late_hf_generation"]
+    late_hf_callback_step_index = int(
+        late_hf_generation["callback_step_index"]
+    )
+    if config.inference_steps != int(
+        late_hf_generation["expected_inference_step_count"]
+    ):
+        raise RuntimeError("late HF generation requires the governed step count")
     core_method_digest = semantic_conditioned_latent_method_definition_digest()
     composite_method_identity = build_content_survival_runtime_method_identity(
         core_method_definition_digest=core_method_digest,
@@ -7104,7 +7164,6 @@ def _run_semantic_watermark_runtime_with_content_strength(
     }
     chain_records: list[dict[str, Any]] = []
     role_payloads: dict[str, dict[str, Any]] = {}
-    carrier_reference_image: Any | None = None
 
     def run_chain(
         role: str,
@@ -7120,6 +7179,7 @@ def _run_semantic_watermark_runtime_with_content_strength(
         terminal_routing: Any | None = None
         z10_digest = ""
         callback_count = 0
+        late_hf_write_count = 0
         payload: dict[str, Any] = {}
 
         def callback(
@@ -7128,7 +7188,8 @@ def _run_semantic_watermark_runtime_with_content_strength(
             timestep: Any,
             callback_kwargs: dict[str, Any],
         ) -> dict[str, Any]:
-            nonlocal captured_z9, terminal_routing, z10_digest, callback_count, payload
+            nonlocal captured_z9, terminal_routing, z10_digest, callback_count
+            nonlocal late_hf_write_count, payload
             latent = callback_kwargs.get("latents")
             if latent is None:
                 raise RuntimeError("survival chain callback requires latents")
@@ -7136,6 +7197,44 @@ def _run_semantic_watermark_runtime_with_content_strength(
                 if captured_z9 is not None:
                     raise RuntimeError("survival chain captured z9 more than once")
                 captured_z9 = latent.detach().clone()
+                return callback_kwargs
+            if step_index == late_hf_callback_step_index:
+                if role not in CONTENT_SURVIVAL_REPLAY_ROLES:
+                    return callback_kwargs
+                if (
+                    callback_count != 1
+                    or terminal_routing is None
+                    or late_hf_write_count
+                ):
+                    raise RuntimeError(
+                        "late HF generation requires one completed z10 write"
+                    )
+                late_hf_write_count += 1
+                written_late_hf, late_hf_record = (
+                    _build_late_hf_generation_update(
+                        latent,
+                        routing=terminal_routing,
+                        key_material=config.key_material,
+                        model_identity_digest=model_identity_digest,
+                        protocol=protocol,
+                    )
+                )
+                callback_kwargs["latents"] = written_late_hf
+                payload.update(late_hf_record)
+                payload.update(
+                    {
+                        "late_hf_generation_applied": True,
+                        "late_hf_generation_callback_step_index": step_index,
+                        "late_hf_generation_write_count": late_hf_write_count,
+                        "late_hf_generation_remaining_step_count": int(
+                            late_hf_generation[
+                                "remaining_transformer_scheduler_step_count"
+                            ]
+                        ),
+                        "late_hf_generation_post_pipeline_write_applied": False,
+                        "late_hf_generation_wrong_key_accessed": False,
+                    }
+                )
                 return callback_kwargs
             if step_index != 10:
                 return callback_kwargs
@@ -7391,99 +7490,34 @@ def _run_semantic_watermark_runtime_with_content_strength(
         )
         if callback_count != 1 or not z10_digest or not payload:
             raise RuntimeError("survival chain did not execute its unique z10 callback")
+        expected_late_hf_write_count = (
+            1 if role in CONTENT_SURVIVAL_REPLAY_ROLES else 0
+        )
+        if late_hf_write_count != expected_late_hf_write_count:
+            raise RuntimeError("late HF generation write count drifted")
         terminal_latent = _extract_terminal_pipeline_latent(output)
         rendered_latent = terminal_latent
-        predecoded_image: Any | None = None
         if role in CONTENT_SURVIVAL_REPLAY_ROLES:
-            if terminal_routing is None:
-                raise RuntimeError("nominal replay requires terminal routing")
-            terminal_lf_template = build_formal_low_frequency_template(
-                terminal_latent,
-                config.key_material,
-                model_identity_digest,
-                prg_version=KEYED_PRG_VERSION,
-            )
-            terminal_hf_template = build_high_frequency_tail_template(
-                terminal_latent,
-                config.key_material,
-                model_identity_digest,
-                prg_version=KEYED_PRG_VERSION,
-            )
-            terminal_update = build_terminal_content_carrier_update(
-                terminal_latent,
-                terminal_routing,
-                terminal_lf_template,
-                terminal_hf_template,
-                routing_mode="semantic_unit_energy",
-                carrier_mode="hf_only",
-                strength_multiplier=8.0,
-            )
-            rendered_latent = terminal_update.written_latent
             payload.update(
                 {
-                    "terminal_pre_vae_carrier_applied": True,
-                    "terminal_pre_vae_routing_mode": "semantic_unit_energy",
-                    "terminal_pre_vae_carrier_mode": "hf_only",
-                    "terminal_pre_vae_strength_multiplier": 8.0,
-                    "terminal_pre_vae_input_latent_content_sha256": (
+                    "late_hf_generation_output_latent_content_sha256": (
                         tensor_content_sha256(terminal_latent)
                     ),
-                    "terminal_pre_vae_written_latent_content_sha256": (
-                        tensor_content_sha256(rendered_latent)
-                    ),
-                    "terminal_pre_vae_hf_update_content_sha256": (
-                        tensor_content_sha256(terminal_update.hf_tail_update)
-                    ),
-                    "terminal_pre_vae_hf_effective_l2": (
-                        terminal_update.hf_tail_effective_l2
-                    ),
-                    "terminal_pre_vae_combined_effective_l2": (
-                        terminal_update.combined_effective_l2
-                    ),
-                    "terminal_pre_vae_combined_relative_l2": (
-                        terminal_update.combined_relative_l2
-                    ),
+                    "post_generation_qk_optimizer_applied": False,
                 }
             )
-            if role == "full_nominal_replay":
-                if carrier_reference_image is None:
-                    raise RuntimeError(
-                        "full terminal Q/K sync requires completed carrier replay"
-                    )
-                rendered_latent, predecoded_image, terminal_qk_sync = (
-                    _build_terminal_registered_qk_sync(
-                        terminal_latent=terminal_latent,
-                        terminal_hf_update=terminal_update,
-                        terminal_routing=terminal_routing,
-                        carrier_only_image=carrier_reference_image,
-                        pipeline=pipeline,
-                        config=config,
-                        modules=context.attention_modules,
-                        public_prompt_embeds=context.unconditional_prompt,
-                        public_pooled_prompt_embeds=(
-                            context.unconditional_pooled
-                        ),
-                        protocol=protocol,
-                    )
-                )
-                payload.update(terminal_qk_sync)
-                payload["terminal_pre_vae_written_latent_content_sha256"] = (
-                    tensor_content_sha256(rendered_latent)
-                )
-            else:
-                payload.update(
-                    {
-                        "terminal_qk_sync_full_replay_only": True,
-                        "terminal_qk_sync_applied": False,
-                        "terminal_qk_sync_ready": False,
-                    }
-                )
         else:
-            payload["terminal_pre_vae_carrier_applied"] = False
-        if predecoded_image is None:
-            image = _decode_content_runtime_latent_image(pipeline, rendered_latent)
-        else:
-            image = predecoded_image
+            payload.update(
+                {
+                    "late_hf_generation_applied": False,
+                    "late_hf_generation_write_count": 0,
+                    "late_hf_generation_post_pipeline_write_applied": False,
+                    "late_hf_generation_wrong_key_accessed": False,
+                    "terminal_pre_vae_carrier_applied": False,
+                    "post_generation_qk_optimizer_applied": False,
+                }
+            )
+        image = _decode_content_runtime_latent_image(pipeline, rendered_latent)
         image_identity = canonical_rgb_uint8_content_record(image)
         payload.update(
             {
@@ -7582,7 +7616,6 @@ def _run_semantic_watermark_runtime_with_content_strength(
         "carrier_nominal_replay",
         replay_sign=selected_sign,
     )
-    carrier_reference_image = carrier_only_image
     watermarked_image, full_payload = run_chain(
         "full_nominal_replay",
         replay_sign=selected_sign,
@@ -7716,10 +7749,6 @@ def _run_semantic_watermark_runtime_with_content_strength(
         counterfactual_identity_digest=counterfactual_identity_digest,
     )
     final_image_evidence_gate_failures: list[str] = []
-    if full_payload["terminal_qk_sync_ready"] is not True:
-        final_image_evidence_gate_failures.append(
-            "terminal_qk_sync_not_ready"
-        )
     if (
         final_image_preservation["final_image_preservation_gate_ready"] is not True
         or carrier_only_final_image_preservation[
