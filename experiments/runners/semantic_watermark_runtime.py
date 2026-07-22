@@ -51,6 +51,7 @@ from experiments.protocol.content_survival_direction import (
     CONTENT_SURVIVAL_CHAIN_ROLES,
     CONTENT_SURVIVAL_DIRECTION_RECORD_PATH,
     CONTENT_SURVIVAL_PROBE_ROLES,
+    CONTENT_SURVIVAL_REPLAY_ROLES,
     build_content_survival_artifact_binding,
     build_content_survival_direction_record,
     build_content_survival_runtime_method_identity,
@@ -154,6 +155,9 @@ from main.methods.carrier.high_frequency_tail import (
     build_high_frequency_tail_template,
 )
 from main.methods.carrier.content_update import build_content_carrier_update
+from main.methods.carrier.terminal_update import (
+    build_terminal_content_carrier_update,
+)
 from main.methods.content.local_sensitivity import build_public_probe_identity
 from main.methods.content.runtime_adapter import build_content_observation_routing
 from main.methods.geometry.sync_update import (
@@ -766,6 +770,19 @@ def _decode_content_runtime_latent(pipeline: Any, latent: Any) -> Any:
     if not isinstance(image, torch.Tensor):
         raise RuntimeError("SD3.5 VAE postprocess must return an RGB Tensor")
     return image.to(device=latent.device, dtype=torch.float32)
+
+
+def _decode_content_runtime_latent_image(pipeline: Any, latent: Any) -> Any:
+    """Decode one SD3.5 terminal latent to the single persisted PIL image."""
+
+    vae_dtype = next(pipeline.vae.parameters()).dtype
+    scaled = latent.to(dtype=vae_dtype) / pipeline.vae.config.scaling_factor
+    scaled = scaled + pipeline.vae.config.shift_factor
+    decoded = pipeline.vae.decode(scaled, return_dict=False)[0]
+    images = pipeline.image_processor.postprocess(decoded, output_type="pil")
+    if not isinstance(images, list) or len(images) != 1:
+        raise RuntimeError("SD3.5 VAE postprocess must return one PIL image")
+    return images[0]
 
 
 def _content_runtime_prompt_embeddings(
@@ -2042,7 +2059,12 @@ def _formal_content_runtime_artifact_binding_ready(
     expected_key_plan = build_detection_key_plan_record(config.key_material)
     if not (
         metadata.get("method_runtime")
-        == "formal_content_dual_chain_single_write"
+        == "formal_terminal_hf_content_dual_chain"
+        and metadata.get("formal_attribution_carrier")
+        == "terminal_pre_vae_hf_tail"
+        and metadata.get("formal_attribution_strength_multiplier") == 8.0
+        and metadata.get("formal_attribution_routing")
+        == "semantic_unit_energy"
         and metadata.get("method_definition_digest") == core_method_digest
         and metadata.get("threshold_free_blind_measurement_ready") is True
         and metadata.get("formal_blind_detection_ready") is False
@@ -2063,9 +2085,9 @@ def _formal_content_runtime_artifact_binding_ready(
         == expected_key_plan
         and manifest_metadata.get("supports_paper_claim") is False
         and manifest_metadata.get("formal_runtime_chain")
-        == "content_survival_registered_probe_nominal_replay"
+        == "content_survival_nominal_replay_terminal_hf"
         and manifest_metadata.get("formal_detection_chain")
-        == "threshold_free_lf_hf_tail_measurement_pending_frozen_evidence"
+        == "threshold_free_hf_tail_measurement_pending_frozen_evidence"
         and diagnostic.get("content_strength_common_multiplier")
         == expected_content_strength_common_multiplier
         and diagnostic.get("chain_count") == 7
@@ -2154,6 +2176,9 @@ def _formal_content_runtime_artifact_binding_ready(
         "hf_tail_effective_l2",
         "combined_effective_l2",
         "combined_effective_l2_limit",
+        "terminal_pre_vae_hf_effective_l2",
+        "terminal_pre_vae_combined_effective_l2",
+        "terminal_pre_vae_combined_relative_l2",
     )
     if any(
         not finite_number(record.get(field_name))
@@ -2197,6 +2222,16 @@ def _formal_content_runtime_artifact_binding_ready(
         "actual_dtype_single_write_digest",
         "routing_identity_digest",
         "attention_geometry_enabled",
+        "terminal_pre_vae_carrier_applied",
+        "terminal_pre_vae_routing_mode",
+        "terminal_pre_vae_carrier_mode",
+        "terminal_pre_vae_strength_multiplier",
+        "terminal_pre_vae_input_latent_content_sha256",
+        "terminal_pre_vae_written_latent_content_sha256",
+        "terminal_pre_vae_hf_update_content_sha256",
+        "terminal_pre_vae_hf_effective_l2",
+        "terminal_pre_vae_combined_effective_l2",
+        "terminal_pre_vae_combined_relative_l2",
     )
     if any(
         full_update.get(field_name) != diagnostic.get(field_name)
@@ -2239,6 +2274,17 @@ def _formal_content_runtime_artifact_binding_ready(
         <= carrier_update["combined_effective_l2_limit"]
         and full_update.get("combined_effective_l2_ready") is True
         and carrier_update.get("combined_effective_l2_ready") is True
+        and full_update.get("terminal_pre_vae_carrier_applied") is True
+        and carrier_update.get("terminal_pre_vae_carrier_applied") is True
+        and full_update.get("terminal_pre_vae_routing_mode")
+        == carrier_update.get("terminal_pre_vae_routing_mode")
+        == "semantic_unit_energy"
+        and full_update.get("terminal_pre_vae_carrier_mode")
+        == carrier_update.get("terminal_pre_vae_carrier_mode")
+        == "hf_only"
+        and full_update.get("terminal_pre_vae_strength_multiplier")
+        == carrier_update.get("terminal_pre_vae_strength_multiplier")
+        == 8.0
         and full_update.get("actual_dtype_single_write_count") == 1
         and carrier_update.get("actual_dtype_single_write_count") == 1
         and full_update.get("reference_source")
@@ -2258,6 +2304,9 @@ def _formal_content_runtime_artifact_binding_ready(
                 "routing_identity_digest",
                 "lf_update_content_sha256",
                 "tail_robust_update_content_sha256",
+                "terminal_pre_vae_input_latent_content_sha256",
+                "terminal_pre_vae_written_latent_content_sha256",
+                "terminal_pre_vae_hf_update_content_sha256",
             )
         )
     ):
@@ -2305,7 +2354,7 @@ def _formal_content_runtime_artifact_binding_ready(
                 and not record.get("attacked_image_path")
                 and not record.get("attacked_image_digest")
                 and record_metadata.get("method_role")
-                == "full_dual_chain"
+                == "hf_tail_only_content"
                 and record_metadata.get("measurement_status")
                 == "threshold_independent_image_only_evidence"
                 and record_metadata.get("reference_source")
@@ -2410,7 +2459,7 @@ def load_completed_semantic_watermark_runtime_result(
     if (
         isinstance(metadata, Mapping)
         and metadata.get("method_runtime")
-        == "formal_content_dual_chain_single_write"
+        == "formal_terminal_hf_content_dual_chain"
     ):
         if not _formal_content_runtime_artifact_binding_ready(
             result_payload,
@@ -3991,6 +4040,34 @@ def _build_image_only_measurement_config(
             else "full_dual_chain"
         ),
     )
+
+
+def _build_formal_terminal_hf_measurement_config(
+    config: SemanticWatermarkRuntimeConfig,
+) -> ImageOnlyMeasurementConfig:
+    """把正式最终归因收敛到经真实图像回读的 HF-tail 密钥分量。"""
+
+    return replace(
+        _build_image_only_measurement_config(config),
+        lf_weight=0.0,
+        tail_robust_weight=1.0,
+        method_role="hf_tail_only_content",
+    )
+
+
+def _extract_terminal_pipeline_latent(output: Any) -> Any:
+    """从 Diffusers latent 输出中取得唯一的 terminal/pre-VAE latent。"""
+
+    import torch
+
+    value = getattr(output, "images", None)
+    if isinstance(value, torch.Tensor) and value.ndim == 4:
+        return value
+    if isinstance(value, (tuple, list)) and len(value) == 1:
+        item = value[0]
+        if isinstance(item, torch.Tensor) and item.ndim == 4:
+            return item
+    raise RuntimeError("formal pipeline did not return one terminal latent")
 
 
 def _public_detection_noise_evidence_cursor(extractor: Any | None) -> int:
@@ -6496,7 +6573,7 @@ def _run_semantic_watermark_runtime_with_content_strength(
     Any | None,
     dict[str, Any],
 ]:
-    """执行七条固定生成链并以 registered-only probe 冻结共同方向。"""
+    """执行七条生成链，并在 nominal terminal latent 写入固定能量 HF 载体。"""
 
     _require_full_content_runtime_config(config)
     _require_calibration_content_strength_multiplier(
@@ -6580,7 +6657,7 @@ def _run_semantic_watermark_runtime_with_content_strength(
         "height": config.height,
         "num_inference_steps": config.inference_steps,
         "guidance_scale": config.guidance_scale,
-        "output_type": "pil",
+        "output_type": "latent",
     }
     chain_records: list[dict[str, Any]] = []
     role_payloads: dict[str, dict[str, Any]] = {}
@@ -6596,6 +6673,7 @@ def _run_semantic_watermark_runtime_with_content_strength(
         if role not in CONTENT_SURVIVAL_CHAIN_ROLES:
             raise ValueError("generation chain role is not governed")
         captured_z9: Any | None = None
+        terminal_routing: Any | None = None
         z10_digest = ""
         callback_count = 0
         payload: dict[str, Any] = {}
@@ -6606,7 +6684,7 @@ def _run_semantic_watermark_runtime_with_content_strength(
             timestep: Any,
             callback_kwargs: dict[str, Any],
         ) -> dict[str, Any]:
-            nonlocal captured_z9, z10_digest, callback_count, payload
+            nonlocal captured_z9, terminal_routing, z10_digest, callback_count, payload
             latent = callback_kwargs.get("latents")
             if latent is None:
                 raise RuntimeError("survival chain callback requires latents")
@@ -6661,6 +6739,7 @@ def _run_semantic_watermark_runtime_with_content_strength(
             )
             if additional_decode_count != 1:
                 raise RuntimeError("content observation probe decode did not execute")
+            terminal_routing = observations.routing
             lf_template = build_formal_low_frequency_template(
                 z10,
                 config.key_material,
@@ -6868,7 +6947,62 @@ def _run_semantic_watermark_runtime_with_content_strength(
         )
         if callback_count != 1 or not z10_digest or not payload:
             raise RuntimeError("survival chain did not execute its unique z10 callback")
-        image = output.images[0]
+        terminal_latent = _extract_terminal_pipeline_latent(output)
+        rendered_latent = terminal_latent
+        if role in CONTENT_SURVIVAL_REPLAY_ROLES:
+            if terminal_routing is None:
+                raise RuntimeError("nominal replay requires terminal routing")
+            terminal_lf_template = build_formal_low_frequency_template(
+                terminal_latent,
+                config.key_material,
+                model_identity_digest,
+                prg_version=KEYED_PRG_VERSION,
+            )
+            terminal_hf_template = build_high_frequency_tail_template(
+                terminal_latent,
+                config.key_material,
+                model_identity_digest,
+                prg_version=KEYED_PRG_VERSION,
+            )
+            terminal_update = build_terminal_content_carrier_update(
+                terminal_latent,
+                terminal_routing,
+                terminal_lf_template,
+                terminal_hf_template,
+                routing_mode="semantic_unit_energy",
+                carrier_mode="hf_only",
+                strength_multiplier=8.0,
+            )
+            rendered_latent = terminal_update.written_latent
+            payload.update(
+                {
+                    "terminal_pre_vae_carrier_applied": True,
+                    "terminal_pre_vae_routing_mode": "semantic_unit_energy",
+                    "terminal_pre_vae_carrier_mode": "hf_only",
+                    "terminal_pre_vae_strength_multiplier": 8.0,
+                    "terminal_pre_vae_input_latent_content_sha256": (
+                        tensor_content_sha256(terminal_latent)
+                    ),
+                    "terminal_pre_vae_written_latent_content_sha256": (
+                        tensor_content_sha256(rendered_latent)
+                    ),
+                    "terminal_pre_vae_hf_update_content_sha256": (
+                        tensor_content_sha256(terminal_update.hf_tail_update)
+                    ),
+                    "terminal_pre_vae_hf_effective_l2": (
+                        terminal_update.hf_tail_effective_l2
+                    ),
+                    "terminal_pre_vae_combined_effective_l2": (
+                        terminal_update.combined_effective_l2
+                    ),
+                    "terminal_pre_vae_combined_relative_l2": (
+                        terminal_update.combined_relative_l2
+                    ),
+                }
+            )
+        else:
+            payload["terminal_pre_vae_carrier_applied"] = False
+        image = _decode_content_runtime_latent_image(pipeline, rendered_latent)
         image_identity = canonical_rgb_uint8_content_record(image)
         payload.update(
             {
@@ -7133,6 +7267,7 @@ def _run_semantic_watermark_runtime_with_content_strength(
 
     run_id = build_semantic_watermark_run_id(config)
     paired_quality = compute_image_quality_metrics(clean_image, watermarked_image)
+    measurement_config = _build_formal_terminal_hf_measurement_config(config)
     detections: list[dict[str, Any]] = []
     detection_key_plan = build_detection_key_plan_record(config.key_material)
     for sample_role, image, detection_key_role in (
@@ -7264,7 +7399,10 @@ def _run_semantic_watermark_runtime_with_content_strength(
         elapsed_seconds=time.time() - started_at,
         metadata={
             **runtime_versions,
-            "method_runtime": "formal_content_dual_chain_single_write",
+            "method_runtime": "formal_terminal_hf_content_dual_chain",
+            "formal_attribution_carrier": "terminal_pre_vae_hf_tail",
+            "formal_attribution_strength_multiplier": 8.0,
+            "formal_attribution_routing": "semantic_unit_energy",
             "formal_method_config_digest": config.formal_method_config_digest,
             "method_definition": semantic_conditioned_latent_method_definition(),
             "method_definition_digest": core_method_digest,
@@ -7328,7 +7466,7 @@ def run_semantic_watermark_runtime(
     Any | None,
     dict[str, Any],
 ]:
-    """以名义内容强度执行公开正式索引10单写回与盲检测。"""
+    """执行索引10内容几何链及 terminal HF 正式盲检测。"""
 
     return _run_semantic_watermark_runtime_with_content_strength(
         config,
@@ -7684,10 +7822,10 @@ def _write_semantic_watermark_runtime_outputs_with_content_strength(
             "detection_key_plan": detection_key_plan,
             "supports_paper_claim": False,
             "formal_runtime_chain": (
-                "content_survival_registered_probe_nominal_replay"
+                "content_survival_nominal_replay_terminal_hf"
             ),
             "formal_detection_chain": (
-                "threshold_free_lf_hf_tail_measurement_pending_frozen_evidence"
+                "threshold_free_hf_tail_measurement_pending_frozen_evidence"
             ),
             "composite_runtime_method_identity": composite_identity,
             "content_survival_artifact_binding_digest": binding_digest,

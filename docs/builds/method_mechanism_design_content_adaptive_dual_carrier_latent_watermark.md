@@ -6,10 +6,10 @@
 
 目标方法由两个核心链组成：
 
-- **内容链**：Prompt 条件语义显著性、纹理复杂度、潜空间响应特征与局部扰动敏感性 -> LF/HF-tail 路由 -> 内容载体嵌入 -> 原始及恢复后内容评分。
+- **内容链**：Prompt 条件语义显著性、纹理复杂度、潜空间响应特征与局部扰动敏感性 -> 索引10 LF/HF-tail 路由与内容载体 -> terminal/pre-VAE 固定能量 HF-tail 载体 -> 最终图像 HF-tail 归属评分。
 - **几何链**：带密钥 Q/K 关系同步模板 -> 生成阶段几何更新 -> 检测阶段“二面体 + 有界相似变换”恢复 -> 同阈值救回重判。
 
-“双链”是方法职责划分，不是张量分支数量。一次实际 latent 写回包含 `lf_content`、`hf_tail_robust`、`attention_geometry` 三个分支。
+“双链”是方法职责划分，不是张量分支数量。callback 索引10的一次 scheduler latent 写回包含 `lf_content`、`hf_tail_robust`、`attention_geometry` 三个分支；名义 replay 在 scheduler 完成后、最终 VAE 解码前另执行一次 `hf_tail_robust` 固定能量写回。
 
 
 ---
@@ -319,7 +319,7 @@ def compute_blind_content_score(
 
 两个构造接口都必须验证 `reference_latent` 为有限 `[1,C,H,W]` Tensor，并把精确形状、`model_identity_digest`、评分密钥身份、PRG 版本及内部固定 domain 写入结构化输出；不得通过省略参数、全局变量或调用者约定隐式取得这些身份。LF 内部固定第6节 low-pass 协议；HF-tail 内部固定第7节 high-pass 与 `max(1,ceil(0.20*C*H*W))` 协议，不接受外层可变 kernel 或 tail fraction。
 
-`build_high_frequency_tail_template()` 是 HF-tail 的唯一正式构造接口；任何只执行原始高斯幅值截断而缺少二维高通的接口都不得映射到该职责。LF 与 HF-tail 的命名只描述空间路由掩码作用前的密钥载体频率来源；`lf_mask` 或 `hf_tail_mask` 对载体执行空间调制后，实际写入分别称为 LF-origin 与 HF-tail-origin 更新，不主张其仍严格带限、频谱互不重叠或彼此正交。`compute_blind_content_score()` 必须验证两个模板的形状、模型、密钥和 PRG 身份与 `observed_latent` 一致，并按 `method_role` 解析冻结权重：`lf_only_content=1.0/0.0`、`hf_tail_only_content=0.0/1.0`，其余4个角色为 `0.70/0.30`；调用者不得直接传入任意权重。该函数实现展平、分别去均值后的 `float32` 归一化内积，并以结构化结果同时返回两个分支分数、总分和摘要；非有限输入、元素数不一致或零中心化能量必须失败关闭。
+`build_high_frequency_tail_template()` 是 HF-tail 的唯一正式构造接口；任何只执行原始高斯幅值截断而缺少二维高通的接口都不得映射到该职责。LF 与 HF-tail 的命名只描述空间路由掩码作用前的密钥载体频率来源；`lf_mask` 或 `hf_tail_mask` 对载体执行空间调制后，实际写入分别称为 LF-origin 与 HF-tail-origin 更新，不主张其仍严格带限、频谱互不重叠或彼此正交。`compute_blind_content_score()` 必须验证两个模板的形状、模型、密钥和 PRG 身份与 `observed_latent` 一致，并按 `method_role` 解析冻结权重：`lf_only_content=1.0/0.0`、`hf_tail_only_content=0.0/1.0`，其他旧角色保留 `0.70/0.30` 只用于诊断和历史兼容；正式最终图像归属调用固定使用 `hf_tail_only_content`。调用者不得直接传入任意权重。该函数实现展平、分别去均值后的 `float32` 归一化内积，并以结构化结果同时返回两个分支分数、总分和摘要；非有限输入、元素数不一致或零中心化能量必须失败关闭。
 
 `ContentCarrierUpdateResult` 是 frozen 进程内算法结果，不形成持久化记录字段；其字段精确为 `geometry_capacity_map`、`lf_direction`、`hf_tail_direction`、`lf_update`、`hf_tail_update`、`content_only_latent_float32`、`latent_l2`、`lf_nominal_strength`、`hf_tail_nominal_strength` 和 `method_role`。其中 `latent_l2` 只表示 `||float32(z_10)||_2`，不得改指内容更新后 latent 的范数。
 
@@ -585,9 +585,11 @@ def measure_dual_chain_watermark(
 → 按固定共同回溯和总 L2 上界选择一次实际 dtype 写回，并以该 latent 替换索引10回调返回值
 → 复验实际写回的 Q/K 正增益
 → 完成剩余扩散步骤
+→ 对名义 replay 的 terminal/pre-VAE latent 按 semantic-unit-energy 路由追加固定 8.0× HF-tail 载体
+→ 立即从写入后的 terminal latent 执行最终 VAE 解码
 → 记录同源 CLIP 机制一致性诊断，不据此筛除正式样本
 → 持久化最终图像和方法原子记录
-→ 从最终图像执行盲内容测量和 registered/wrong-key Q/K 诊断
+→ 从最终图像执行 HF-tail-only 盲归属测量和 registered/wrong-key Q/K 诊断
 → 先按冻结内容阈值判断直接通过或近阈值失败
 → 只对近阈值失败样本执行 Q/K 几何搜索
 → 几何可靠时执行图像回正、重新编码和同阈值重判
@@ -981,7 +983,7 @@ full_paper = 0.001
 12. Q/K 四分量、稳定 token、pair 权重、极性、组合公式，以及公开仅图像 VAE/noise/schedule/empty-text 条件与权威文档逐字段一致。
 13. 几何更新来自一次真实 Q/K 目标梯度，并在最多9个比例候选内产生正关系增益。
 14. Jacobian、JVP/VJP、PSD-CG 和三时刻注入未进入执行路径。
-15. LF/HF/geometry 分别使用 `0.0025/0.0015/0.0010`，总更新不超过 `0.0050||z||_2`，并形成一次非零实际 dtype 写回。
+15. 索引10 LF/HF/geometry 分别使用 `0.0025/0.0015/0.0010`，总更新不超过 `0.0050||z||_2` 并形成一次非零 scheduler dtype 写回；名义 replay 还形成一次 `8.0×0.0015` terminal HF-tail 写回。
 16. 最终图像 registered-key Q/K 分数同时高于 wrong-key 和 matched content-only 反事实。
 17. 同源 CLIP cosine 不低于 `0.995`，但不使用204维手工结构分量作为核心门禁。
 18. 只有近阈值失败才启动几何搜索，且 `geometry_reliable` 由搜索结果产生。

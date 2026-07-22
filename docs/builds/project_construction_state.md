@@ -20,20 +20,20 @@
 | 重复协议文档修订日期 | `2026-07-17` |
 | profile 与等价执行文档修订日期 | `2026-07-17` |
 | 攻击证据职责文档修订日期 | `2026-07-17` |
-| 源代码与已审 GPU 证据基线提交 | S1 证据绑定 `db324b7c86a1bef305114fe83db44dfed04fd706`；当前已发布 Colab 代码基线为 `af6533286a4c950ebafc82c2c15095edc25cbbac` |
-| GitNexus 索引提交 | `af6533286a4c950ebafc82c2c15095edc25cbbac` |
-| GitNexus 索引规模 | 14,984 nodes、33,241 edges、300 execution flows |
-| 当前活动构建单元 | `terminal_content_carrier_observation`（把内容密钥载体从扩散中段的易失方向改为 terminal/pre-VAE 固定能量候选，并用4条扩散链比较 semantic-unit-energy/uniform、LF/HF/dual 与4×/8×强度） |
-| 下一目标构建单元 | CPU闭合、提交并发布该紧凑 observation；随后只在 Colab A100-80G 执行4条扩散链与48个 terminal 变体，不再重跑148链旧矩阵 |
+| 源代码与已审 GPU 证据基线提交 | S1 证据绑定 `db324b7c86a1bef305114fe83db44dfed04fd706`；terminal 因果结果绑定 `33cf96661fe1c0a54935b3a4e5730405bb8fdb4f` |
+| GitNexus 索引提交 | `33cf96661fe1c0a54935b3a4e5730405bb8fdb4f` |
+| GitNexus 索引规模 | 21,284 symbols、42,147 relationships、300 execution flows |
+| 当前活动构建单元 | `formal_terminal_hf_attribution_cpu_closed`（已把A100诊断通过的 semantic-unit-energy、terminal/pre-VAE、HF-only 8×固定能量载体接入正式 nominal 生成、盲检测、持久化与loader复验） |
+| 下一目标构建单元 | 发布正式方法修复，并让固定 Colab Notebook 通过项目代码执行33条 calibration，逐Prompt比较 registered 与32个独立 wrong keys |
 | 受治理解释器 | 仓库 `.venv` 的 CPython 3.12.13 |
-| 默认测试事实 | `.venv/bin/pytest -q -s` 为 `2371 passed, 82 deselected`；精确 `.venv/bin/pytest -q` 仍在收集前触发宿主 capture 临时文件 `FileNotFoundError`；真实 Colab A100-40G 与 A100-80G 诊断结果按下文边界登记 |
+| 默认测试事实 | `.venv/bin/pytest -q -s` 为 `2376 passed, 82 deselected`；精确 `.venv/bin/pytest -q` 仍在收集前触发宿主 capture 临时文件 `FileNotFoundError`；真实 Colab A100-40G 与 A100-80G 诊断结果按下文边界登记 |
 | 定向协议/cache/约束检查 | observation protocol、专用 host 与 Colab 适配合计 `74 passed`；最小验收面覆盖公开 GitHub 提交、固定 Drive 输入、kernel 内 controller 调用、薄 Notebook、A100 显存门、secret 隔离、长时 pipe 排空、进程组清理、失败落盘和最终固定 Drive 交付，不建立模型供应链或通用持久化门禁 |
 | harness 与格式检查 | 10项 harness 全部通过；`git diff --check` 通过 |
 | 外部源码 qualification | 显式 integration 运行 `6 failed, 0 skipped`；失败均来自4套登记真实源码目录缺失，符合缺源失败关闭边界，不属于默认测试失败 |
 | 工作树说明 | S3 从已独立审计的 `db324b7` 开始；`.codex/config.toml` 是既有范围外 untracked 文件，本原子不得修改或提交；旧 S1 存储归档保持只读 |
 | 核心实现判断范围 | `main/`、`experiments/`、`configs/model_sd35.yaml`、`configs/method_semantic_registry.json` 及其测试和运行入口 |
 
-已审 GPU 证据继续精确绑定 `db324b7`；`0b6abdc` 只登记为没有通过科学验证的候选 M0。`af65332` 的完整 A100-80G observation 已证明执行与 Drive 交付成功，但方法仍未通过；当前修复不改盲检测公式、密钥计划、Notebook、Q/K 公共实现或论文阈值，只新增 terminal 内容载体候选与紧凑可证伪运行面。本表只用于安排构建，不支持论文主张。
+已审 S1 证据继续精确绑定 `db324b7`；`0b6abdc` 只登记为没有通过科学验证的候选 M0。`33cf966` 的紧凑 A100-80G 因果结果完成4个Prompt、48个terminal变体与3,168次密钥评分：HF-only 8×在terminal及VAE重编码后对registered+32 wrong keys均为8/8 rank-1，而LF-only和既有0.70/0.30 dual聚合仍失败。当前正式修复据此保留索引10内容/几何链，但在nominal terminal/pre-VAE增加semantic-unit-energy HF-only 8×固定能量载体，并把最终密钥归因收敛为HF-tail分数；Notebook、密钥计划、Q/K公共实现和论文阈值不变。本表只用于安排构建，不支持论文主张。
 
 ### 2.1 `db324b7` 后的有效状态（覆盖下文历史差距快照）
 
@@ -46,6 +46,7 @@
 - `af65332` 的完整 A100-80G 结果包含24个终止 cell，其中12个 semantic cell 成功、12个 uniform cell 以真实 Q/K actual-dtype 改善失败结束；实际执行84条、成功72条 diffusion chain 和15,048次评分。12个 semantic cell 的 nominal sign 均为 `+1`，before/after 排名没有改善；最终 re-encode registered blind 平均排名为 LF 17.0、HF 17.5、dual 16.5，routed oracle 也未恢复 key ownership。该结果为 `METHOD NOT PASSED`。
 - 存储 tensor 的独立差分显示 semantic 写入点实际相对 L2 约为 LF `0.00096`、HF `0.00048`、dual `0.00098`，且 `common_gamma=1.0`；从 z10 到 terminal 扰动范数放大约9–18倍，但与原写入方向余弦只剩约0.05–0.12。terminal 到 VAE re-encode 的差异方向余弦约0.80。因此主要损失发生在写入后的扩散步骤，不是 VAE，也不是回溯缩放。
 - 当前候选在 terminal/pre-VAE latent 上写入固定能量的 registered LF/HF-tail 方向：semantic 模式保留空间掩码后恢复分支单位 L2，uniform 模式直接使用标准模板；4×/8×分别测试 LF `1%/2%` 与 HF `0.6%/1.2%` 相对 L2。该候选只进入紧凑诊断，GPU结果形成前不得写入正式方法结论。
+- `33cf966` 的正式A100-80G紧凑结果已闭合上述诊断：HF-only 8×在semantic与uniform两种routing、4个固定困难Prompt、terminal与VAE重编码两个观测位置上均为registered rank-1（合计8/8），重编码后对最强wrong-key平均margin约`+0.00430`，平均SSIM约`0.99631`、PSNR约`45.92 dB`。同一结果中dual 8×重编码仅4/8 rank-1，LF-only 8×仅3/8，证明现有LF分支与0.70 LF/0.30 HF聚合会掩盖可用HF密钥信号；VAE和semantic routing不是主阻断。该结果允许进入正式方法修复，但样本量仍不支持论文主张或qualification。
 
 ### 2.2 候选 M0 的定位边界与独立 observation 原子
 

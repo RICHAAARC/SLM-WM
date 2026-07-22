@@ -3821,6 +3821,16 @@ def _write_formal_content_runtime_cache_fixture(
         "routing_identity_digest": "4" * 64,
         "lf_update_content_sha256": "5" * 64,
         "tail_robust_update_content_sha256": "6" * 64,
+        "terminal_pre_vae_carrier_applied": True,
+        "terminal_pre_vae_routing_mode": "semantic_unit_energy",
+        "terminal_pre_vae_carrier_mode": "hf_only",
+        "terminal_pre_vae_strength_multiplier": 8.0,
+        "terminal_pre_vae_input_latent_content_sha256": "2" * 64,
+        "terminal_pre_vae_written_latent_content_sha256": "3" * 64,
+        "terminal_pre_vae_hf_update_content_sha256": "4" * 64,
+        "terminal_pre_vae_hf_effective_l2": 0.12,
+        "terminal_pre_vae_combined_effective_l2": 0.12,
+        "terminal_pre_vae_combined_relative_l2": 0.012,
     }
     chain_records[-2].update(shared_replay)
     chain_records[-2]["geometry_effective_l2"] = 0.0
@@ -3921,7 +3931,7 @@ def _write_formal_content_runtime_cache_fixture(
         record_metadata = dict(record["metadata"])
         record_metadata.update(
             {
-                "method_role": "full_dual_chain",
+                "method_role": "hf_tail_only_content",
                 "measurement_status": (
                     "threshold_independent_image_only_evidence"
                 ),
@@ -4027,7 +4037,10 @@ def _write_formal_content_runtime_cache_fixture(
         "update_count": 1,
         "elapsed_seconds": 1.0,
         "metadata": {
-            "method_runtime": "formal_content_dual_chain_single_write",
+            "method_runtime": "formal_terminal_hf_content_dual_chain",
+            "formal_attribution_carrier": "terminal_pre_vae_hf_tail",
+            "formal_attribution_strength_multiplier": 8.0,
+            "formal_attribution_routing": "semantic_unit_energy",
             "method_definition_digest": core_method_digest,
             "composite_runtime_method_identity": composite,
             "content_survival_direction_record": direction_record,
@@ -4101,10 +4114,10 @@ def _write_formal_content_runtime_cache_fixture(
             ),
             "supports_paper_claim": False,
             "formal_runtime_chain": (
-                "content_survival_registered_probe_nominal_replay"
+                "content_survival_nominal_replay_terminal_hf"
             ),
             "formal_detection_chain": (
-                "threshold_free_lf_hf_tail_measurement_pending_frozen_evidence"
+                "threshold_free_hf_tail_measurement_pending_frozen_evidence"
             ),
             "composite_runtime_method_identity": composite,
             "content_survival_artifact_binding_digest": binding[

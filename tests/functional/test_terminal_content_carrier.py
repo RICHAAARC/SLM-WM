@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import inspect
 import math
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import torch
+from PIL import Image
 
 from experiments.runners import terminal_content_carrier_runtime as runtime
+from experiments.runners import semantic_watermark_runtime as semantic_runtime
 from experiments.protocol.content_routing_reference_quantile import (
     ContentRoutingReferenceScalars,
 )
@@ -90,6 +93,61 @@ def test_terminal_update_restores_fixed_branch_energy(
     )
     assert update.combined_relative_l2 > 0.0
     assert not torch.equal(update.written_latent, latent)
+
+
+def test_formal_runtime_applies_terminal_hf_x8_and_scores_hf_only() -> None:
+    config = SemanticWatermarkRuntimeConfig(
+        standard_attack_profiles=(),
+        diffusion_attacks_enabled=False,
+    )
+    measurement = semantic_runtime._build_formal_terminal_hf_measurement_config(
+        config
+    )
+    source = inspect.getsource(
+        semantic_runtime._run_semantic_watermark_runtime_with_content_strength
+    )
+
+    assert measurement.method_role == "hf_tail_only_content"
+    assert measurement.lf_weight == 0.0
+    assert measurement.tail_robust_weight == 1.0
+    assert '"output_type": "latent"' in source
+    assert 'carrier_mode="hf_only"' in source
+    assert "strength_multiplier=8.0" in source
+    assert "role in CONTENT_SURVIVAL_REPLAY_ROLES" in source
+    assert source.index("terminal_update = build_terminal_content_carrier_update") < (
+        source.index("image = _decode_content_runtime_latent_image")
+    )
+
+
+def test_formal_terminal_decode_returns_persistable_pil_image() -> None:
+    class FakeVae(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.zeros((), dtype=torch.float32))
+            self.config = SimpleNamespace(scaling_factor=1.0, shift_factor=0.0)
+
+        def decode(self, value: torch.Tensor, *, return_dict: bool):
+            assert return_dict is False
+            return (value[:, :3],)
+
+    pipeline = SimpleNamespace(
+        vae=FakeVae(),
+        image_processor=SimpleNamespace(
+            postprocess=lambda value, *, output_type: (
+                [Image.new("RGB", (8, 8))]
+                if output_type == "pil" and tuple(value.shape) == (1, 3, 8, 8)
+                else []
+            )
+        ),
+    )
+
+    image = semantic_runtime._decode_content_runtime_latent_image(
+        pipeline,
+        torch.zeros((1, 4, 8, 8), dtype=torch.float32),
+    )
+
+    assert isinstance(image, Image.Image)
+    assert image.size == (8, 8)
 
 
 @pytest.mark.parametrize(
