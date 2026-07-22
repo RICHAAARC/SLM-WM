@@ -236,7 +236,12 @@ def test_preflight_uses_existing_host_and_secret_without_model_governance(
     _, paths, fake = _bootstrap_ready(request_path, bootstrap)
     report = colab.preflight_run(request_path, runner=fake, gpu_probe=_gpu)
     assert report["gpu"]["gpu_name"].startswith("NVIDIA A100")
-    assert report["workload"] == {"cell_count": 24, "chain_count": 148, "evaluation_count": 29304}
+    assert report["workload"] == {
+        "prompt_count": 4,
+        "diffusion_chain_count": 4,
+        "variant_count": 48,
+        "key_score_count": 3168,
+    }
     text = (paths.evidence_root / "preflight_report.json").read_text(encoding="utf-8")
     assert WATERMARK not in text and HF_TOKEN not in text
     source = Path(colab.__file__).read_text(encoding="utf-8")

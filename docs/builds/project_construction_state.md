@@ -20,20 +20,20 @@
 | 重复协议文档修订日期 | `2026-07-17` |
 | profile 与等价执行文档修订日期 | `2026-07-17` |
 | 攻击证据职责文档修订日期 | `2026-07-17` |
-| 源代码与已审 GPU 证据基线提交 | S1 证据绑定 `db324b7c86a1bef305114fe83db44dfed04fd706`；当前已发布 Colab 代码基线为 `98e9b790ac0094e26bbf9f20f00ce8b9fd1f8afa` |
-| GitNexus 索引提交 | `98e9b790ac0094e26bbf9f20f00ce8b9fd1f8afa` |
-| GitNexus 索引规模 | 14,975 nodes、33,199 edges、300 execution flows |
-| 当前活动构建单元 | `content_survival_method_failure_continuation`（把单个 observation cell 的真实 Q/K actual-dtype 回溯失败保存为终止失败结果并继续矩阵；不修改正式 Q/K 算法、载体 producer 或 Notebook） |
-| 下一目标构建单元 | 提交并发布 diagnostic failure continuation，更新 Drive request 后在 Colab A100-80G 重新执行完整 observation 矩阵 |
+| 源代码与已审 GPU 证据基线提交 | S1 证据绑定 `db324b7c86a1bef305114fe83db44dfed04fd706`；当前已发布 Colab 代码基线为 `af6533286a4c950ebafc82c2c15095edc25cbbac` |
+| GitNexus 索引提交 | `af6533286a4c950ebafc82c2c15095edc25cbbac` |
+| GitNexus 索引规模 | 14,984 nodes、33,241 edges、300 execution flows |
+| 当前活动构建单元 | `terminal_content_carrier_observation`（把内容密钥载体从扩散中段的易失方向改为 terminal/pre-VAE 固定能量候选，并用4条扩散链比较 semantic-unit-energy/uniform、LF/HF/dual 与4×/8×强度） |
+| 下一目标构建单元 | CPU闭合、提交并发布该紧凑 observation；随后只在 Colab A100-80G 执行4条扩散链与48个 terminal 变体，不再重跑148链旧矩阵 |
 | 受治理解释器 | 仓库 `.venv` 的 CPython 3.12.13 |
-| 默认测试事实 | `.venv/bin/pytest -q -s` 为 `2362 passed, 82 deselected, 380 warnings`；精确 `.venv/bin/pytest -q` 仍在收集前触发宿主 capture 临时文件 `FileNotFoundError`；真实 Colab A100-40G 与 A100-80G 诊断结果按下文边界登记 |
+| 默认测试事实 | `.venv/bin/pytest -q -s` 为 `2371 passed, 82 deselected`；精确 `.venv/bin/pytest -q` 仍在收集前触发宿主 capture 临时文件 `FileNotFoundError`；真实 Colab A100-40G 与 A100-80G 诊断结果按下文边界登记 |
 | 定向协议/cache/约束检查 | observation protocol、专用 host 与 Colab 适配合计 `74 passed`；最小验收面覆盖公开 GitHub 提交、固定 Drive 输入、kernel 内 controller 调用、薄 Notebook、A100 显存门、secret 隔离、长时 pipe 排空、进程组清理、失败落盘和最终固定 Drive 交付，不建立模型供应链或通用持久化门禁 |
 | harness 与格式检查 | 10项 harness 全部通过；`git diff --check` 通过 |
 | 外部源码 qualification | 显式 integration 运行 `6 failed, 0 skipped`；失败均来自4套登记真实源码目录缺失，符合缺源失败关闭边界，不属于默认测试失败 |
 | 工作树说明 | S3 从已独立审计的 `db324b7` 开始；`.codex/config.toml` 是既有范围外 untracked 文件，本原子不得修改或提交；旧 S1 存储归档保持只读 |
 | 核心实现判断范围 | `main/`、`experiments/`、`configs/model_sd35.yaml`、`configs/method_semantic_registry.json` 及其测试和运行入口 |
 
-已审 GPU 证据继续精确绑定 `db324b7`；`0b6abdc` 只登记为尚未科学验证的候选 M0。当前修复仅旋转 `FORMAL_WATERMARK_KEY_PLAN` 及其摘要，使它绑定已经生成并固定保存在 Drive 的私有 raw key；H1-H5、`semantic_conditioned_latent_method_definition`、`FormalMethodRuntimeConfig`、routing registry、派生算法、检测公式、阈值和候选顺序均不变。公开 CPU 测试使用独立测试 plan，不读取或提交私有 raw key。本表只用于安排构建，不支持论文主张。
+已审 GPU 证据继续精确绑定 `db324b7`；`0b6abdc` 只登记为没有通过科学验证的候选 M0。`af65332` 的完整 A100-80G observation 已证明执行与 Drive 交付成功，但方法仍未通过；当前修复不改盲检测公式、密钥计划、Notebook、Q/K 公共实现或论文阈值，只新增 terminal 内容载体候选与紧凑可证伪运行面。本表只用于安排构建，不支持论文主张。
 
 ### 2.1 `db324b7` 后的有效状态（覆盖下文历史差距快照）
 
@@ -43,6 +43,9 @@
 - S3 writer/loader 使用同一全量 validator 和 manifest rename-last 原子发布；旧 S1 artifact 因缺少新协议、复合方法身份、七链父子记录和三图证据而明确不兼容，不迁移、不补造。
 - 对存储端 S1 正式副本的只读 paired 复算确认已有原子分量足以做诊断：三档 `content_score` 均为11/33胜，均值 registered-wrong delta 约为 `-0.0080`，未配对 AUC 约为 `0.314–0.315`；LF 同为11/33，HF-tail 为5/33，attention-sync 为0/33，attention-geometry 为6–7/33。相同图像的 `embedding_pair_ssim` 与 `source_to_evaluated_ssim` 在 registered/wrong 两侧差值精确为0。八个最困难 Prompt 在三档稳定重合，描述上包含 object-centric、balanced、structured scene；这是旧记录的组件诊断，不是新方法通过证据，也不把 CLIP/语义量解释为 key ownership。
 - 本原子目前只构成 CPU 可运行性与契约实现。survival-direction 是否改善同一水印图的 registered-vs-wrong 归因只能由下一次获批的全新 GPU run 证伪；在该结果形成前不得写成方法有效、GPU qualified 或论文证据。
+- `af65332` 的完整 A100-80G 结果包含24个终止 cell，其中12个 semantic cell 成功、12个 uniform cell 以真实 Q/K actual-dtype 改善失败结束；实际执行84条、成功72条 diffusion chain 和15,048次评分。12个 semantic cell 的 nominal sign 均为 `+1`，before/after 排名没有改善；最终 re-encode registered blind 平均排名为 LF 17.0、HF 17.5、dual 16.5，routed oracle 也未恢复 key ownership。该结果为 `METHOD NOT PASSED`。
+- 存储 tensor 的独立差分显示 semantic 写入点实际相对 L2 约为 LF `0.00096`、HF `0.00048`、dual `0.00098`，且 `common_gamma=1.0`；从 z10 到 terminal 扰动范数放大约9–18倍，但与原写入方向余弦只剩约0.05–0.12。terminal 到 VAE re-encode 的差异方向余弦约0.80。因此主要损失发生在写入后的扩散步骤，不是 VAE，也不是回溯缩放。
+- 当前候选在 terminal/pre-VAE latent 上写入固定能量的 registered LF/HF-tail 方向：semantic 模式保留空间掩码后恢复分支单位 L2，uniform 模式直接使用标准模板；4×/8×分别测试 LF `1%/2%` 与 HF `0.6%/1.2%` 相对 L2。该候选只进入紧凑诊断，GPU结果形成前不得写入正式方法结论。
 
 ### 2.2 候选 M0 的定位边界与独立 observation 原子
 
@@ -72,7 +75,7 @@
 - 固定输入目录为 `/content/drive/MyDrive/SLM/content-survival/inputs/`，其中非秘密 `run_request.json` 由控制任务在目标提交发布后生成，raw key 固定来自私有 `watermark_raw_key.txt`。controller 在启动边界短暂挂载 Drive，把 request 复制到固定 `/content` 路径；raw key 仅在 `run` 时从固定文件读入内存并立即卸载 Drive，经既有 single-use 内存环境传给唯一 host 链。可选 HF token 继续来自 Colab Secret。raw key 不进入 Notebook、argv、日志、JSON、archive、controller state 或本地持久文件。
 - child 启动前只落盘 `watermark_used` 与 `hf_token_used` 非秘密布尔。处于 running、success 或 scientific failure 的运行在打包时必须重新从固定 Drive key 文件取得 raw key，并在 HF token 已使用时重新取得该 Secret，才能执行内容扫描；key 缺失、不可读、HF Secret 权限撤销或 usage 状态缺失都失败关闭且不复制结果。尚未向 child 传递 secret 的 bootstrap/preflight failure 仍可无 secret 独立打包。
 - 科学运行期间 Drive 已卸载，不执行 Drive hot I/O，也不写 checkpoint、日志或中间结果。最后 cell 先在 `/content` 从磁盘状态分类 success/failure，完成 secret scan、文件清单、archive、detached checksum 和独立解包复验；仅全部通过后才再次 mount Drive，并按 archive 后 checksum 的顺序复制到固定 `/content/drive/MyDrive/SLM/content-survival/results/`。VM 回收前未执行该 cell 会丢失本地结果，这是当前被接受的运行边界。
-- 固定科学工作量仍由既有 single-use host → scientific child 执行：4个 Prompt、24个 cell、148条 diffusion chain、29,304次评分，且保持 `diagnostic_only=true`、`supports_paper_claim=false`、`candidate_promotion_allowed=false`、`qualification_evidence=false`。CPU 适配验收不证明真实 Colab/A100 运行成功。
+- single-use host → scientific child 保持不变，但下一工作量收敛为4个 Prompt各1条干净扩散链；在每条 terminal latent 上离线测试2种路由能量语义×3种载体×2档强度，共48个变体、3,168个 registered/32-wrong key score。所有输出继续保持 `diagnostic_only=true`、`supports_paper_claim=false`、`candidate_promotion_allowed=false`、`qualification_evidence=false`。CPU 适配验收不证明真实 Colab/A100 运行成功。
 - `58ca8f6` 的首个完整 Notebook/Drive 尝试已经证明 A100-40G preflight、依赖环境、唯一 scientific child、secret 隔离及失败包 Drive 交付正常；scientific child 在模型加载和首个 cell 前因固定 Drive raw key 未匹配仍绑定旧公开根密钥的 `FORMAL_WATERMARK_KEY_PLAN` 失败，精确为0/24 cell、0/148 chain、0/29,304 evaluation。这不是 OOM、模型加载、M0 或方法科学失败。失败包经检查后已从 Drive `results/` 删除，避免与后续有效 observation 混淆。
 - `5831bae` 已证明新的私有 key plan 与 Drive raw key 匹配并推进到 SD3.5 下载，但 controller 查找 `SLM_WM_HF_TOKEN`，而 Colab 已配置的标准 Secret 名称是 `HF_TOKEN`；因此记录为 `hf_token_used=false`，Hugging Face gated repo 返回401，仍是0个 cell/chain/evaluation。当前修复只把固定 Secret 名称对齐为 `HF_TOKEN`；token 由 Notebook controller 读取后仅通过内存环境传给隔离 host，再由 orchestrator 传到 scientific child，并在最终打包时重新读取用于 secret scan；它不进入 argv、日志、仓库或结果包。
 - `3f5696c` 已证明标准 `HF_TOKEN` 进入科学链，SD3.5 的26个文件下载完成且pipeline 9/9组件加载完成；随后固定 `openai/clip-vit-base-patch32` loader 因 `local_files_only=True` 且全新 Colab cache 中没有该快照失败，仍是0个 cell/chain/evaluation。这不是401、OOM或方法科学失败。当前最小修复只在 execution identity 通过后、GPU runtime 前用固定model id/revision准备同一个 `HF_HOME` cache；共享HIGH loader和CRITICAL组件加载器保持不变，也不新增模型文件hash门。
@@ -80,7 +83,7 @@
 - `98e9b79` 在 A100-40G 上完成模型加载和第一条 diffusion chain，但第二条链的真实 Q/K autograd 使39.49 GiB显存仅余约3.44 MiB并触发 OOM；因此40G不再作为该固定工作量的运行设备，后续使用 A100-80G，不启用 offload、量化或缩减矩阵。
 - 同一 `98e9b79` 在 A100-80G 上没有 OOM，并完成第一个 Prompt 的 semantic×LF-only、semantic×HF-only、semantic×dual 三个完整 cell。三者 selected sign 均为 `+1`，所以 nominal before/after 完全相同；最终 re-encode latent 的 registered key 在32个 wrong key加 registered 的33键集合中，blind rank 分别为19、12、17，routed-template oracle rank 分别为20、30、20。该结果表明 routed oracle 也没有恢复稳定 key ownership，当前载体归因仍弱；它是诊断事实，不是候选通过。
 - A100-80G 随后在 uniform×LF-only 的 `full_probe_positive` step10 触发正式门禁：9个 Q/K geometry 回溯候选都不能在 actual dtype 上严格改善关系分数。正式 `main/methods/geometry/sync_update.py` 的失败关闭保持不变；问题在于 observation runner 把一个 cell 的方法失败升级为整个24-cell矩阵的进程失败。
-- 当前最小修复为失败 cell 写入摘要绑定的 `cell_failure.json`，固定失败边界、稳定 failure code、失败角色、已成功/已尝试链数、零 evaluation 和 `fallback_chain_materialized=false`，然后继续下一 cell。成功 cell 仍使用原 full validator 与 manifest-last；24个 cell 全部形成成功 bundle 或方法失败记录后输出 attempt summary。该修复不把零 geometry、随机方向或 content-only 图像冒充 full 方法结果，也不改变正式 Q/K 接受条件。
+- `af65332` 已完成旧矩阵并证明 M0 sign 选择、routed oracle 和中段微弱载体都没有恢复 key ownership，因此不再继续扩展该矩阵。当前最小修复直接测试 terminal/pre-VAE 固定能量载体；每 Prompt 的候选图像、质量、terminal/re-encode 33-key完整分数和摘要落盘，Prompt manifest 最后发布。它不修改固定 Notebook，也不把 CPU 合成可分性冒充 GPU 方法通过。
 
 ---
 

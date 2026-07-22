@@ -266,7 +266,7 @@ def test_cli_binds_nested_orchestrator_identity_from_formal_report(
     monkeypatch.setattr(observation_cli, "build_method_config", _forbidden_model)
     monkeypatch.setattr(
         observation_cli,
-        "run_content_survival_observation",
+        "run_terminal_content_carrier_observation",
         _forbidden_pipeline,
     )
     identity = observation_cli._execution_environment_identity(
@@ -352,7 +352,7 @@ def test_cli_rejects_nested_orchestrator_identity_drift_before_model_load(
     )
     monkeypatch.setattr(
         observation_cli,
-        "run_content_survival_observation",
+            "run_terminal_content_carrier_observation",
         lambda *_args, **_kwargs: pytest.fail("identity failure called the pipeline"),
     )
     with pytest.raises(RuntimeError, match=message):
@@ -423,7 +423,9 @@ def test_cli_prefetches_clip_after_identity_gate_and_before_gpu_runtime() -> Non
     prefetch_index = main_source.index(
         "_prepare_prompt_saliency_model_cache(prompt_configs)"
     )
-    runtime_index = main_source.index("summary = run_content_survival_observation(")
+    runtime_index = main_source.index(
+        "summary = run_terminal_content_carrier_observation("
+    )
     assert identity_index < prefetch_index < runtime_index
 
 

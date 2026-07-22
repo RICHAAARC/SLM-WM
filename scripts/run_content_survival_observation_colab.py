@@ -2,9 +2,9 @@
 
 The controller deliberately owns only platform concerns: an exact public
 GitHub checkout, the A100 memory gate, secret-safe long-process supervision,
-minimal on-disk status, and an explicit package-then-Drive handoff.  Scientific
-method, model loading, validation, and the 24-cell workload remain in the
-existing repository host chain.
+minimal on-disk status, and an explicit package-then-Drive handoff. Scientific
+method, model loading, validation, and the compact terminal-carrier workload
+remain in the existing repository host chain.
 """
 
 from __future__ import annotations
@@ -55,9 +55,10 @@ CLAIM_BOUNDARY = {
     "qualification_evidence": False,
 }
 WORKLOAD_IDENTITY = {
-    "cell_count": 24,
-    "chain_count": 148,
-    "evaluation_count": 29304,
+    "prompt_count": 4,
+    "diffusion_chain_count": 4,
+    "variant_count": 48,
+    "key_score_count": 3168,
 }
 SECRET_USAGE_REQUIRED_STATUSES = frozenset({"running", "success", "scientific_failure"})
 

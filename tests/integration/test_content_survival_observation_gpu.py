@@ -1,4 +1,4 @@
-"""Explicit real-GPU entry for the fixed content-survival observation."""
+"""Explicit real-GPU entry for the compact terminal-carrier observation."""
 
 from __future__ import annotations
 
@@ -41,5 +41,6 @@ def test_content_survival_observation_real_gpu() -> None:
         env=os.environ.copy(),
     )
     assert completed.returncode == 0, completed.stderr
-    assert '"chain_count": 148' in completed.stdout
-    assert '"evaluation_count": 29304' in completed.stdout
+    assert '"diffusion_chain_count": 4' in completed.stdout
+    assert '"variant_count": 48' in completed.stdout
+    assert '"key_score_count": 3168' in completed.stdout
