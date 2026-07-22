@@ -20,6 +20,7 @@ from experiments.protocol.content_survival_observation import (
     load_content_survival_observation_protocol,
 )
 from experiments.runners.semantic_watermark_runtime import (
+    FinalImageEvidenceGateFailure,
     SemanticWatermarkRuntimeConfig,
     SemanticWatermarkRuntimeContext,
     _encode_image_latent,
@@ -108,6 +109,17 @@ def _load_completed_cell(prompt_root: Path) -> dict[str, Any] | None:
     }
     if result.get("result_digest") != build_stable_digest(result_payload):
         raise RuntimeError("formal terminal HF cell result identity drifted")
+    formal_runtime_complete = result.get("formal_runtime_complete") is True
+    formal_paths = (
+        result.get("formal_runtime_result_path"),
+        result.get("formal_runtime_manifest_path"),
+    )
+    if formal_runtime_complete != all(bool(path) for path in formal_paths):
+        raise RuntimeError("formal terminal HF completion state drifted")
+    if not formal_runtime_complete and result.get("scientific_gate_failure") != (
+        "final_image_evidence"
+    ):
+        raise RuntimeError("formal terminal HF incomplete cell lacks scientific gate")
     return result
 
 
@@ -118,6 +130,8 @@ def _publish_cell(prompt_root: Path, result: Mapping[str, Any]) -> None:
     manifest_payload = {
         "result_path": result_path.name,
         "result_sha256": file_digest(result_path),
+        "formal_runtime_complete": result["formal_runtime_complete"],
+        "scientific_gate_failure": result["scientific_gate_failure"],
         "formal_runtime_result_path": result["formal_runtime_result_path"],
         "formal_runtime_result_sha256": result["formal_runtime_result_sha256"],
         "formal_runtime_manifest_path": result["formal_runtime_manifest_path"],
@@ -187,29 +201,85 @@ def run_formal_terminal_hf_screen(
             runtime_config,
             root,
         )
+        diagnostic_gate_failure: FinalImageEvidenceGateFailure | None = None
         if completed is None:
-            write_semantic_watermark_runtime_outputs(
+            try:
+                write_semantic_watermark_runtime_outputs(
+                    runtime_config,
+                    root,
+                    references=references,
+                    verified_formal_execution_lock=verified_formal_execution_lock,
+                    runtime_context=context,
+                )
+            except FinalImageEvidenceGateFailure as exc:
+                diagnostic_gate_failure = exc
+        if diagnostic_gate_failure is None:
+            completed = load_completed_semantic_watermark_runtime_result(
                 runtime_config,
                 root,
-                references=references,
-                verified_formal_execution_lock=verified_formal_execution_lock,
-                runtime_context=context,
             )
-        completed = load_completed_semantic_watermark_runtime_result(
-            runtime_config,
-            root,
-        )
-        if completed is None:
-            raise RuntimeError("formal terminal HF writer output did not reload")
-        detections = _detection_records(root, completed)
+            if completed is None:
+                raise RuntimeError("formal terminal HF writer output did not reload")
+            detections = _detection_records(root, completed)
+            image_path = (root / completed.watermarked_image_path).resolve()
+            with Image.open(image_path) as source_image:
+                image = source_image.convert("RGB").copy()
+            runtime_metadata = completed.metadata
+            runtime_run_id = completed.run_id
+            runtime_result_path = (
+                root
+                / runtime_config.output_dir
+                / completed.run_id
+                / "runtime_result.json"
+            ).resolve()
+            runtime_manifest_path = Path(root / completed.manifest_path).resolve()
+            formal_runtime_result_path = runtime_result_path.relative_to(
+                root
+            ).as_posix()
+            formal_runtime_result_sha256 = file_digest(runtime_result_path)
+            formal_runtime_manifest_path = runtime_manifest_path.relative_to(
+                root
+            ).as_posix()
+            formal_runtime_manifest_sha256 = file_digest(runtime_manifest_path)
+            scientific_gate_failure = None
+            scientific_gate_failure_reasons: list[str] = []
+            formal_runtime_complete = True
+        else:
+            (
+                failed_runtime,
+                _,
+                _,
+                failed_detections,
+                _,
+                image,
+                _,
+                _,
+            ) = diagnostic_gate_failure.runtime_outputs
+            if failed_runtime.run_decision != "fail":
+                raise RuntimeError("final-image gate failure reported a passing runtime")
+            detections = tuple(failed_detections)
+            runtime_metadata = failed_runtime.metadata
+            runtime_run_id = failed_runtime.run_id
+            formal_runtime_result_path = ""
+            formal_runtime_result_sha256 = ""
+            formal_runtime_manifest_path = ""
+            formal_runtime_manifest_sha256 = ""
+            scientific_gate_failure = "final_image_evidence"
+            scientific_gate_failure_reasons = list(
+                diagnostic_gate_failure.failure_reasons
+            )
+            formal_runtime_complete = False
+        if [record.get("sample_role") for record in detections] != [
+            "clean_negative",
+            "positive_source",
+            "wrong_key_negative",
+        ]:
+            raise RuntimeError("formal terminal HF detections are incomplete")
         positive = detections[1]
         fixed_wrong = detections[2]
         fixed_wrong_margin = float(positive["content_score"]) - float(
             fixed_wrong["content_score"]
         )
-        image_path = (root / completed.watermarked_image_path).resolve()
-        with Image.open(image_path) as source_image:
-            image = source_image.convert("RGB").copy()
         reencoded = _encode_image_latent(context.pipeline, image)
         multi_key_scores = _score_key_roster(
             reencoded,
@@ -218,23 +288,19 @@ def run_formal_terminal_hf_screen(
             model_identity_digest=model_identity_digest,
             carrier_mode="hf_only",
         )
-        runtime_result_path = (
-            root
-            / runtime_config.output_dir
-            / completed.run_id
-            / "runtime_result.json"
-        ).resolve()
-        runtime_manifest_path = Path(root / completed.manifest_path).resolve()
         result_payload = {
             "result_schema": "slm_wm_formal_terminal_hf_screen",
             "schema_version": 1,
             "prompt_id": config.prompt_id,
-            "run_id": completed.run_id,
-            "formal_runtime": completed.metadata["method_runtime"],
-            "formal_attribution_carrier": completed.metadata[
+            "run_id": runtime_run_id,
+            "formal_runtime_complete": formal_runtime_complete,
+            "scientific_gate_failure": scientific_gate_failure,
+            "scientific_gate_failure_reasons": scientific_gate_failure_reasons,
+            "formal_runtime": runtime_metadata["method_runtime"],
+            "formal_attribution_carrier": runtime_metadata[
                 "formal_attribution_carrier"
             ],
-            "formal_attribution_strength_multiplier": completed.metadata[
+            "formal_attribution_strength_multiplier": runtime_metadata[
                 "formal_attribution_strength_multiplier"
             ],
             "formal_fixed_wrong_key_margin": fixed_wrong_margin,
@@ -244,15 +310,20 @@ def run_formal_terminal_hf_screen(
             "registered_rank_one": (
                 multi_key_scores["rank_record"]["registered_rank"] == 1
             ),
-            "paired_quality": completed.metadata["paired_quality"],
-            "formal_runtime_result_path": runtime_result_path.relative_to(
-                root
-            ).as_posix(),
-            "formal_runtime_result_sha256": file_digest(runtime_result_path),
-            "formal_runtime_manifest_path": runtime_manifest_path.relative_to(
-                root
-            ).as_posix(),
-            "formal_runtime_manifest_sha256": file_digest(runtime_manifest_path),
+            "paired_quality": runtime_metadata["paired_quality"],
+            "final_image_preservation": runtime_metadata[
+                "final_image_preservation"
+            ],
+            "carrier_only_final_image_preservation": runtime_metadata[
+                "carrier_only_final_image_preservation"
+            ],
+            "final_image_attention_observability": runtime_metadata[
+                "final_image_attention_observability"
+            ],
+            "formal_runtime_result_path": formal_runtime_result_path,
+            "formal_runtime_result_sha256": formal_runtime_result_sha256,
+            "formal_runtime_manifest_path": formal_runtime_manifest_path,
+            "formal_runtime_manifest_sha256": formal_runtime_manifest_sha256,
             "verified_execution_environment_identity_digest": build_stable_digest(
                 dict(verified_execution_environment_identity)
             ),
@@ -271,12 +342,18 @@ def run_formal_terminal_hf_screen(
         result.get("formal_fixed_wrong_key_pass") is True
         for result in prompt_results
     )
+    final_image_evidence_pass_count = sum(
+        result.get("formal_runtime_complete") is True
+        for result in prompt_results
+    )
     return {
         "decision": "pass",
         "method_screening_decision": (
             "pass"
             if rank_one_count == len(CONTENT_SURVIVAL_PROMPT_IDS)
             and fixed_wrong_pass_count == len(CONTENT_SURVIVAL_PROMPT_IDS)
+            and final_image_evidence_pass_count
+            == len(CONTENT_SURVIVAL_PROMPT_IDS)
             else "fail"
         ),
         "prompt_count": len(prompt_results),
@@ -285,6 +362,10 @@ def run_formal_terminal_hf_screen(
         "key_score_count": len(prompt_results) * 33,
         "registered_rank_one_count": rank_one_count,
         "formal_fixed_wrong_key_pass_count": fixed_wrong_pass_count,
+        "final_image_evidence_pass_count": final_image_evidence_pass_count,
+        "scientific_gate_failure_count": (
+            len(prompt_results) - final_image_evidence_pass_count
+        ),
         "prompt_results": prompt_results,
         **CONTENT_SURVIVAL_CLAIM_BOUNDARY,
     }

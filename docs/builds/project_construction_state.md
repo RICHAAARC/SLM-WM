@@ -21,12 +21,12 @@
 | profile 与等价执行文档修订日期 | `2026-07-17` |
 | 攻击证据职责文档修订日期 | `2026-07-17` |
 | 源代码与已审 GPU 证据基线提交 | S1 证据绑定 `db324b7c86a1bef305114fe83db44dfed04fd706`；terminal 因果结果绑定 `33cf96661fe1c0a54935b3a4e5730405bb8fdb4f` |
-| GitNexus 索引提交 | `33cf96661fe1c0a54935b3a4e5730405bb8fdb4f` |
-| GitNexus 索引规模 | 21,284 symbols、42,147 relationships、300 execution flows |
-| 当前活动构建单元 | `formal_terminal_hf_colab_screen`（固定 Notebook 不变，由项目 runner 对4个冻结Prompt各执行完整7链正式runtime、writer/loader与32 wrong-key排名） |
+| GitNexus 索引提交 | `65f0be002ed74971286e916fd1cfb81b3c9dcf4b` |
+| GitNexus 索引规模 | 15,114 nodes、33,501 edges、300 execution flows |
+| 当前活动构建单元 | `formal_terminal_hf_colab_screen`（固定 Notebook 不变；正式 writer 保持最终证据失败关闭，诊断 runner 对4个冻结Prompt记录完整7链的最终证据门结果与32 wrong-key排名） |
 | 下一目标构建单元 | Colab A100-80G 的4 Prompt正式链通过后，扩大到33条 calibration，不再重复旧compact terminal矩阵 |
 | 受治理解释器 | 仓库 `.venv` 的 CPython 3.12.13 |
-| 默认测试事实 | `.venv/bin/pytest -q -s` 为 `2377 passed, 82 deselected`；精确 `.venv/bin/pytest -q` 仍在收集前触发宿主 capture 临时文件 `FileNotFoundError`；真实 Colab A100-40G 与 A100-80G 诊断结果按下文边界登记 |
+| 默认测试事实 | `.venv/bin/pytest -q -s` 为 `2378 passed, 82 deselected`；精确 `.venv/bin/pytest -q` 仍在收集前触发宿主 capture 临时文件 `FileNotFoundError`；真实 Colab A100-40G 与 A100-80G 诊断结果按下文边界登记 |
 | 定向协议/cache/约束检查 | observation protocol、专用 host 与 Colab 适配合计 `74 passed`；最小验收面覆盖公开 GitHub 提交、固定 Drive 输入、kernel 内 controller 调用、薄 Notebook、A100 显存门、secret 隔离、长时 pipe 排空、进程组清理、失败落盘和最终固定 Drive 交付，不建立模型供应链或通用持久化门禁 |
 | harness 与格式检查 | 10项 harness 全部通过；`git diff --check` 通过 |
 | 外部源码 qualification | 显式 integration 运行 `6 failed, 0 skipped`；失败均来自4套登记真实源码目录缺失，符合缺源失败关闭边界，不属于默认测试失败 |
@@ -84,6 +84,7 @@
 - `98e9b79` 在 A100-40G 上完成模型加载和第一条 diffusion chain，但第二条链的真实 Q/K autograd 使39.49 GiB显存仅余约3.44 MiB并触发 OOM；因此40G不再作为该固定工作量的运行设备，后续使用 A100-80G，不启用 offload、量化或缩减矩阵。
 - 同一 `98e9b79` 在 A100-80G 上没有 OOM，并完成第一个 Prompt 的 semantic×LF-only、semantic×HF-only、semantic×dual 三个完整 cell。三者 selected sign 均为 `+1`，所以 nominal before/after 完全相同；最终 re-encode latent 的 registered key 在32个 wrong key加 registered 的33键集合中，blind rank 分别为19、12、17，routed-template oracle rank 分别为20、30、20。该结果表明 routed oracle 也没有恢复稳定 key ownership，当前载体归因仍弱；它是诊断事实，不是候选通过。
 - A100-80G 随后在 uniform×LF-only 的 `full_probe_positive` step10 触发正式门禁：9个 Q/K geometry 回溯候选都不能在 actual dtype 上严格改善关系分数。正式 `main/methods/geometry/sync_update.py` 的失败关闭保持不变；问题在于 observation runner 把一个 cell 的方法失败升级为整个24-cell矩阵的进程失败。
+- `65f0be0` 的最新 A100-80G run 已通过模型加载、首个冻结 Prompt 的7条完整扩散链、CLIP三图质量特征和先前两项执行接口修复，随后在 `final_image_attention_observability_gate_ready=false` 处失败。该结果首次到达真实最终图像 Q/K 科学门，不是环境、模型、密钥、显存或 Transformers 接口错误；但旧控制流在门失败时立即抛错，未持久化已经计算出的具体分数，因而尚不能区分真实 Q/K 几何未存活、`0.0001` 下界未达到或观测归因异常。当前最小修复不放宽正式门、不改 Q/K 公式或阈值：正式 writer 继续失败关闭，diagnostic-only screen 捕获携带完整内存观测的专用失败，持久化 preservation/Q/K 指标、固定 wrong-key 分差与registered+32 wrong-key HF排名，并继续剩余 Prompt；只有四条Prompt全部门禁与密钥排名通过时方法screen才通过。
 - `af65332` 已完成旧矩阵并证明 M0 sign 选择、routed oracle 和中段微弱载体都没有恢复 key ownership，因此不再继续扩展该矩阵。当前最小修复直接测试 terminal/pre-VAE 固定能量载体；每 Prompt 的候选图像、质量、terminal/re-encode 33-key完整分数和摘要落盘，Prompt manifest 最后发布。它不修改固定 Notebook，也不把 CPU 合成可分性冒充 GPU 方法通过。
 
 ---

@@ -667,6 +667,25 @@ class SemanticWatermarkRuntimeContext:
     runtime_versions: dict[str, Any]
 
 
+class FinalImageEvidenceGateFailure(RuntimeError):
+    """携带已完成科学观测，使诊断入口可记录真实门禁失败。"""
+
+    def __init__(
+        self,
+        *,
+        failure_reasons: tuple[str, ...],
+        runtime_outputs: tuple[Any, ...],
+    ) -> None:
+        if not failure_reasons:
+            raise ValueError("final-image evidence failure requires reasons")
+        super().__init__(
+            "nominal replay images failed final-image evidence gates: "
+            + ", ".join(failure_reasons)
+        )
+        self.failure_reasons = failure_reasons
+        self.runtime_outputs = runtime_outputs
+
+
 def load_semantic_watermark_runtime_context(
     config: SemanticWatermarkRuntimeConfig,
     *,
@@ -7233,6 +7252,7 @@ def _run_semantic_watermark_runtime_with_content_strength(
         ),
         counterfactual_identity_digest=counterfactual_identity_digest,
     )
+    final_image_evidence_gate_failures: list[str] = []
     if (
         final_image_preservation["final_image_preservation_gate_ready"] is not True
         or carrier_only_final_image_preservation[
@@ -7240,7 +7260,7 @@ def _run_semantic_watermark_runtime_with_content_strength(
         ]
         is not True
     ):
-        raise RuntimeError("nominal replay images failed preservation gates")
+        final_image_evidence_gate_failures.append("final_image_preservation")
 
     attention_extractor = _image_attention_extractor(
         pipeline,
@@ -7263,7 +7283,9 @@ def _run_semantic_watermark_runtime_with_content_strength(
     if final_image_attention_observability[
         "final_image_attention_observability_gate_ready"
     ] is not True:
-        raise RuntimeError("nominal replay images failed final-image Q/K observability")
+        final_image_evidence_gate_failures.append(
+            "final_image_attention_observability"
+        )
 
     run_id = build_semantic_watermark_run_id(config)
     paired_quality = compute_image_quality_metrics(clean_image, watermarked_image)
@@ -7389,7 +7411,9 @@ def _run_semantic_watermark_runtime_with_content_strength(
     )
     result = SemanticWatermarkRuntimeResult(
         run_id=run_id,
-        run_decision="pass",
+        run_decision=(
+            "fail" if final_image_evidence_gate_failures else "pass"
+        ),
         clean_image_path="",
         watermarked_image_path="",
         update_record_path="",
@@ -7428,6 +7452,9 @@ def _run_semantic_watermark_runtime_with_content_strength(
             "final_image_attention_observability": (
                 final_image_attention_observability
             ),
+            "final_image_evidence_gate_failures": list(
+                final_image_evidence_gate_failures
+            ),
             "old_content_runtime_artifact_compatible": False,
             "reference_source": "fixed_content_routing_reference_registry",
             "supports_paper_claim": False,
@@ -7437,7 +7464,7 @@ def _run_semantic_watermark_runtime_with_content_strength(
             "scientific_unit_provenance": provenance,
         },
     )
-    return (
+    runtime_outputs = (
         result,
         (update_record,),
         (carrier_only_update_record,),
@@ -7447,6 +7474,12 @@ def _run_semantic_watermark_runtime_with_content_strength(
         carrier_only_image,
         {},
     )
+    if final_image_evidence_gate_failures:
+        raise FinalImageEvidenceGateFailure(
+            failure_reasons=tuple(final_image_evidence_gate_failures),
+            runtime_outputs=runtime_outputs,
+        )
+    return runtime_outputs
 
 
 def run_semantic_watermark_runtime(
