@@ -73,6 +73,12 @@ def _arguments() -> argparse.Namespace:
     )
     parser.add_argument("--repository-root", type=Path, default=ROOT)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--prompt-count",
+        type=int,
+        choices=(1, 4),
+        default=4,
+    )
     return parser.parse_args()
 
 
@@ -90,14 +96,17 @@ def _prompt_records(root: Path) -> dict[str, object]:
     return {prompt_id: by_id[prompt_id] for prompt_id in CONTENT_SURVIVAL_PROMPT_IDS}
 
 
-def _prompt_configs(root: Path) -> dict[str, object]:
+def _prompt_configs(root: Path, prompt_count: int = 4) -> dict[str, object]:
     if not os.environ.get("SLM_WM_KEY_MATERIAL"):
         raise RuntimeError("SLM_WM_KEY_MATERIAL must be explicitly provided")
     base = build_method_config(root)
     repeat = resolve_formal_randomization_repeat(base.randomization_repeat_id)
     base_generation_seed = int(base.seed) - int(repeat.generation_seed_offset)
     configs: dict[str, object] = {}
+    selected_prompt_ids = CONTENT_SURVIVAL_PROMPT_IDS[:prompt_count]
     for prompt_id, record in _prompt_records(root).items():
+        if prompt_id not in selected_prompt_ids:
+            continue
         seed = formal_generation_seed(
             base_generation_seed,
             int(record.prompt_index),
@@ -366,7 +375,7 @@ def main() -> int:
         expected_file_sha256=routing_identity["file_sha256"],
     )
     execution_environment_identity = _execution_environment_identity(root, lock)
-    prompt_configs = _prompt_configs(root)
+    prompt_configs = _prompt_configs(root, arguments.prompt_count)
     _prepare_prompt_saliency_model_cache(prompt_configs)
     summary = run_formal_terminal_hf_screen(
         prompt_configs,

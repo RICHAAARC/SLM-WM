@@ -4094,7 +4094,14 @@ def _terminal_registered_qk_direction(
     if not callable(scale_noise):
         raise RuntimeError("terminal Q/K sync requires scheduler.scale_noise")
     with torch.enable_grad():
-        candidate = terminal_hf_latent.detach().float().requires_grad_(True)
+        frozen_terminal_hf_latent = terminal_hf_latent.detach().to(
+            dtype=torch.float32
+        )
+        terminal_delta = torch.zeros_like(
+            frozen_terminal_hf_latent,
+            requires_grad=True,
+        )
+        candidate = frozen_terminal_hf_latent + terminal_delta
         vae_dtype = next(pipeline.vae.parameters()).dtype
         scaled = candidate.to(dtype=vae_dtype) / pipeline.vae.config.scaling_factor
         scaled = scaled + pipeline.vae.config.shift_factor
@@ -4124,7 +4131,7 @@ def _terminal_registered_qk_direction(
                 stable_pair_weights=carrier_pair_weights,
                 component_weights=config.attention_relation_component_weights,
             )
-            gradient = torch.autograd.grad(score, candidate)[0]
+            gradient = torch.autograd.grad(score, terminal_delta)[0]
     masked = gradient.detach().float() * geometry_capacity_map.detach().float()
     norm = torch.linalg.vector_norm(masked.reshape(-1))
     if (
@@ -4214,7 +4221,7 @@ def _build_terminal_registered_qk_sync(
     )
     geometry_budget = latent_l2 * geometry_limit * 0.999
     candidates: list[dict[str, Any]] = []
-    candidate_values: list[tuple[Any, Any]] = []
+    candidate_values: list[tuple[Any, Any | None]] = []
     for candidate_index, scale in enumerate(scales):
         proposed = baseline.detach().float() + direction * geometry_budget * scale
         written = proposed.to(dtype=terminal_latent.dtype)
@@ -4224,22 +4231,20 @@ def _build_terminal_registered_qk_sync(
         combined_actual_l2 = torch.linalg.vector_norm(combined_actual.reshape(-1))
         geometry_relative = float((geometry_actual_l2 / latent_l2).item())
         combined_relative = float((combined_actual_l2 / latent_l2).item())
-        if (
-            not math.isfinite(geometry_relative)
-            or not math.isfinite(combined_relative)
-            or geometry_relative > geometry_limit
-            or combined_relative > combined_limit
+        if not math.isfinite(geometry_relative) or not math.isfinite(
+            combined_relative
         ):
-            raise RuntimeError("terminal Q/K candidate exceeded actual-dtype budget")
-        image = _decode_content_runtime_latent_image(pipeline, written)
-        image_identity = canonical_rgb_uint8_content_record(image)
-        qk_records = tuple(exact_extractor(image))
-        score_record, _ = _terminal_registered_qk_score(
-            qk_records,
-            config.key_material,
-            config,
-            carrier_pair_weights=carrier_pair_weights,
-        )
+            budget_failure_reason = "nonfinite_actual_dtype_measurement"
+        elif geometry_relative > geometry_limit:
+            budget_failure_reason = (
+                "geometry_actual_dtype_relative_l2_exceeded"
+            )
+        elif combined_relative > combined_limit:
+            budget_failure_reason = (
+                "combined_actual_dtype_relative_l2_exceeded"
+            )
+        else:
+            budget_failure_reason = ""
         item = {
             "candidate_index": candidate_index,
             "candidate_scale_fraction": scale,
@@ -4247,14 +4252,26 @@ def _build_terminal_registered_qk_sync(
             "written_latent_content_sha256": tensor_content_sha256(
                 written.detach().float()
             ),
-            "output_image_rgb_uint8_content_sha256": image_identity[
-                "image_rgb_uint8_content_sha256"
-            ],
-            "geometry_actual_dtype_l2": float(geometry_actual_l2.item()),
-            "geometry_actual_dtype_relative_l2": geometry_relative,
-            "combined_actual_dtype_l2": float(combined_actual_l2.item()),
-            "combined_actual_dtype_relative_l2": combined_relative,
-            **score_record,
+            "geometry_actual_dtype_l2": (
+                float(geometry_actual_l2.item())
+                if bool(torch.isfinite(geometry_actual_l2))
+                else None
+            ),
+            "geometry_actual_dtype_relative_l2": (
+                geometry_relative if math.isfinite(geometry_relative) else None
+            ),
+            "combined_actual_dtype_l2": (
+                float(combined_actual_l2.item())
+                if bool(torch.isfinite(combined_actual_l2))
+                else None
+            ),
+            "combined_actual_dtype_relative_l2": (
+                combined_relative if math.isfinite(combined_relative) else None
+            ),
+            "actual_dtype_budget_ready": budget_failure_reason == "",
+            "actual_dtype_budget_failure_reason": budget_failure_reason,
+            "candidate_score_evaluated": False,
+            "candidate_acceptance_ready": False,
             "registered_key_only": True,
             "wrong_key_accessed": False,
             "score_source": "image_reencoded_public_noise_real_qk",
@@ -4262,65 +4279,101 @@ def _build_terminal_registered_qk_sync(
         }
         item["candidate_record_digest"] = build_stable_digest(item)
         candidates.append(item)
-        candidate_values.append((written, image))
+        candidate_values.append((written, None))
     baseline_record = candidates[0]
     minimum_gain = float(config.minimum_final_image_attention_score_gain)
     selected_index = 0
-    for item in candidates[1:]:
-        item["strict_blind_improvement_over_zero"] = bool(
-            item["blind_attention_score"]
-            > baseline_record["blind_attention_score"]
-        )
-        item["strict_carrier_paired_improvement_over_zero"] = bool(
-            item["carrier_paired_attention_score"]
-            > baseline_record["carrier_paired_attention_score"]
-        )
-        item["blind_full_vs_carrier_gain"] = float(
-            item["blind_attention_score"]
-            - carrier_score["blind_attention_score"]
-        )
-        item["carrier_paired_full_vs_carrier_gain"] = float(
-            item["carrier_paired_attention_score"]
-            - carrier_score["carrier_paired_attention_score"]
-        )
-        item["candidate_acceptance_ready"] = bool(
-            item["strict_blind_improvement_over_zero"]
-            and item["strict_carrier_paired_improvement_over_zero"]
-            and item["blind_full_vs_carrier_gain"] > minimum_gain
-            and item["carrier_paired_full_vs_carrier_gain"] > minimum_gain
-        )
-        item["candidate_record_digest"] = build_stable_digest(
-            {key: value for key, value in item.items() if key != "candidate_record_digest"}
-        )
-        if selected_index == 0 and item["candidate_acceptance_ready"]:
-            selected_index = int(item["candidate_index"])
-    baseline_record.update(
-        {
-            "strict_blind_improvement_over_zero": False,
-            "strict_carrier_paired_improvement_over_zero": False,
-            "blind_full_vs_carrier_gain": float(
-                baseline_record["blind_attention_score"]
+    if baseline_record["actual_dtype_budget_ready"]:
+        for candidate_index, item in enumerate(candidates):
+            if not item["actual_dtype_budget_ready"]:
+                continue
+            written, _ = candidate_values[candidate_index]
+            image = _decode_content_runtime_latent_image(pipeline, written)
+            image_identity = canonical_rgb_uint8_content_record(image)
+            qk_records = tuple(exact_extractor(image))
+            score_record, _ = _terminal_registered_qk_score(
+                qk_records,
+                config.key_material,
+                config,
+                carrier_pair_weights=carrier_pair_weights,
+            )
+            item.update(
+                {
+                    "output_image_rgb_uint8_content_sha256": image_identity[
+                        "image_rgb_uint8_content_sha256"
+                    ],
+                    **score_record,
+                    "candidate_score_evaluated": True,
+                }
+            )
+            candidate_values[candidate_index] = (written, image)
+        for item in candidates[1:]:
+            if not item["actual_dtype_budget_ready"]:
+                continue
+            item["strict_blind_improvement_over_zero"] = bool(
+                item["blind_attention_score"]
+                > baseline_record["blind_attention_score"]
+            )
+            item["strict_carrier_paired_improvement_over_zero"] = bool(
+                item["carrier_paired_attention_score"]
+                > baseline_record["carrier_paired_attention_score"]
+            )
+            item["blind_full_vs_carrier_gain"] = float(
+                item["blind_attention_score"]
                 - carrier_score["blind_attention_score"]
-            ),
-            "carrier_paired_full_vs_carrier_gain": float(
-                baseline_record["carrier_paired_attention_score"]
+            )
+            item["carrier_paired_full_vs_carrier_gain"] = float(
+                item["carrier_paired_attention_score"]
                 - carrier_score["carrier_paired_attention_score"]
-            ),
-            "candidate_acceptance_ready": False,
-        }
-    )
-    baseline_record["candidate_record_digest"] = build_stable_digest(
-        {
-            key: value
-            for key, value in baseline_record.items()
-            if key != "candidate_record_digest"
-        }
-    )
+            )
+            item["candidate_acceptance_ready"] = bool(
+                item["strict_blind_improvement_over_zero"]
+                and item["strict_carrier_paired_improvement_over_zero"]
+                and item["blind_full_vs_carrier_gain"] > minimum_gain
+                and item["carrier_paired_full_vs_carrier_gain"] > minimum_gain
+            )
+            if selected_index == 0 and item["candidate_acceptance_ready"]:
+                selected_index = int(item["candidate_index"])
+        baseline_record.update(
+            {
+                "strict_blind_improvement_over_zero": False,
+                "strict_carrier_paired_improvement_over_zero": False,
+                "blind_full_vs_carrier_gain": float(
+                    baseline_record["blind_attention_score"]
+                    - carrier_score["blind_attention_score"]
+                ),
+                "carrier_paired_full_vs_carrier_gain": float(
+                    baseline_record["carrier_paired_attention_score"]
+                    - carrier_score["carrier_paired_attention_score"]
+                ),
+            }
+        )
+    else:
+        baseline_latent, _ = candidate_values[0]
+        baseline_image = _decode_content_runtime_latent_image(
+            pipeline, baseline_latent
+        )
+        image_identity = canonical_rgb_uint8_content_record(baseline_image)
+        baseline_record["output_image_rgb_uint8_content_sha256"] = image_identity[
+            "image_rgb_uint8_content_sha256"
+        ]
+        candidate_values[0] = (baseline_latent, baseline_image)
+    for item in candidates:
+        item["candidate_record_digest"] = build_stable_digest(
+            {
+                key: value
+                for key, value in item.items()
+                if key != "candidate_record_digest"
+            }
+        )
     selected_record = candidates[selected_index]
+    zero_baseline_budget_ready = bool(
+        baseline_record["actual_dtype_budget_ready"]
+    )
     sync_record = {
         **direction_record,
         "terminal_qk_sync_full_replay_only": True,
-        "terminal_qk_sync_applied": True,
+        "terminal_qk_sync_applied": selected_index != 0,
         "terminal_qk_sync_terminal_hf_unchanged": True,
         "terminal_qk_sync_registered_key_only": True,
         "terminal_qk_sync_wrong_key_accessed": False,
@@ -4337,7 +4390,13 @@ def _build_terminal_registered_qk_sync(
         ],
         "terminal_qk_sync_ready": selected_index != 0,
         "terminal_qk_sync_failure_reason": (
-            "" if selected_index != 0 else "no_exact_image_qk_candidate_passed"
+            ""
+            if selected_index != 0
+            else (
+                "no_exact_image_qk_candidate_passed"
+                if zero_baseline_budget_ready
+                else "zero_baseline_actual_dtype_budget_not_ready"
+            )
         ),
         "supports_paper_claim": False,
     }
@@ -7657,6 +7716,10 @@ def _run_semantic_watermark_runtime_with_content_strength(
         counterfactual_identity_digest=counterfactual_identity_digest,
     )
     final_image_evidence_gate_failures: list[str] = []
+    if full_payload["terminal_qk_sync_ready"] is not True:
+        final_image_evidence_gate_failures.append(
+            "terminal_qk_sync_not_ready"
+        )
     if (
         final_image_preservation["final_image_preservation_gate_ready"] is not True
         or carrier_only_final_image_preservation[

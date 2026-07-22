@@ -81,9 +81,10 @@ def local_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path
         json.dumps(
             {
                 "request_schema": "content_survival_observation_colab_run_request",
-                "schema_version": 1,
+                "schema_version": 2,
                 "run_id": "content_survival_observation_colab_20260721T180000Z_ccccccc",
                 "repository_commit": COMMIT,
+                "prompt_count": 4,
             }
         ),
         encoding="utf-8",
@@ -152,6 +153,31 @@ def test_run_request_cannot_select_drive_results_directory(local_content: tuple[
     assert colab._drive_results_root() == (
         colab.CONTENT_ROOT / "drive/MyDrive/SLM/content-survival/results"
     ).resolve()
+
+
+def test_run_request_selects_only_one_or_four_frozen_prompts(
+    local_content: tuple[Path, Path],
+) -> None:
+    request_path, _ = local_content
+    payload = json.loads(request_path.read_text(encoding="utf-8"))
+    payload["prompt_count"] = 1
+    request_path.write_text(json.dumps(payload), encoding="utf-8")
+    request = colab.load_run_request(request_path)
+    assert request.prompt_count == 1
+    assert colab._host_command(colab.run_paths(request), request)[-2:] == [
+        "--prompt-count",
+        "1",
+    ]
+    assert colab._workload_identity(request.prompt_count) == {
+        "prompt_count": 1,
+        "formal_runtime_count": 1,
+        "diffusion_chain_count": 7,
+        "key_score_count": 33,
+    }
+    payload["prompt_count"] = 2
+    request_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(colab.ColabObservationError, match="one or four"):
+        colab.load_run_request(request_path)
 
 
 def _gpu(name: str = "NVIDIA A100-SXM4-40GB", total: int = 40536, free: int = 40100) -> colab.GpuIdentity:

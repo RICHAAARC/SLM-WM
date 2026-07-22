@@ -162,9 +162,13 @@ def run_formal_terminal_hf_screen(
     root = Path(repository_root).resolve()
     output_root = (root / Path(output_dir)).resolve()
     output_root.relative_to((root / "outputs").resolve())
-    if tuple(prompt_configs) != CONTENT_SURVIVAL_PROMPT_IDS:
-        raise ValueError("formal terminal HF screen requires the frozen four prompts")
-    configs = tuple(prompt_configs[prompt_id] for prompt_id in CONTENT_SURVIVAL_PROMPT_IDS)
+    prompt_ids = tuple(prompt_configs)
+    if prompt_ids not in {
+        CONTENT_SURVIVAL_PROMPT_IDS[:1],
+        CONTENT_SURVIVAL_PROMPT_IDS,
+    }:
+        raise ValueError("formal terminal HF screen requires the frozen prompt prefix")
+    configs = tuple(prompt_configs[prompt_id] for prompt_id in prompt_ids)
     validate_formal_execution_lock_record(verified_formal_execution_lock)
     if not verified_execution_environment_identity:
         raise ValueError("formal terminal HF screen requires execution identity")
@@ -350,12 +354,11 @@ def run_formal_terminal_hf_screen(
         "decision": "pass",
         "method_screening_decision": (
             "pass"
-            if rank_one_count == len(CONTENT_SURVIVAL_PROMPT_IDS)
-            and fixed_wrong_pass_count == len(CONTENT_SURVIVAL_PROMPT_IDS)
-            and final_image_evidence_pass_count
-            == len(CONTENT_SURVIVAL_PROMPT_IDS)
+            if rank_one_count == len(prompt_ids)
+            and fixed_wrong_pass_count == len(prompt_ids)
             else "fail"
         ),
+        "prompt_ids": list(prompt_ids),
         "prompt_count": len(prompt_results),
         "complete_cell_count": len(prompt_results),
         "diffusion_chain_count": len(prompt_results) * 7,

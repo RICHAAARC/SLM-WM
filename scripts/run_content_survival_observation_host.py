@@ -117,6 +117,7 @@ def _scientific_command_runner(
     root: Path,
     output_dir: Path,
     key_material: str,
+    prompt_count: int = 4,
     process_runner: ProcessRunner = subprocess.run,
 ) -> tuple[
     Callable[[Sequence[str], Path, Mapping[str, str]], Mapping[str, Any]],
@@ -125,6 +126,8 @@ def _scientific_command_runner(
     """Create the only runner allowed to place the key in a child environment."""
 
     target_script = (root / "scripts/run_content_survival_observation.py").resolve()
+    if prompt_count not in {1, 4}:
+        raise ContentSurvivalObservationHostError("prompt count must be one or four")
     expected_tail = (
         str(target_script),
         "--repository-root",
@@ -132,6 +135,8 @@ def _scientific_command_runner(
         "--output-dir",
         str(output_dir),
     )
+    if prompt_count != 4:
+        expected_tail = (*expected_tail, "--prompt-count", str(prompt_count))
     state: dict[str, int | bool] = {
         "consumed": False,
         "runner_invocation_count": 0,
@@ -323,7 +328,7 @@ def _write_host_report(path: Path, report: Mapping[str, Any]) -> None:
 
 
 def _orchestrator_arguments(arguments: argparse.Namespace) -> list[str]:
-    return [
+    command = [
         "-I",
         str(Path(__file__).resolve()),
         "orchestrator",
@@ -352,6 +357,9 @@ def _orchestrator_arguments(arguments: argparse.Namespace) -> list[str]:
         "--orchestrator-python-sha256",
         arguments.orchestrator_python_sha256,
     ]
+    if arguments.prompt_count != 4:
+        command.extend(("--prompt-count", str(arguments.prompt_count)))
+    return command
 
 
 def _run_host(arguments: argparse.Namespace) -> int:
@@ -464,16 +472,20 @@ def _run_orchestrator(arguments: argparse.Namespace) -> int:
         root=root,
         output_dir=output_dir,
         key_material=key_material,
+        prompt_count=arguments.prompt_count,
     )
+    scientific_command = [
+        str(root / "scripts/run_content_survival_observation.py"),
+        "--repository-root",
+        str(root),
+        "--output-dir",
+        str(output_dir),
+    ]
+    if arguments.prompt_count != 4:
+        scientific_command.extend(("--prompt-count", str(arguments.prompt_count)))
     report, report_path = execute_isolated_scientific_command(
         SCIENTIFIC_PROFILE_ID,
-        [
-            str(root / "scripts/run_content_survival_observation.py"),
-            "--repository-root",
-            str(root),
-            "--output-dir",
-            str(output_dir),
-        ],
+        scientific_command,
         execution_report_path=arguments.scientific_execution_report,
         repository_root=root,
         environment_root=arguments.scientific_environment_root,
@@ -506,6 +518,7 @@ def _run_orchestrator(arguments: argparse.Namespace) -> int:
         "prompt_roster_artifact_file_sha256": protocol.payload["roster"][
             "roster_artifact_file_sha256"
         ],
+        "prompt_count": arguments.prompt_count,
         "key_material_identity": {
             "role": "registered_watermark_key_material",
             "digest_domain": KEY_DIGEST_DOMAIN.decode("ascii"),
@@ -546,6 +559,7 @@ def _common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--scientific-managed-python-root", type=Path, required=True)
     parser.add_argument("--scientific-execution-report", type=Path, required=True)
     parser.add_argument("--host-report", type=Path, required=True)
+    parser.add_argument("--prompt-count", type=int, choices=(1, 4), default=4)
 
 
 def build_parser() -> argparse.ArgumentParser:

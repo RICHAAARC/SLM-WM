@@ -37,11 +37,20 @@ def _configs() -> dict[str, SemanticWatermarkRuntimeConfig]:
     }
 
 
-@pytest.mark.parametrize("final_image_gate_failure", [False, True])
+@pytest.mark.parametrize("prompt_count", [1, 4])
+@pytest.mark.parametrize(
+    "scientific_failure_reason",
+    [
+        None,
+        "final_image_attention_observability",
+        "terminal_qk_sync_not_ready",
+    ],
+)
 def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    final_image_gate_failure: bool,
+    prompt_count: int,
+    scientific_failure_reason: str | None,
 ) -> None:
     (tmp_path / "outputs").mkdir()
     completed: dict[str, SimpleNamespace] = {}
@@ -116,13 +125,17 @@ def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
             },
             "final_image_attention_observability": {
                 "final_image_attention_observability_gate_ready": (
-                    not final_image_gate_failure
+                    scientific_failure_reason
+                    != "final_image_attention_observability"
                 ),
                 "final_image_attention_blind_attribution_gain": -0.0002,
                 "final_image_attention_carrier_paired_attribution_gain": -0.0001,
             },
+            "terminal_qk_sync_ready": (
+                scientific_failure_reason != "terminal_qk_sync_not_ready"
+            ),
         }
-        if final_image_gate_failure:
+        if scientific_failure_reason is not None:
             failed_runtime = SemanticWatermarkRuntimeResult(
                 run_id=run_id,
                 run_decision="fail",
@@ -136,12 +149,12 @@ def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
                 metadata={
                     **metadata,
                     "final_image_evidence_gate_failures": [
-                        "final_image_attention_observability"
+                        scientific_failure_reason
                     ],
                 },
             )
             raise FinalImageEvidenceGateFailure(
-                failure_reasons=("final_image_attention_observability",),
+                failure_reasons=(scientific_failure_reason,),
                 runtime_outputs=(
                     failed_runtime,
                     (),
@@ -196,38 +209,45 @@ def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
         "output_dir": "outputs/formal_terminal_hf",
     }
 
-    summary = runtime.run_formal_terminal_hf_screen(_configs(), **kwargs)
+    selected_prompt_ids = CONTENT_SURVIVAL_PROMPT_IDS[:prompt_count]
+    configs = {
+        prompt_id: config
+        for prompt_id, config in _configs().items()
+        if prompt_id in selected_prompt_ids
+    }
+    summary = runtime.run_formal_terminal_hf_screen(configs, **kwargs)
 
     assert summary["decision"] == "pass"
-    assert summary["method_screening_decision"] == (
-        "fail" if final_image_gate_failure else "pass"
-    )
-    assert summary["prompt_count"] == 4
-    assert summary["diffusion_chain_count"] == 28
-    assert summary["key_score_count"] == 132
-    assert summary["registered_rank_one_count"] == 4
+    assert summary["method_screening_decision"] == "pass"
+    assert summary["prompt_ids"] == list(selected_prompt_ids)
+    assert summary["prompt_count"] == prompt_count
+    assert summary["diffusion_chain_count"] == prompt_count * 7
+    assert summary["key_score_count"] == prompt_count * 33
+    assert summary["registered_rank_one_count"] == prompt_count
     assert summary["final_image_evidence_pass_count"] == (
-        0 if final_image_gate_failure else 4
+        0 if scientific_failure_reason is not None else prompt_count
     )
     assert summary["scientific_gate_failure_count"] == (
-        4 if final_image_gate_failure else 0
+        prompt_count if scientific_failure_reason is not None else 0
     )
-    if final_image_gate_failure:
+    if scientific_failure_reason is not None:
         first = summary["prompt_results"][0]
         assert first["formal_runtime_result_path"] == ""
         assert first["scientific_gate_failure_reasons"] == [
-            "final_image_attention_observability"
+            scientific_failure_reason
         ]
+        assert first["registered_rank_one"] is True
+        assert first["formal_fixed_wrong_key_margin"] == pytest.approx(0.1)
         assert first["final_image_attention_observability"][
             "final_image_attention_blind_attribution_gain"
         ] == -0.0002
         assert issubclass(FinalImageEvidenceGateFailure, RuntimeError)
-    assert writer_calls == list(CONTENT_SURVIVAL_PROMPT_IDS)
-    assert len(list((tmp_path / "outputs").rglob("cell_manifest.json"))) == 4
+    assert writer_calls == list(selected_prompt_ids)
+    assert len(list((tmp_path / "outputs").rglob("cell_manifest.json"))) == prompt_count
 
-    resumed = runtime.run_formal_terminal_hf_screen(_configs(), **kwargs)
-    assert resumed["registered_rank_one_count"] == 4
+    resumed = runtime.run_formal_terminal_hf_screen(configs, **kwargs)
+    assert resumed["registered_rank_one_count"] == prompt_count
     assert resumed["scientific_gate_failure_count"] == (
-        4 if final_image_gate_failure else 0
+        prompt_count if scientific_failure_reason is not None else 0
     )
-    assert writer_calls == list(CONTENT_SURVIVAL_PROMPT_IDS)
+    assert writer_calls == list(selected_prompt_ids)

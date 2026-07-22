@@ -27,6 +27,7 @@ def _host_arguments(root: Path) -> argparse.Namespace:
         repository_root=root,
         repository_commit="a" * 40,
         output_dir=Path("outputs/observation/run"),
+        prompt_count=4,
         scientific_environment_root=root / "scientific-environments",
         scientific_managed_python_root=root / "managed-pythons",
         scientific_execution_report=Path("outputs/observation/scientific.json"),
@@ -41,6 +42,7 @@ def _orchestrator_arguments(root: Path) -> argparse.Namespace:
         repository_root=root,
         repository_commit="a" * 40,
         output_dir=Path("outputs/observation/run"),
+        prompt_count=4,
         scientific_environment_root=root / "scientific-environments",
         scientific_managed_python_root=root / "managed-pythons",
         scientific_execution_report=Path("outputs/observation/scientific.json"),
@@ -383,6 +385,7 @@ def test_orchestrator_persists_only_digest_role_and_fixed_identity(
 
     monkeypatch.setattr(host, "execute_isolated_scientific_command", execute)
     arguments = _orchestrator_arguments(root)
+    arguments.prompt_count = 1
 
     assert host._run_orchestrator(arguments) == 0
 
@@ -401,6 +404,7 @@ def test_orchestrator_persists_only_digest_role_and_fixed_identity(
         "content_survival_observation_v1"
     )
     assert report["prompt_roster_semantic_digest"] == "1" * 64
+    assert report["prompt_count"] == 1
     assert report["target_scientific_child_count"] == 1
     assert report["non_target_key_environment_count"] == 0
     assert report["scientific_runner_state"] == {
@@ -421,6 +425,8 @@ def test_orchestrator_persists_only_digest_role_and_fixed_identity(
         str(root),
         "--output-dir",
         str(arguments.output_dir),
+        "--prompt-count",
+        "1",
     ]
 
 

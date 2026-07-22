@@ -429,6 +429,26 @@ def test_cli_prefetches_clip_after_identity_gate_and_before_gpu_runtime() -> Non
     assert identity_index < prefetch_index < runtime_index
 
 
+def test_cli_prompt_count_keeps_the_same_formal_screen_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        observation_cli.sys,
+        "argv",
+        [
+            "run_content_survival_observation.py",
+            "--output-dir",
+            "outputs/smoke",
+            "--prompt-count",
+            "1",
+        ],
+    )
+    assert observation_cli._arguments().prompt_count == 1
+    main_source = inspect.getsource(observation_cli.main)
+    assert "_prompt_configs(root, arguments.prompt_count)" in main_source
+    assert "summary = run_formal_terminal_hf_screen(" in main_source
+
+
 def _config(
     prompt_id: str = protocol.CONTENT_SURVIVAL_PROMPT_IDS[0],
 ) -> SemanticWatermarkRuntimeConfig:

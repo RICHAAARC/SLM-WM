@@ -55,12 +55,6 @@ CLAIM_BOUNDARY = {
     "candidate_promotion_allowed": False,
     "qualification_evidence": False,
 }
-WORKLOAD_IDENTITY = {
-    "prompt_count": 4,
-    "formal_runtime_count": 4,
-    "diffusion_chain_count": 28,
-    "key_score_count": 132,
-}
 SECRET_USAGE_REQUIRED_STATUSES = frozenset({"running", "success", "scientific_failure"})
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[Any]]
@@ -78,6 +72,7 @@ class ColabObservationError(RuntimeError):
 class RunRequest:
     run_id: str
     repository_commit: str
+    prompt_count: int
     request_sha256: str
 
 
@@ -115,6 +110,15 @@ class GpuIdentity:
             "gpu_uuid": self.uuid,
             "gpu_utilization_percent": self.utilization_percent,
         }
+
+
+def _workload_identity(prompt_count: int) -> dict[str, int]:
+    return {
+        "prompt_count": prompt_count,
+        "formal_runtime_count": prompt_count,
+        "diffusion_chain_count": prompt_count * 7,
+        "key_score_count": prompt_count * 33,
+    }
 
 
 @dataclass(frozen=True)
@@ -226,26 +230,31 @@ def _parse_run_request(raw: bytes) -> RunRequest:
         "schema_version",
         "run_id",
         "repository_commit",
+        "prompt_count",
     }
     if type(payload) is not dict or set(payload) != required:
         raise ColabObservationError("run request fields drifted")
     if (
         payload["request_schema"]
         != "content_survival_observation_colab_run_request"
-        or payload["schema_version"] != 1
+        or payload["schema_version"] != 2
     ):
         raise ColabObservationError("run request schema drifted")
     run_id = payload["run_id"]
     commit = payload["repository_commit"]
+    prompt_count = payload["prompt_count"]
     if type(run_id) is not str or SAFE_RUN_ID.fullmatch(run_id) is None:
         raise ColabObservationError("run identity is invalid")
     if type(commit) is not str or SAFE_COMMIT.fullmatch(commit) is None:
         raise ColabObservationError("repository commit is invalid")
+    if type(prompt_count) is not int or prompt_count not in {1, 4}:
+        raise ColabObservationError("prompt count must be one or four")
     if not run_id.endswith("_" + commit[:7]):
         raise ColabObservationError("run identity does not bind repository commit")
     return RunRequest(
         run_id=run_id,
         repository_commit=commit,
+        prompt_count=prompt_count,
         request_sha256=hashlib.sha256(raw).hexdigest(),
     )
 
@@ -649,7 +658,7 @@ def preflight_run(
             "colab_runtime_identity": os.environ.get("COLAB_RELEASE_TAG", "unknown"),
             "python": sys.version.split()[0],
             "gpu": gpu.record(),
-            "workload": WORKLOAD_IDENTITY,
+            "workload": _workload_identity(request.prompt_count),
             **CLAIM_BOUNDARY,
         }
         _write_json_atomic(paths.evidence_root / "preflight_report.json", report)
@@ -866,7 +875,7 @@ def execute_drained_process(
 
 
 def _host_command(paths: RunPaths, request: RunRequest) -> list[str]:
-    return [
+    command = [
         sys.executable,
         "-I",
         str(paths.repository_root / "scripts/run_content_survival_observation_host.py"),
@@ -888,6 +897,9 @@ def _host_command(paths: RunPaths, request: RunRequest) -> list[str]:
         "--host-report",
         str(paths.host_execution_path.relative_to(paths.repository_root)),
     ]
+    if request.prompt_count != 4:
+        command.extend(("--prompt-count", str(request.prompt_count)))
+    return command
 
 
 def run_observation(
@@ -1073,7 +1085,7 @@ def _verify_local_delivery(
         "run_status": state.get("run_status"),
         "error_category": state.get("error_category"),
         "secret_scan": dict(scan),
-        "workload": WORKLOAD_IDENTITY,
+        "workload": _workload_identity(request.prompt_count),
         **CLAIM_BOUNDARY,
     }
     if _read_json(staging / "delivery_summary.json", "delivery summary") != expected_summary:
@@ -1125,7 +1137,7 @@ def _build_local_delivery(
         "run_status": state.get("run_status"),
         "error_category": state.get("error_category"),
         "secret_scan": dict(scan),
-        "workload": WORKLOAD_IDENTITY,
+        "workload": _workload_identity(request.prompt_count),
         **CLAIM_BOUNDARY,
     }
     _write_json_atomic(staging / "delivery_summary.json", summary)
