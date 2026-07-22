@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -421,6 +422,168 @@ def test_failure_is_locally_verified_before_drive_mount(local_content: tuple[Pat
     assert events[0] == "mount"
     assert events[1:] == [".gz", ".sha256", "unmount"]
     assert {path.parent for path in targets} == {colab._drive_results_root()}
+
+
+def test_delivery_after_mount_failure_rebuilds_only_damaged_local_copy(
+    local_content: tuple[Path, Path],
+) -> None:
+    request_path, bootstrap = local_content
+    request, paths, _ = _bootstrap_ready(request_path, bootstrap)
+    colab._state_event(
+        request,
+        paths,
+        run_status="preflight_failure",
+        operation="synthetic_preflight",
+        error_category="synthetic_failure",
+    )
+    mount_count = 0
+
+    def mount(path: str) -> None:
+        nonlocal mount_count
+        mount_count += 1
+        if mount_count == 1:
+            raise RuntimeError("synthetic mount interruption")
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+    with pytest.raises(RuntimeError, match="mount interruption"):
+        colab.package_and_deliver_to_drive(
+            request_path,
+            drive_mount=mount,
+            drive_unmount=lambda: None,
+        )
+    archive = paths.delivery_root / f"{request.run_id}.tar.gz"
+    archive.write_bytes(b"damaged local archive")
+
+    result = colab.package_and_deliver_to_drive(
+        request_path,
+        drive_mount=mount,
+        drive_unmount=lambda: None,
+    )
+
+    assert result["decision"] == "pass"
+    assert mount_count == 2
+    assert archive.read_bytes() != b"damaged local archive"
+    state = json.loads(paths.state_path.read_text(encoding="utf-8"))
+    assert state["run_status"] == "preflight_failure"
+
+
+def test_delivery_after_archive_copy_failure_only_copies_missing_checksum(
+    local_content: tuple[Path, Path],
+) -> None:
+    request_path, bootstrap = local_content
+    request, paths, _ = _bootstrap_ready(request_path, bootstrap)
+    colab._state_event(
+        request,
+        paths,
+        run_status="preflight_failure",
+        operation="synthetic_preflight",
+        error_category="synthetic_failure",
+    )
+    copied: list[str] = []
+    checksum_failure = True
+
+    def mount(path: str) -> None:
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+    def copy(source: str, target: str) -> str:
+        nonlocal checksum_failure
+        copied.append(Path(source).name)
+        if source.endswith(".sha256") and checksum_failure:
+            checksum_failure = False
+            raise OSError("synthetic checksum copy interruption")
+        return shutil.copy2(source, target)
+
+    with pytest.raises(OSError, match="checksum copy interruption"):
+        colab.package_and_deliver_to_drive(
+            request_path,
+            drive_mount=mount,
+            drive_unmount=lambda: None,
+            copy_file=copy,
+        )
+    archive_name = f"{request.run_id}.tar.gz"
+    assert (colab._drive_results_root() / archive_name).is_file()
+    assert not (colab._drive_results_root() / f"{archive_name}.sha256").exists()
+
+    result = colab.package_and_deliver_to_drive(
+        request_path,
+        drive_mount=mount,
+        drive_unmount=lambda: None,
+        copy_file=copy,
+    )
+
+    assert result["decision"] == "pass"
+    assert copied == [archive_name, f"{archive_name}.sha256", f"{archive_name}.sha256"]
+
+
+def test_completed_delivery_is_idempotent_without_additional_copy(
+    local_content: tuple[Path, Path],
+) -> None:
+    request_path, bootstrap = local_content
+    request, paths, _ = _bootstrap_ready(request_path, bootstrap)
+    colab._state_event(
+        request,
+        paths,
+        run_status="preflight_failure",
+        operation="synthetic_preflight",
+        error_category="synthetic_failure",
+    )
+
+    def mount(path: str) -> None:
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+    first = colab.package_and_deliver_to_drive(
+        request_path,
+        drive_mount=mount,
+        drive_unmount=lambda: None,
+    )
+    second = colab.package_and_deliver_to_drive(
+        request_path,
+        drive_mount=mount,
+        drive_unmount=lambda: None,
+        copy_file=lambda source, target: (_ for _ in ()).throw(
+            AssertionError((source, target))
+        ),
+    )
+
+    assert first["archive_sha256"] == second["archive_sha256"]
+    assert second["decision"] == "pass"
+
+
+def test_existing_drive_mismatch_is_rejected_without_overwrite(
+    local_content: tuple[Path, Path],
+) -> None:
+    request_path, bootstrap = local_content
+    request, paths, _ = _bootstrap_ready(request_path, bootstrap)
+    colab._state_event(
+        request,
+        paths,
+        run_status="preflight_failure",
+        operation="synthetic_preflight",
+        error_category="synthetic_failure",
+    )
+
+    def mount(path: str) -> None:
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+    colab.package_and_deliver_to_drive(
+        request_path,
+        drive_mount=mount,
+        drive_unmount=lambda: None,
+    )
+    archive_target = colab._drive_results_root() / f"{request.run_id}.tar.gz"
+    archive_target.write_bytes(b"conflicting drive archive")
+    copied: list[tuple[str, str]] = []
+
+    with pytest.raises(colab.ColabObservationError, match="conflicts"):
+        colab.package_and_deliver_to_drive(
+            request_path,
+            drive_mount=mount,
+            drive_unmount=lambda: None,
+            copy_file=lambda source, target: copied.append((source, target)) or target,
+        )
+
+    assert archive_target.read_bytes() == b"conflicting drive archive"
+    assert copied == []
 
 
 def test_package_cell_recovers_absent_state_from_disk(local_content: tuple[Path, Path]) -> None:

@@ -1043,6 +1043,145 @@ def _verify_inventory(root: Path, inventory: Sequence[Mapping[str, Any]]) -> Non
         raise ColabObservationError("delivery inventory verification failed")
 
 
+def _local_delivery_paths(
+    request: RunRequest,
+    paths: RunPaths,
+) -> tuple[Path, Path, Path]:
+    staging = paths.delivery_root / "evidence"
+    archive = paths.delivery_root / f"{request.run_id}.tar.gz"
+    checksum = paths.delivery_root / f"{archive.name}.sha256"
+    return staging, archive, checksum
+
+
+def _verify_local_delivery(
+    request: RunRequest,
+    paths: RunPaths,
+    state: Mapping[str, Any],
+    secrets: Sequence[str],
+    scan: Mapping[str, Any],
+) -> tuple[Path, Path]:
+    """Verify one complete local delivery without changing scientific evidence."""
+
+    staging, archive, checksum = _local_delivery_paths(request, paths)
+    if not staging.is_dir() or not archive.is_file() or not checksum.is_file():
+        raise ColabObservationError("local delivery is incomplete")
+    expected_summary = {
+        "delivery_schema": "content_survival_observation_colab_delivery",
+        "schema_version": 1,
+        "run_id": request.run_id,
+        "repository_commit": request.repository_commit,
+        "run_status": state.get("run_status"),
+        "error_category": state.get("error_category"),
+        "secret_scan": dict(scan),
+        "workload": WORKLOAD_IDENTITY,
+        **CLAIM_BOUNDARY,
+    }
+    if _read_json(staging / "delivery_summary.json", "delivery summary") != expected_summary:
+        raise ColabObservationError("local delivery summary drifted")
+    inventory = _read_json(
+        staging / "delivery_inventory.json",
+        "delivery inventory",
+    )
+    files = inventory.get("files")
+    if set(inventory) != {"files"} or type(files) is not list:
+        raise ColabObservationError("delivery inventory is invalid")
+    _verify_inventory(staging, files)
+    expected_checksum = f"{_sha256(archive)}  {archive.name}\n"
+    if checksum.read_text(encoding="utf-8") != expected_checksum:
+        raise ColabObservationError("local delivery checksum drifted")
+    with tempfile.TemporaryDirectory(dir=paths.delivery_root) as temporary:
+        with tarfile.open(archive, "r:gz") as handle:
+            handle.extractall(temporary, filter="data")
+        unpacked = Path(temporary) / request.run_id
+        unpacked_inventory = _read_json(
+            unpacked / "delivery_inventory.json",
+            "delivery inventory",
+        )
+        unpacked_files = unpacked_inventory.get("files")
+        if set(unpacked_inventory) != {"files"} or type(unpacked_files) is not list:
+            raise ColabObservationError("delivery inventory is invalid")
+        _verify_inventory(unpacked, unpacked_files)
+    _secret_scan(paths.delivery_root, secrets)
+    return archive, checksum
+
+
+def _build_local_delivery(
+    request: RunRequest,
+    paths: RunPaths,
+    state: Mapping[str, Any],
+    secrets: Sequence[str],
+    scan: Mapping[str, Any],
+) -> tuple[Path, Path]:
+    """Build and verify the immutable local archive before mounting Drive."""
+
+    paths.delivery_root.mkdir(parents=True, exist_ok=False)
+    staging, archive, checksum = _local_delivery_paths(request, paths)
+    shutil.copytree(paths.evidence_root, staging)
+    summary = {
+        "delivery_schema": "content_survival_observation_colab_delivery",
+        "schema_version": 1,
+        "run_id": request.run_id,
+        "repository_commit": request.repository_commit,
+        "run_status": state.get("run_status"),
+        "error_category": state.get("error_category"),
+        "secret_scan": dict(scan),
+        "workload": WORKLOAD_IDENTITY,
+        **CLAIM_BOUNDARY,
+    }
+    _write_json_atomic(staging / "delivery_summary.json", summary)
+    inventory = _file_inventory(
+        staging,
+        excluded=frozenset({"delivery_inventory.json"}),
+    )
+    _write_json_atomic(staging / "delivery_inventory.json", {"files": inventory})
+    _secret_scan(staging, secrets)
+    with tarfile.open(archive, "w:gz") as handle:
+        handle.add(staging, arcname=request.run_id)
+    checksum.write_text(f"{_sha256(archive)}  {archive.name}\n", encoding="utf-8")
+    return _verify_local_delivery(request, paths, state, secrets, scan)
+
+
+def _prepare_local_delivery(
+    request: RunRequest,
+    paths: RunPaths,
+    state: Mapping[str, Any],
+    secrets: Sequence[str],
+    scan: Mapping[str, Any],
+) -> tuple[Path, Path]:
+    """Reuse a verified delivery or rebuild only this run's damaged copy."""
+
+    if paths.delivery_root.exists():
+        try:
+            return _verify_local_delivery(request, paths, state, secrets, scan)
+        except (ColabObservationError, OSError, tarfile.TarError, ValueError):
+            expected_parent = DELIVERY_ROOT.resolve()
+            if (
+                paths.delivery_root.parent != expected_parent
+                or paths.delivery_root.name != request.run_id
+            ):
+                raise ColabObservationError("local delivery cleanup target drifted")
+            shutil.rmtree(paths.delivery_root)
+    return _build_local_delivery(request, paths, state, secrets, scan)
+
+
+def _copy_drive_artifact_if_absent(
+    source: Path,
+    target: Path,
+    *,
+    copy_file: Callable[[str, str], str],
+) -> None:
+    """Keep a matching Drive artifact or copy one missing immutable file."""
+
+    source_digest = _sha256(source)
+    if target.exists():
+        if not target.is_file() or _sha256(target) != source_digest:
+            raise ColabObservationError("Drive delivery artifact conflicts with local bytes")
+        return
+    copy_file(str(source), str(target))
+    if not target.is_file() or _sha256(target) != source_digest:
+        raise ColabObservationError("Drive delivery verification failed")
+
+
 def package_and_deliver_to_drive(
     request_path: Path = RUN_REQUEST_PATH,
     *,
@@ -1081,57 +1220,29 @@ def package_and_deliver_to_drive(
         assert hf_token is not None
         secrets.append(hf_token)
     scan = _secret_scan(paths.evidence_root, secrets)
-    if paths.delivery_root.exists():
-        raise ColabObservationError("local delivery root already exists")
-    paths.delivery_root.mkdir(parents=True, exist_ok=False)
-    staging = paths.delivery_root / "evidence"
-    shutil.copytree(paths.evidence_root, staging)
-    summary = {
-        "delivery_schema": "content_survival_observation_colab_delivery",
-        "schema_version": 1,
-        "run_id": request.run_id,
-        "repository_commit": request.repository_commit,
-        "run_status": state.get("run_status"),
-        "error_category": state.get("error_category"),
-        "secret_scan": scan,
-        "workload": WORKLOAD_IDENTITY,
-        **CLAIM_BOUNDARY,
-    }
-    _write_json_atomic(staging / "delivery_summary.json", summary)
-    inventory = _file_inventory(staging, excluded=frozenset({"delivery_inventory.json"}))
-    _write_json_atomic(staging / "delivery_inventory.json", {"files": inventory})
-    _secret_scan(staging, secrets)
-    archive = paths.delivery_root / f"{request.run_id}.tar.gz"
-    with tarfile.open(archive, "w:gz") as handle:
-        handle.add(staging, arcname=request.run_id)
-    checksum = paths.delivery_root / f"{archive.name}.sha256"
-    checksum.write_text(f"{_sha256(archive)}  {archive.name}\n", encoding="utf-8")
-    with tempfile.TemporaryDirectory(dir=paths.delivery_root) as temporary:
-        with tarfile.open(archive, "r:gz") as handle:
-            handle.extractall(temporary, filter="data")
-        unpacked = Path(temporary) / request.run_id
-        unpacked_inventory = _read_json(unpacked / "delivery_inventory.json", "delivery inventory")
-        files = unpacked_inventory.get("files")
-        if type(files) is not list:
-            raise ColabObservationError("delivery inventory is invalid")
-        _verify_inventory(unpacked, files)
-    _secret_scan(paths.delivery_root, secrets)
+    archive, checksum = _prepare_local_delivery(
+        request,
+        paths,
+        state,
+        secrets,
+        scan,
+    )
     drive_mount(str(_drive_mount_root()))
     try:
         results_root = _drive_results_root()
         results_root.mkdir(parents=True, exist_ok=True)
         archive_target = results_root / archive.name
         checksum_target = results_root / checksum.name
-        if archive_target.exists() or checksum_target.exists():
-            raise ColabObservationError("Drive delivery target already exists")
-        copy_file(str(archive), str(archive_target))
-        copy_file(str(checksum), str(checksum_target))
-        if (
-            _sha256(archive_target) != _sha256(archive)
-            or checksum_target.read_text(encoding="utf-8")
-            != checksum.read_text(encoding="utf-8")
-        ):
-            raise ColabObservationError("Drive delivery verification failed")
+        _copy_drive_artifact_if_absent(
+            archive,
+            archive_target,
+            copy_file=copy_file,
+        )
+        _copy_drive_artifact_if_absent(
+            checksum,
+            checksum_target,
+            copy_file=copy_file,
+        )
     finally:
         drive_unmount()
     return {
