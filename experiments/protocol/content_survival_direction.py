@@ -166,6 +166,7 @@ def validate_content_survival_direction_payload(
             "sign_selection",
             "replay_protocol",
             "failure_protocol",
+            "terminal_qk_sync",
             _SEMANTIC_DIGEST_FIELD,
         ),
         "protocol",
@@ -283,6 +284,30 @@ def validate_content_survival_direction_payload(
         "supports_paper_claim": False,
     }:
         raise ValueError("content survival failure protocol drifted")
+    terminal_qk_sync = resolved["terminal_qk_sync"]
+    if type(terminal_qk_sync) is not dict or terminal_qk_sync != {
+        "full_replay_only": True,
+        "terminal_hf_update": "unchanged_before_independent_qk_sync",
+        "direction_source": (
+            "differentiable_vae_roundtrip_public_noise_registered_qk"
+        ),
+        "direction_mask": "semantic_writable_capacity_map",
+        "score_source": "image_reencoded_public_noise_real_qk",
+        "public_detection_schedule_index": 7,
+        "selection_key_access": "registered_only_wrong_key_forbidden",
+        "candidate_scale_fractions": [0.0, 0.0625, 0.125, 0.25, 0.5, 1.0],
+        "geometry_actual_dtype_relative_l2_limit": 0.001,
+        "combined_actual_dtype_relative_l2_limit": 0.014,
+        "zero_baseline_required": True,
+        "acceptance_rule": (
+            "first_nonzero_candidate_with_strict_zero_baseline_improvement_"
+            "and_both_full_vs_carrier_gains_above_runtime_minimum"
+        ),
+        "failure_policy": (
+            "retain_zero_baseline_and_fail_final_image_attention_gate"
+        ),
+    }:
+        raise ValueError("terminal Q/K sync protocol drifted")
     claimed = _required_sha256(
         resolved[_SEMANTIC_DIGEST_FIELD],
         _SEMANTIC_DIGEST_FIELD,

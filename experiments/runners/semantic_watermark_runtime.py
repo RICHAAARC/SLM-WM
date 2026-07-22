@@ -3981,6 +3981,371 @@ def _image_attention_extractor(
     return extract
 
 
+def _terminal_registered_qk_score(
+    records: tuple[tuple[str, Any, tuple[int, ...]], ...],
+    key_material: str,
+    config: SemanticWatermarkRuntimeConfig,
+    *,
+    carrier_pair_weights: Any | None = None,
+) -> tuple[dict[str, Any], Any]:
+    """以正式 registered Q/K scorer 返回盲分数和冻结 carrier-pair 分数。"""
+
+    if len(records) < 2:
+        raise RuntimeError("terminal Q/K scorer requires two frozen layers")
+    selection = select_stable_attention_tokens(
+        records,
+        stable_token_fraction=config.attention_stable_token_fraction,
+    )
+    blind_pair_weights = build_stable_attention_pair_weights(
+        records,
+        selection,
+        unstable_pair_weight=config.attention_unstable_pair_weight,
+    )
+    paired_weights = (
+        blind_pair_weights
+        if carrier_pair_weights is None
+        else carrier_pair_weights
+    )
+    blind_score = attention_geometry_score(
+        records,
+        key_material,
+        prg_version=config.keyed_prg_version,
+        stable_pair_weights=blind_pair_weights,
+        component_weights=config.attention_relation_component_weights,
+    )
+    paired_score = attention_geometry_score(
+        records,
+        key_material,
+        prg_version=config.keyed_prg_version,
+        stable_pair_weights=paired_weights,
+        component_weights=config.attention_relation_component_weights,
+    )
+    relation = build_attention_relation_graph_identity(
+        records,
+        key_material,
+        prg_version=config.keyed_prg_version,
+        component_weights=config.attention_relation_component_weights,
+    )
+    if (
+        relation.relation_source != DIRECT_QK_RELATION_SOURCE
+        or not relation.qk_operator_metadata_ready
+        or not relation.qk_atomic_content_ready
+    ):
+        raise RuntimeError("terminal candidate lacks complete direct Q/K identity")
+    return (
+        {
+            "blind_attention_score": float(blind_score.detach().item()),
+            "carrier_paired_attention_score": float(
+                paired_score.detach().item()
+            ),
+            "blind_pair_weight_identity_digest": (
+                blind_pair_weights.pair_weight_identity_digest
+            ),
+            "blind_pair_weight_realization_digest": (
+                blind_pair_weights.pair_weight_realization_digest
+            ),
+            "carrier_pair_weight_identity_digest": (
+                paired_weights.pair_weight_identity_digest
+            ),
+            "carrier_pair_weight_realization_digest": (
+                paired_weights.pair_weight_realization_digest
+            ),
+            "attention_relation_component_identity_digest": (
+                relation.component_identity_digest
+            ),
+            "attention_relation_keyed_projection_digest": (
+                relation.keyed_projection_digest
+            ),
+            "attention_relation_qk_operator_metadata_digest": (
+                relation.qk_operator_metadata_digest
+            ),
+            "qk_atomic_content_digest": relation.qk_atomic_content_digest,
+        },
+        blind_pair_weights,
+    )
+
+
+def _terminal_registered_qk_direction(
+    *,
+    pipeline: Any,
+    config: SemanticWatermarkRuntimeConfig,
+    modules: tuple[tuple[str, Any], ...],
+    public_prompt_embeds: Any,
+    public_pooled_prompt_embeds: Any,
+    terminal_hf_latent: Any,
+    geometry_capacity_map: Any,
+    carrier_pair_weights: Any,
+) -> tuple[Any, dict[str, Any]]:
+    """从公开仅图像条件的可微 VAE 往返构造 registered Q/K 方向。
+
+    该连续路径只产生候选方向，不产生接受结论。所有候选随后必须真实解码、
+    经正式 image-only extractor 重编码与评分，避免把连续近似冒充最终证据。
+    """
+
+    import torch
+
+    pipeline.scheduler.set_timesteps(
+        config.inference_steps,
+        device=pipeline._execution_device,
+    )
+    detection_index = config.public_detection_schedule_index
+    timestep = pipeline.scheduler.timesteps[detection_index]
+    scale_noise = getattr(pipeline.scheduler, "scale_noise", None)
+    if not callable(scale_noise):
+        raise RuntimeError("terminal Q/K sync requires scheduler.scale_noise")
+    with torch.enable_grad():
+        candidate = terminal_hf_latent.detach().float().requires_grad_(True)
+        vae_dtype = next(pipeline.vae.parameters()).dtype
+        scaled = candidate.to(dtype=vae_dtype) / pipeline.vae.config.scaling_factor
+        scaled = scaled + pipeline.vae.config.shift_factor
+        decoded = pipeline.vae.decode(scaled, return_dict=False)[0]
+        detector_pixels = decoded.clamp(-1.0, 1.0)
+        encoded = pipeline.vae.encode(detector_pixels).latent_dist.mode()
+        observed_latent = (
+            encoded - float(pipeline.vae.config.shift_factor)
+        ) * float(pipeline.vae.config.scaling_factor)
+        noise = _public_detection_noise_tensor(observed_latent, config)
+        timestep_batch = timestep.reshape(1).expand(observed_latent.shape[0])
+        noisy_latent = scale_noise(observed_latent, timestep_batch, noise)
+        with DifferentiableAttentionRecorder(
+            modules,
+            max_tokens=config.max_attention_tokens,
+        ) as recorder:
+            _transformer_forward_function(
+                pipeline,
+                timestep,
+                public_prompt_embeds,
+                public_pooled_prompt_embeds,
+            )(noisy_latent)
+            score = attention_geometry_score(
+                recorder.records,
+                config.key_material,
+                prg_version=config.keyed_prg_version,
+                stable_pair_weights=carrier_pair_weights,
+                component_weights=config.attention_relation_component_weights,
+            )
+            gradient = torch.autograd.grad(score, candidate)[0]
+    masked = gradient.detach().float() * geometry_capacity_map.detach().float()
+    norm = torch.linalg.vector_norm(masked.reshape(-1))
+    if (
+        not bool(torch.isfinite(masked).all())
+        or not bool(torch.isfinite(norm))
+        or float(norm.item()) <= 0.0
+    ):
+        raise RuntimeError("terminal registered Q/K direction is non-finite or zero")
+    direction = masked / norm
+    record = {
+        "terminal_qk_direction_source": (
+            "differentiable_vae_roundtrip_public_noise_registered_qk"
+        ),
+        "terminal_qk_direction_score_is_acceptance_evidence": False,
+        "terminal_qk_direction_registered_only": True,
+        "terminal_qk_direction_wrong_key_accessed": False,
+        "terminal_qk_direction_content_sha256": tensor_content_sha256(direction),
+        "terminal_qk_direction_gradient_content_sha256": tensor_content_sha256(
+            gradient.detach().float()
+        ),
+        "terminal_qk_direction_geometry_capacity_content_sha256": (
+            tensor_content_sha256(geometry_capacity_map.detach().float())
+        ),
+        "terminal_qk_direction_public_schedule_index": detection_index,
+        "terminal_qk_direction_public_timestep": float(
+            timestep.detach().float().item()
+        ),
+    }
+    record["terminal_qk_direction_record_digest"] = build_stable_digest(record)
+    return direction, record
+
+
+def _build_terminal_registered_qk_sync(
+    *,
+    terminal_latent: Any,
+    terminal_hf_update: Any,
+    terminal_routing: Any,
+    carrier_only_image: Any,
+    pipeline: Any,
+    config: SemanticWatermarkRuntimeConfig,
+    modules: tuple[tuple[str, Any], ...],
+    public_prompt_embeds: Any,
+    public_pooled_prompt_embeds: Any,
+    protocol: Any,
+) -> tuple[Any, Any, dict[str, Any]]:
+    """为 full replay 选择真实成图评分通过的最小 terminal Q/K 候选。"""
+
+    import torch
+
+    qk_protocol = protocol.payload["terminal_qk_sync"]
+    if config.public_detection_schedule_index != int(
+        qk_protocol["public_detection_schedule_index"]
+    ):
+        raise RuntimeError("terminal Q/K protocol and runtime schedule drifted")
+    scales = tuple(float(value) for value in qk_protocol["candidate_scale_fractions"])
+    if scales != (0.0, 0.0625, 0.125, 0.25, 0.5, 1.0):
+        raise RuntimeError("terminal Q/K candidate family drifted")
+    exact_extractor = _image_attention_extractor(
+        pipeline,
+        config,
+        modules,
+        public_prompt_embeds,
+        public_pooled_prompt_embeds,
+    )
+    carrier_records = tuple(exact_extractor(carrier_only_image))
+    carrier_score, carrier_pair_weights = _terminal_registered_qk_score(
+        carrier_records,
+        config.key_material,
+        config,
+    )
+    direction, direction_record = _terminal_registered_qk_direction(
+        pipeline=pipeline,
+        config=config,
+        modules=modules,
+        public_prompt_embeds=public_prompt_embeds,
+        public_pooled_prompt_embeds=public_pooled_prompt_embeds,
+        terminal_hf_latent=terminal_hf_update.written_latent,
+        geometry_capacity_map=terminal_routing.writable_capacity_map,
+        carrier_pair_weights=carrier_pair_weights,
+    )
+    original = terminal_latent.detach().float()
+    baseline = terminal_hf_update.written_latent.detach()
+    latent_l2 = torch.linalg.vector_norm(original.reshape(-1))
+    geometry_limit = float(qk_protocol["geometry_actual_dtype_relative_l2_limit"])
+    combined_limit = float(
+        qk_protocol["combined_actual_dtype_relative_l2_limit"]
+    )
+    geometry_budget = latent_l2 * geometry_limit * 0.999
+    candidates: list[dict[str, Any]] = []
+    candidate_values: list[tuple[Any, Any]] = []
+    for candidate_index, scale in enumerate(scales):
+        proposed = baseline.detach().float() + direction * geometry_budget * scale
+        written = proposed.to(dtype=terminal_latent.dtype)
+        geometry_actual = written.detach().float() - baseline.detach().float()
+        geometry_actual_l2 = torch.linalg.vector_norm(geometry_actual.reshape(-1))
+        combined_actual = written.detach().float() - original
+        combined_actual_l2 = torch.linalg.vector_norm(combined_actual.reshape(-1))
+        geometry_relative = float((geometry_actual_l2 / latent_l2).item())
+        combined_relative = float((combined_actual_l2 / latent_l2).item())
+        if (
+            not math.isfinite(geometry_relative)
+            or not math.isfinite(combined_relative)
+            or geometry_relative > geometry_limit
+            or combined_relative > combined_limit
+        ):
+            raise RuntimeError("terminal Q/K candidate exceeded actual-dtype budget")
+        image = _decode_content_runtime_latent_image(pipeline, written)
+        image_identity = canonical_rgb_uint8_content_record(image)
+        qk_records = tuple(exact_extractor(image))
+        score_record, _ = _terminal_registered_qk_score(
+            qk_records,
+            config.key_material,
+            config,
+            carrier_pair_weights=carrier_pair_weights,
+        )
+        item = {
+            "candidate_index": candidate_index,
+            "candidate_scale_fraction": scale,
+            "zero_baseline": candidate_index == 0,
+            "written_latent_content_sha256": tensor_content_sha256(
+                written.detach().float()
+            ),
+            "output_image_rgb_uint8_content_sha256": image_identity[
+                "image_rgb_uint8_content_sha256"
+            ],
+            "geometry_actual_dtype_l2": float(geometry_actual_l2.item()),
+            "geometry_actual_dtype_relative_l2": geometry_relative,
+            "combined_actual_dtype_l2": float(combined_actual_l2.item()),
+            "combined_actual_dtype_relative_l2": combined_relative,
+            **score_record,
+            "registered_key_only": True,
+            "wrong_key_accessed": False,
+            "score_source": "image_reencoded_public_noise_real_qk",
+            "supports_paper_claim": False,
+        }
+        item["candidate_record_digest"] = build_stable_digest(item)
+        candidates.append(item)
+        candidate_values.append((written, image))
+    baseline_record = candidates[0]
+    minimum_gain = float(config.minimum_final_image_attention_score_gain)
+    selected_index = 0
+    for item in candidates[1:]:
+        item["strict_blind_improvement_over_zero"] = bool(
+            item["blind_attention_score"]
+            > baseline_record["blind_attention_score"]
+        )
+        item["strict_carrier_paired_improvement_over_zero"] = bool(
+            item["carrier_paired_attention_score"]
+            > baseline_record["carrier_paired_attention_score"]
+        )
+        item["blind_full_vs_carrier_gain"] = float(
+            item["blind_attention_score"]
+            - carrier_score["blind_attention_score"]
+        )
+        item["carrier_paired_full_vs_carrier_gain"] = float(
+            item["carrier_paired_attention_score"]
+            - carrier_score["carrier_paired_attention_score"]
+        )
+        item["candidate_acceptance_ready"] = bool(
+            item["strict_blind_improvement_over_zero"]
+            and item["strict_carrier_paired_improvement_over_zero"]
+            and item["blind_full_vs_carrier_gain"] > minimum_gain
+            and item["carrier_paired_full_vs_carrier_gain"] > minimum_gain
+        )
+        item["candidate_record_digest"] = build_stable_digest(
+            {key: value for key, value in item.items() if key != "candidate_record_digest"}
+        )
+        if selected_index == 0 and item["candidate_acceptance_ready"]:
+            selected_index = int(item["candidate_index"])
+    baseline_record.update(
+        {
+            "strict_blind_improvement_over_zero": False,
+            "strict_carrier_paired_improvement_over_zero": False,
+            "blind_full_vs_carrier_gain": float(
+                baseline_record["blind_attention_score"]
+                - carrier_score["blind_attention_score"]
+            ),
+            "carrier_paired_full_vs_carrier_gain": float(
+                baseline_record["carrier_paired_attention_score"]
+                - carrier_score["carrier_paired_attention_score"]
+            ),
+            "candidate_acceptance_ready": False,
+        }
+    )
+    baseline_record["candidate_record_digest"] = build_stable_digest(
+        {
+            key: value
+            for key, value in baseline_record.items()
+            if key != "candidate_record_digest"
+        }
+    )
+    selected_record = candidates[selected_index]
+    sync_record = {
+        **direction_record,
+        "terminal_qk_sync_full_replay_only": True,
+        "terminal_qk_sync_applied": True,
+        "terminal_qk_sync_terminal_hf_unchanged": True,
+        "terminal_qk_sync_registered_key_only": True,
+        "terminal_qk_sync_wrong_key_accessed": False,
+        "terminal_qk_sync_score_source": "image_reencoded_public_noise_real_qk",
+        "terminal_qk_sync_candidate_scale_fractions": list(scales),
+        "terminal_qk_sync_geometry_actual_dtype_relative_l2_limit": geometry_limit,
+        "terminal_qk_sync_combined_actual_dtype_relative_l2_limit": combined_limit,
+        "terminal_qk_sync_minimum_final_image_attention_score_gain": minimum_gain,
+        "terminal_qk_sync_carrier_reference_score": carrier_score,
+        "terminal_qk_sync_candidate_records": candidates,
+        "terminal_qk_sync_selected_candidate_index": selected_index,
+        "terminal_qk_sync_selected_candidate_record_digest": selected_record[
+            "candidate_record_digest"
+        ],
+        "terminal_qk_sync_ready": selected_index != 0,
+        "terminal_qk_sync_failure_reason": (
+            "" if selected_index != 0 else "no_exact_image_qk_candidate_passed"
+        ),
+        "supports_paper_claim": False,
+    }
+    sync_record["terminal_qk_sync_record_digest"] = build_stable_digest(sync_record)
+    selected_latent, selected_image = candidate_values[selected_index]
+    return selected_latent, selected_image, sync_record
+
+
 def _build_image_only_measurement_config(
     config: SemanticWatermarkRuntimeConfig,
 ) -> ImageOnlyMeasurementConfig:
@@ -6680,6 +7045,7 @@ def _run_semantic_watermark_runtime_with_content_strength(
     }
     chain_records: list[dict[str, Any]] = []
     role_payloads: dict[str, dict[str, Any]] = {}
+    carrier_reference_image: Any | None = None
 
     def run_chain(
         role: str,
@@ -6968,6 +7334,7 @@ def _run_semantic_watermark_runtime_with_content_strength(
             raise RuntimeError("survival chain did not execute its unique z10 callback")
         terminal_latent = _extract_terminal_pipeline_latent(output)
         rendered_latent = terminal_latent
+        predecoded_image: Any | None = None
         if role in CONTENT_SURVIVAL_REPLAY_ROLES:
             if terminal_routing is None:
                 raise RuntimeError("nominal replay requires terminal routing")
@@ -7019,9 +7386,45 @@ def _run_semantic_watermark_runtime_with_content_strength(
                     ),
                 }
             )
+            if role == "full_nominal_replay":
+                if carrier_reference_image is None:
+                    raise RuntimeError(
+                        "full terminal Q/K sync requires completed carrier replay"
+                    )
+                rendered_latent, predecoded_image, terminal_qk_sync = (
+                    _build_terminal_registered_qk_sync(
+                        terminal_latent=terminal_latent,
+                        terminal_hf_update=terminal_update,
+                        terminal_routing=terminal_routing,
+                        carrier_only_image=carrier_reference_image,
+                        pipeline=pipeline,
+                        config=config,
+                        modules=context.attention_modules,
+                        public_prompt_embeds=context.unconditional_prompt,
+                        public_pooled_prompt_embeds=(
+                            context.unconditional_pooled
+                        ),
+                        protocol=protocol,
+                    )
+                )
+                payload.update(terminal_qk_sync)
+                payload["terminal_pre_vae_written_latent_content_sha256"] = (
+                    tensor_content_sha256(rendered_latent)
+                )
+            else:
+                payload.update(
+                    {
+                        "terminal_qk_sync_full_replay_only": True,
+                        "terminal_qk_sync_applied": False,
+                        "terminal_qk_sync_ready": False,
+                    }
+                )
         else:
             payload["terminal_pre_vae_carrier_applied"] = False
-        image = _decode_content_runtime_latent_image(pipeline, rendered_latent)
+        if predecoded_image is None:
+            image = _decode_content_runtime_latent_image(pipeline, rendered_latent)
+        else:
+            image = predecoded_image
         image_identity = canonical_rgb_uint8_content_record(image)
         payload.update(
             {
@@ -7120,6 +7523,7 @@ def _run_semantic_watermark_runtime_with_content_strength(
         "carrier_nominal_replay",
         replay_sign=selected_sign,
     )
+    carrier_reference_image = carrier_only_image
     watermarked_image, full_payload = run_chain(
         "full_nominal_replay",
         replay_sign=selected_sign,

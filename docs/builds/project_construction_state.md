@@ -86,6 +86,7 @@
 - A100-80G 随后在 uniform×LF-only 的 `full_probe_positive` step10 触发正式门禁：9个 Q/K geometry 回溯候选都不能在 actual dtype 上严格改善关系分数。正式 `main/methods/geometry/sync_update.py` 的失败关闭保持不变；问题在于 observation runner 把一个 cell 的方法失败升级为整个24-cell矩阵的进程失败。
 - `65f0be0` 的最新 A100-80G run 已通过模型加载、首个冻结 Prompt 的7条完整扩散链、CLIP三图质量特征和先前两项执行接口修复，随后在 `final_image_attention_observability_gate_ready=false` 处失败。该结果首次到达真实最终图像 Q/K 科学门，不是环境、模型、密钥、显存或 Transformers 接口错误；但旧控制流在门失败时立即抛错，未持久化已经计算出的具体分数，因而尚不能区分真实 Q/K 几何未存活、`0.0001` 下界未达到或观测归因异常。当前最小修复不放宽正式门、不改 Q/K 公式或阈值：正式 writer 继续失败关闭，diagnostic-only screen 捕获携带完整内存观测的专用失败，持久化 preservation/Q/K 指标、固定 wrong-key 分差与registered+32 wrong-key HF排名，并继续剩余 Prompt；只有四条Prompt全部门禁与密钥排名通过时方法screen才通过。
 - `af65332` 已完成旧矩阵并证明 M0 sign 选择、routed oracle 和中段微弱载体都没有恢复 key ownership，因此不再继续扩展该矩阵。当前最小修复直接测试 terminal/pre-VAE 固定能量载体；每 Prompt 的候选图像、质量、terminal/re-encode 33-key完整分数和摘要落盘，Prompt manifest 最后发布。它不修改固定 Notebook，也不把 CPU 合成可分性冒充 GPU 方法通过。
+- `content_survival_observation_colab_20260722T071036Z_1f0058c` 已在 A100 完成4个冻结Prompt、28条diffusion chain和132次key评分：terminal HF registered 在33-key集合中4/4 rank-1，三图质量门均通过；但最终图像Q/K attribution gain依次约为`5.78e-5`、`4.34e-5`、`-3.85e-6`、`4.26e-5`，均未达到固定`1e-4`门，因此仍为方法未通过。当前未验证候选只在full nominal replay的terminal HF之后执行registered-only Q/K方向搜索，用真实PIL解码、VAE重编码、公开噪声、scheduler索引7和冻结两层Q/K正式评分选择最小严格改善候选；carrier-only/clean不写该分量，wrong-key仅在候选冻结后评价，阈值和最终Q/K门不变。CPU测试只证明接线与失败关闭，不构成GPU结果。
 
 ---
 

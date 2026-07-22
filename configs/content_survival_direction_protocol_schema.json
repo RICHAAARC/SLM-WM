@@ -10,6 +10,7 @@
     "protocol_version": {"const": "content_survival_direction_v1"},
     "replay_protocol": {"type": "object"},
     "sign_selection": {"type": "object"},
+    "terminal_qk_sync": {"type": "object"},
     "survival_protocol_semantic_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"}
   },
   "required": [

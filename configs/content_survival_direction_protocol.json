@@ -86,5 +86,27 @@
     "tie_policy": "fail_closed",
     "wrong_key_access": "forbidden_until_nominal_replay_complete"
   },
-  "survival_protocol_semantic_digest": "de2c4d2ea3e67feda1d3d17657af2a686a1d7fff00c6463c7464aa87d08366e2"
+  "terminal_qk_sync": {
+    "acceptance_rule": "first_nonzero_candidate_with_strict_zero_baseline_improvement_and_both_full_vs_carrier_gains_above_runtime_minimum",
+    "candidate_scale_fractions": [
+      0.0,
+      0.0625,
+      0.125,
+      0.25,
+      0.5,
+      1.0
+    ],
+    "combined_actual_dtype_relative_l2_limit": 0.014,
+    "direction_mask": "semantic_writable_capacity_map",
+    "direction_source": "differentiable_vae_roundtrip_public_noise_registered_qk",
+    "failure_policy": "retain_zero_baseline_and_fail_final_image_attention_gate",
+    "full_replay_only": true,
+    "geometry_actual_dtype_relative_l2_limit": 0.001,
+    "public_detection_schedule_index": 7,
+    "score_source": "image_reencoded_public_noise_real_qk",
+    "selection_key_access": "registered_only_wrong_key_forbidden",
+    "terminal_hf_update": "unchanged_before_independent_qk_sync",
+    "zero_baseline_required": true
+  },
+  "survival_protocol_semantic_digest": "25bacdd85953553992e4a90bd82ac6ca4c8098d1896b514c45112249c08dae89"
 }
