@@ -526,7 +526,11 @@ def encode_frozen_clip_global_image_feature(runtime: Any, image: Any) -> Any:
         raise TypeError("frozen CLIP runtime lacks the official global image path")
     pixel_values = prepare(image)
     with torch.inference_mode():
-        features = model.get_image_features(pixel_values=pixel_values)
+        outputs = model.get_image_features(
+            pixel_values=pixel_values,
+            return_dict=True,
+        )
+    features = getattr(outputs, "pooler_output", None)
     if (
         not isinstance(features, torch.Tensor)
         or tuple(features.shape) != (1, 512)

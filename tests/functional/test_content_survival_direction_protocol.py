@@ -300,10 +300,18 @@ def test_official_clip_global_path_produces_real_three_image_evidence() -> None:
     torch = pytest.importorskip("torch")
 
     class Model:
-        def get_image_features(self, *, pixel_values: object) -> object:
+        def get_image_features(
+            self,
+            *,
+            pixel_values: object,
+            return_dict: bool,
+        ) -> object:
+            assert return_dict is True
             values = pixel_values.to(dtype=torch.float32)
             means = values.mean(dim=(2, 3))
-            return means.repeat(1, 171)[:, :512]
+            return SimpleNamespace(
+                pooler_output=means.repeat(1, 171)[:, :512]
+            )
 
     runtime = SimpleNamespace(
         prepare_image_pixels=lambda image: image,
