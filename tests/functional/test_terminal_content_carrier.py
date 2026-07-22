@@ -120,6 +120,8 @@ def test_formal_runtime_applies_terminal_hf_x8_and_scores_hf_only() -> None:
 
 
 def test_formal_terminal_decode_returns_persistable_pil_image() -> None:
+    observed: dict[str, bool] = {}
+
     class FakeVae(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()
@@ -134,7 +136,10 @@ def test_formal_terminal_decode_returns_persistable_pil_image() -> None:
         vae=FakeVae(),
         image_processor=SimpleNamespace(
             postprocess=lambda value, *, output_type: (
-                [Image.new("RGB", (8, 8))]
+                (
+                    observed.__setitem__("requires_grad", value.requires_grad),
+                    [Image.new("RGB", (8, 8))],
+                )[1]
                 if output_type == "pil" and tuple(value.shape) == (1, 3, 8, 8)
                 else []
             )
@@ -143,11 +148,12 @@ def test_formal_terminal_decode_returns_persistable_pil_image() -> None:
 
     image = semantic_runtime._decode_content_runtime_latent_image(
         pipeline,
-        torch.zeros((1, 4, 8, 8), dtype=torch.float32),
+        torch.zeros((1, 4, 8, 8), dtype=torch.float32, requires_grad=True),
     )
 
     assert isinstance(image, Image.Image)
     assert image.size == (8, 8)
+    assert observed == {"requires_grad": False}
 
 
 @pytest.mark.parametrize(

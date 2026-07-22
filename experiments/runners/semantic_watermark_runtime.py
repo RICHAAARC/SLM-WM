@@ -778,7 +778,7 @@ def _decode_content_runtime_latent_image(pipeline: Any, latent: Any) -> Any:
     vae_dtype = next(pipeline.vae.parameters()).dtype
     scaled = latent.to(dtype=vae_dtype) / pipeline.vae.config.scaling_factor
     scaled = scaled + pipeline.vae.config.shift_factor
-    decoded = pipeline.vae.decode(scaled, return_dict=False)[0]
+    decoded = pipeline.vae.decode(scaled, return_dict=False)[0].detach()
     images = pipeline.image_processor.postprocess(decoded, output_type="pil")
     if not isinstance(images, list) or len(images) != 1:
         raise RuntimeError("SD3.5 VAE postprocess must return one PIL image")
