@@ -8353,9 +8353,12 @@ def _write_semantic_watermark_runtime_outputs_with_content_strength(
         handle.flush()
         os.fsync(handle.fileno())
     protocol = load_content_survival_direction_protocol(root_path)
+    persisted_result_payload = json.loads(
+        result_path.read_text(encoding="utf-8")
+    )
     if not validate_content_survival_artifact_bundle(
         repository_root=root_path,
-        result_payload=resolved_result.to_dict(),
+        result_payload=persisted_result_payload,
         manifest=manifest,
         expected_protocol=protocol,
         expected_core_method_definition_digest=(

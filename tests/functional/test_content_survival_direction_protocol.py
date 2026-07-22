@@ -36,6 +36,9 @@ from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
     SemanticWatermarkRuntimeResult,
 )
+from tests.helpers.scientific_unit_provenance import (
+    build_test_scientific_unit_provenance,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -490,12 +493,16 @@ def test_writer_publishes_manifest_last_after_shared_validation(
         standard_attack_profiles=(),
         diffusion_attacks_enabled=False,
     )
+    run_id = runtime_module.build_semantic_watermark_run_id(config)
+    config_digest = runtime_module.semantic_watermark_runtime_config_digest(
+        config
+    )
     counterfactual = {
         "carrier_only_counterfactual_identity_digest": "6" * 64,
         "carrier_only_counterfactual_atom_content_digest": "7" * 64,
     }
     source_result = SemanticWatermarkRuntimeResult(
-        run_id="content_survival_writer_test",
+        run_id=run_id,
         run_decision="pass",
         clean_image_path="",
         watermarked_image_path="",
@@ -506,6 +513,7 @@ def test_writer_publishes_manifest_last_after_shared_validation(
         elapsed_seconds=1.0,
         metadata={
             "composite_runtime_method_identity": composite,
+            "method_runtime": "formal_terminal_hf_content_dual_chain",
             "content_survival_direction_record": direction_record,
             "prompt_saliency_model_identity_digest": "3" * 64,
             "carrier_only_counterfactual": counterfactual,
@@ -516,9 +524,26 @@ def test_writer_publishes_manifest_last_after_shared_validation(
                 "carrier_only_counterfactual_three_way_preservation_gate_ready": True
             },
             "final_image_attention_observability": {
-                "final_image_attention_observability_gate_ready": True
+                "final_image_attention_observability_gate_ready": True,
+                "final_image_public_detection_noise_evidence_records": [
+                    {
+                        "public_detection_noise_evaluation_index": index,
+                        "public_detection_noise_prg_identity": {
+                            "domain_fields": {
+                                "latent_shape": (1, 16, 128, 128),
+                            },
+                            "shape": (1, 16, 128, 128),
+                        },
+                    }
+                    for index in range(3)
+                ],
             },
             "formal_randomization_reference": {"identity": "writer-test"},
+            "scientific_unit_config_digest": config_digest,
+            "scientific_unit_provenance": build_test_scientific_unit_provenance(
+                run_id,
+                config_digest,
+            ),
             "old_content_runtime_artifact_compatible": False,
         },
     )
@@ -560,9 +585,35 @@ def test_writer_publishes_manifest_last_after_shared_validation(
     events = []
     original_validator = runtime_module.validate_content_survival_artifact_bundle
     original_replace = runtime_module.os.replace
+    formal_loader_validation_calls = []
 
     def observed_validator(**kwargs: object) -> bool:
         events.append("validate")
+        result_payload = kwargs["result_payload"]
+        assert isinstance(result_payload, dict)
+        observed_result_path = (
+            tmp_path
+            / Path(str(result_payload["manifest_path"])).parent
+            / "runtime_result.json"
+        )
+        persisted_result_payload = json.loads(
+            observed_result_path.read_text(encoding="utf-8")
+        )
+        assert result_payload == persisted_result_payload
+        evidence_records = result_payload["metadata"][
+            "final_image_attention_observability"
+        ]["final_image_public_detection_noise_evidence_records"]
+        assert all(
+            type(record["public_detection_noise_prg_identity"]["shape"])
+            is list
+            and type(
+                record["public_detection_noise_prg_identity"][
+                    "domain_fields"
+                ]["latent_shape"]
+            )
+            is list
+            for record in evidence_records
+        )
         return original_validator(**kwargs)
 
     def observed_replace(source: object, destination: object) -> None:
@@ -573,6 +624,13 @@ def test_writer_publishes_manifest_last_after_shared_validation(
         runtime_module,
         "validate_content_survival_artifact_bundle",
         observed_validator,
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "_formal_content_runtime_artifact_binding_ready",
+        lambda result_payload, *_args, **_kwargs: (
+            formal_loader_validation_calls.append(result_payload) or True
+        ),
     )
     monkeypatch.setattr(runtime_module.os, "replace", observed_replace)
 
@@ -605,3 +663,10 @@ def test_writer_publishes_manifest_last_after_shared_validation(
             semantic_conditioned_latent_method_definition_digest()
         ),
     )
+    reloaded = runtime_module.load_completed_semantic_watermark_runtime_result(
+        config,
+        root=tmp_path,
+    )
+    assert reloaded is not None
+    assert reloaded.run_id == resolved.run_id
+    assert formal_loader_validation_calls == [result]
