@@ -238,9 +238,9 @@ def test_preflight_uses_existing_host_and_secret_without_model_governance(
     assert report["gpu"]["gpu_name"].startswith("NVIDIA A100")
     assert report["workload"] == {
         "prompt_count": 4,
-        "diffusion_chain_count": 4,
-        "variant_count": 48,
-        "key_score_count": 3168,
+        "formal_runtime_count": 4,
+        "diffusion_chain_count": 28,
+        "key_score_count": 132,
     }
     text = (paths.evidence_root / "preflight_report.json").read_text(encoding="utf-8")
     assert WATERMARK not in text and HF_TOKEN not in text

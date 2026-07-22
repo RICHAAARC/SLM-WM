@@ -3,8 +3,8 @@
 The controller deliberately owns only platform concerns: an exact public
 GitHub checkout, the A100 memory gate, secret-safe long-process supervision,
 minimal on-disk status, and an explicit package-then-Drive handoff. Scientific
-method, model loading, validation, and the compact terminal-carrier workload
-remain in the existing repository host chain.
+method, model loading, validation, and the four-prompt formal terminal-HF
+screen remain in the existing repository host chain.
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ DRIVE_INPUT_DIRECTORY = Path("drive/MyDrive/SLM/content-survival/inputs")
 DRIVE_RESULTS_DIRECTORY = Path("drive/MyDrive/SLM/content-survival/results")
 DRIVE_RUN_REQUEST_NAME = "run_request.json"
 DRIVE_WATERMARK_KEY_NAME = "watermark_raw_key.txt"
+FORMAL_TERMINAL_HF_MANIFEST_NAME = "cell_manifest.json"
 MINIMUM_GPU_MEMORY_MIB = 40000
 HEARTBEAT_INTERVAL_SECONDS = 1800
 IDLE_TIMEOUT_SECONDS = 1800
@@ -56,9 +57,9 @@ CLAIM_BOUNDARY = {
 }
 WORKLOAD_IDENTITY = {
     "prompt_count": 4,
-    "diffusion_chain_count": 4,
-    "variant_count": 48,
-    "key_score_count": 3168,
+    "formal_runtime_count": 4,
+    "diffusion_chain_count": 28,
+    "key_score_count": 132,
 }
 SECRET_USAGE_REQUIRED_STATUSES = frozenset({"running", "success", "scientific_failure"})
 
@@ -760,7 +761,12 @@ def terminate_process_group(
 
 
 def _manifest_count(evidence_root: Path) -> int:
-    return sum(1 for _ in (evidence_root / "scientific").rglob("cell_manifest.json"))
+    return sum(
+        1
+        for _ in (evidence_root / "scientific").rglob(
+            FORMAL_TERMINAL_HF_MANIFEST_NAME
+        )
+    )
 
 
 def execute_drained_process(

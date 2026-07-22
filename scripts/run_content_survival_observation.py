@@ -1,4 +1,4 @@
-"""Launch the explicitly requested GPU content-survival observation."""
+"""Launch the formal terminal-HF integration screen from the fixed Colab host."""
 
 from __future__ import annotations
 
@@ -32,8 +32,8 @@ from experiments.protocol.formal_randomization import (
 from experiments.protocol.paper_run_config import build_paper_run_config
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.splits import apply_split_assignments
-from experiments.runners.terminal_content_carrier_runtime import (
-    run_terminal_content_carrier_observation,
+from experiments.runners.formal_terminal_hf_runtime import (
+    run_formal_terminal_hf_screen,
 )
 from experiments.runners.image_only_dataset_workload import build_method_config
 from experiments.runtime.dependency_profiles import (
@@ -67,7 +67,7 @@ _ORCHESTRATOR_INSPECTION_FIELDS = frozenset(
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the compact terminal content-carrier observation; this output "
+            "Run the four-prompt formal terminal-HF integration screen; this output "
             "cannot support paper claims or candidate promotion."
         )
     )
@@ -368,7 +368,7 @@ def main() -> int:
     execution_environment_identity = _execution_environment_identity(root, lock)
     prompt_configs = _prompt_configs(root)
     _prepare_prompt_saliency_model_cache(prompt_configs)
-    summary = run_terminal_content_carrier_observation(
+    summary = run_formal_terminal_hf_screen(
         prompt_configs,
         references=references,
         verified_formal_execution_lock=lock,
