@@ -191,16 +191,21 @@ def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
     encoded_image_colors: list[tuple[int, int, int]] = []
 
     def encode_image(_pipeline: object, image: Image.Image) -> torch.Tensor:
-        encoded_image_colors.append(image.getpixel((0, 0)))
-        return torch.zeros((1, 4, 8, 8))
+        color = image.getpixel((0, 0))
+        encoded_image_colors.append(color)
+        fill_value = 1.0 if color == (9, 19, 29) else 2.0
+        return torch.full((1, 4, 8, 8), fill_value)
 
     monkeypatch.setattr(runtime, "_encode_image_latent", encode_image)
     score_calls: list[tuple[object, ...]] = []
+    score_latent_values: list[float] = []
 
     def score_roster(*args: object, **kwargs: object) -> dict[str, object]:
-        call_index = len(score_calls)
+        latent = args[0]
+        latent_value = float(latent[0, 0, 0, 0].item())
+        score_latent_values.append(latent_value)
         score_calls.append(tuple(kwargs["wrong_keys"]))
-        carrier_roster_call = call_index % 3 == 1
+        carrier_roster_call = latent_value == 1.0
         wrong_score = (
             0.2
             if carrier_roster_call and not carrier_screen_pass
@@ -210,11 +215,16 @@ def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
         return {
             "latent_content_sha256": "a" * 64,
             "key_score_records": [
-                {"key_role": "registered", "blind_content_score": 0.1},
+                {
+                    "key_role": "registered",
+                    "blind_content_score": 0.1,
+                    "score_identity_digest": "a" * 64,
+                },
                 *(
                     {
                         "key_role": "wrong",
                         "blind_content_score": wrong_score,
+                        "score_identity_digest": "c" * 64,
                     }
                     for _ in range(wrong_count)
                 ),
@@ -226,6 +236,28 @@ def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
         }
 
     monkeypatch.setattr(runtime, "_score_key_roster", score_roster)
+    fixed_wrong_score_calls: list[dict[str, object]] = []
+
+    def score_fixed_wrong(
+        latent: torch.Tensor,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        fixed_wrong_score_calls.append(
+            {
+                "latent_value": float(latent[0, 0, 0, 0].item()),
+                **kwargs,
+            }
+        )
+        return {
+            "blind_content_score": 0.0,
+            "score_identity_digest": "b" * 64,
+        }
+
+    monkeypatch.setattr(
+        runtime,
+        "compute_blind_observation_score",
+        score_fixed_wrong,
+    )
     kwargs = {
         "references": object(),
         "verified_formal_execution_lock": {"lock": "synthetic"},
@@ -261,8 +293,16 @@ def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
     assert summary["scientific_gate_failure_count"] == (
         prompt_count if scientific_failure_reason is not None else 0
     )
+    first = summary["prompt_results"][0]
+    assert first["carrier_only_fixed_wrong_score_identity_digest"] == "b" * 64
+    assert len(
+        first["carrier_only_fixed_wrong_key_material_digest_random"]
+    ) == 64
+    assert configs[selected_prompt_ids[0]].key_material not in json.dumps(
+        first,
+        sort_keys=True,
+    )
     if scientific_failure_reason is not None:
-        first = summary["prompt_results"][0]
         assert first["formal_runtime_result_path"] == ""
         assert first["scientific_gate_failure_reasons"] == [
             scientific_failure_reason
@@ -281,7 +321,16 @@ def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
         ] == -0.0002
         assert issubclass(FinalImageEvidenceGateFailure, RuntimeError)
     assert writer_calls == list(selected_prompt_ids)
-    assert [len(call) for call in score_calls] == [32, 32, 1] * prompt_count
+    assert [len(call) for call in score_calls] == [32, 32] * prompt_count
+    assert score_latent_values == [2.0, 1.0] * prompt_count
+    assert len(fixed_wrong_score_calls) == prompt_count
+    assert all(
+        call["latent_value"] == 1.0
+        and call["prg_version"] == runtime.KEYED_PRG_VERSION
+        and call["method_role"] == "hf_tail_only_content"
+        and call["model_identity_digest"] is not None
+        for call in fixed_wrong_score_calls
+    )
     assert encoded_image_colors == [(10, 20, 30), (9, 19, 29)] * prompt_count
     assert len(list((tmp_path / "outputs").rglob("cell_manifest.json"))) == prompt_count
 
@@ -294,3 +343,4 @@ def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
         prompt_count if scientific_failure_reason is not None else 0
     )
     assert writer_calls == list(selected_prompt_ids)
+    assert len(fixed_wrong_score_calls) == prompt_count

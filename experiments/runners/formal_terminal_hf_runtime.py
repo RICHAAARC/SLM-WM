@@ -17,6 +17,7 @@ from experiments.protocol.content_survival_observation import (
     CONTENT_SURVIVAL_CLAIM_BOUNDARY,
     CONTENT_SURVIVAL_PROMPT_IDS,
     build_content_survival_observation_roster,
+    compute_blind_observation_score,
     load_content_survival_observation_protocol,
 )
 from experiments.protocol.detection_key_identity import (
@@ -40,6 +41,7 @@ from experiments.runtime.repository_environment import (
     validate_formal_execution_lock_record,
 )
 from main.core.digest import build_stable_digest
+from main.core.keyed_prg import KEYED_PRG_VERSION
 
 
 FORMAL_TERMINAL_HF_RESULT_NAME = "formal_terminal_hf_result.json"
@@ -318,29 +320,19 @@ def run_formal_terminal_hf_screen(
                 REGISTERED_WRONG_KEY_ROLE,
             )
         )
-        carrier_fixed_wrong_scores = _score_key_roster(
-            carrier_reencoded,
-            registered_key_material=config.key_material,
-            wrong_keys=(
-                {
-                    "wrong_key_index": 0,
-                    "wrong_key_material": fixed_wrong_key,
-                    "wrong_key_material_digest_random": (
-                        fixed_wrong_identity[
-                            "detection_key_material_digest_random"
-                        ]
-                    ),
-                },
-            ),
-            model_identity_digest=model_identity_digest,
-            carrier_mode="hf_only",
-        )
-        carrier_fixed_records = carrier_fixed_wrong_scores[
+        carrier_registered_record = carrier_multi_key_scores[
             "key_score_records"
-        ]
+        ][0]
+        carrier_fixed_wrong_score = compute_blind_observation_score(
+            carrier_reencoded,
+            key_material=fixed_wrong_key,
+            model_identity_digest=model_identity_digest,
+            prg_version=KEYED_PRG_VERSION,
+            method_role="hf_tail_only_content",
+        )
         carrier_fixed_wrong_margin = float(
-            carrier_fixed_records[0]["blind_content_score"]
-        ) - float(carrier_fixed_records[1]["blind_content_score"])
+            carrier_registered_record["blind_content_score"]
+        ) - float(carrier_fixed_wrong_score["blind_content_score"])
         result_payload = {
             "result_schema": "slm_wm_formal_terminal_hf_screen",
             "schema_version": 1,
@@ -373,6 +365,14 @@ def run_formal_terminal_hf_screen(
             "carrier_only_fixed_wrong_key_margin": carrier_fixed_wrong_margin,
             "carrier_only_fixed_wrong_key_pass": (
                 carrier_fixed_wrong_margin > 0.0
+            ),
+            "carrier_only_fixed_wrong_key_material_digest_random": (
+                fixed_wrong_identity[
+                    "detection_key_material_digest_random"
+                ]
+            ),
+            "carrier_only_fixed_wrong_score_identity_digest": (
+                carrier_fixed_wrong_score["score_identity_digest"]
             ),
             "hf_attribution_views": {
                 "full_combined": "multi_key_scores",
