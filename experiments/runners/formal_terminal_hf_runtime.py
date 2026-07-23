@@ -19,6 +19,10 @@ from experiments.protocol.content_survival_observation import (
     build_content_survival_observation_roster,
     load_content_survival_observation_protocol,
 )
+from experiments.protocol.detection_key_identity import (
+    REGISTERED_WRONG_KEY_ROLE,
+    resolve_detection_key_material_and_identity,
+)
 from experiments.runners.semantic_watermark_runtime import (
     FinalImageEvidenceGateFailure,
     SemanticWatermarkRuntimeConfig,
@@ -229,6 +233,11 @@ def run_formal_terminal_hf_screen(
             with Image.open(image_path) as source_image:
                 image = source_image.convert("RGB").copy()
             runtime_metadata = completed.metadata
+            carrier_image_path = (
+                root / runtime_metadata["carrier_only_image_path"]
+            ).resolve()
+            with Image.open(carrier_image_path) as source_image:
+                carrier_image = source_image.convert("RGB").copy()
             runtime_run_id = completed.run_id
             runtime_result_path = (
                 root
@@ -256,7 +265,7 @@ def run_formal_terminal_hf_screen(
                 failed_detections,
                 _,
                 image,
-                _,
+                carrier_image,
                 _,
             ) = diagnostic_gate_failure.runtime_outputs
             if failed_runtime.run_decision != "fail":
@@ -292,6 +301,46 @@ def run_formal_terminal_hf_screen(
             model_identity_digest=model_identity_digest,
             carrier_mode="hf_only",
         )
+        carrier_reencoded = _encode_image_latent(
+            context.pipeline,
+            carrier_image,
+        )
+        carrier_multi_key_scores = _score_key_roster(
+            carrier_reencoded,
+            registered_key_material=config.key_material,
+            wrong_keys=wrong_keys,
+            model_identity_digest=model_identity_digest,
+            carrier_mode="hf_only",
+        )
+        fixed_wrong_key, fixed_wrong_identity = (
+            resolve_detection_key_material_and_identity(
+                config.key_material,
+                REGISTERED_WRONG_KEY_ROLE,
+            )
+        )
+        carrier_fixed_wrong_scores = _score_key_roster(
+            carrier_reencoded,
+            registered_key_material=config.key_material,
+            wrong_keys=(
+                {
+                    "wrong_key_index": 0,
+                    "wrong_key_material": fixed_wrong_key,
+                    "wrong_key_material_digest_random": (
+                        fixed_wrong_identity[
+                            "detection_key_material_digest_random"
+                        ]
+                    ),
+                },
+            ),
+            model_identity_digest=model_identity_digest,
+            carrier_mode="hf_only",
+        )
+        carrier_fixed_records = carrier_fixed_wrong_scores[
+            "key_score_records"
+        ]
+        carrier_fixed_wrong_margin = float(
+            carrier_fixed_records[0]["blind_content_score"]
+        ) - float(carrier_fixed_records[1]["blind_content_score"])
         result_payload = {
             "result_schema": "slm_wm_formal_terminal_hf_screen",
             "schema_version": 1,
@@ -314,6 +363,24 @@ def run_formal_terminal_hf_screen(
             "registered_rank_one": (
                 multi_key_scores["rank_record"]["registered_rank"] == 1
             ),
+            "carrier_only_multi_key_scores": carrier_multi_key_scores,
+            "carrier_only_registered_rank": carrier_multi_key_scores[
+                "rank_record"
+            ]["registered_rank"],
+            "carrier_only_registered_rank_one": (
+                carrier_multi_key_scores["rank_record"]["registered_rank"] == 1
+            ),
+            "carrier_only_fixed_wrong_key_margin": carrier_fixed_wrong_margin,
+            "carrier_only_fixed_wrong_key_pass": (
+                carrier_fixed_wrong_margin > 0.0
+            ),
+            "hf_attribution_views": {
+                "full_combined": "multi_key_scores",
+                "carrier_only": "carrier_only_multi_key_scores",
+                "qk_geometry_gain_source": (
+                    "final_image_attention_observability"
+                ),
+            },
             "paired_quality": runtime_metadata["paired_quality"],
             "final_image_preservation": runtime_metadata[
                 "final_image_preservation"
@@ -346,6 +413,28 @@ def run_formal_terminal_hf_screen(
         result.get("formal_fixed_wrong_key_pass") is True
         for result in prompt_results
     )
+    positive_max_wrong_margin_count = sum(
+        result.get("multi_key_scores", {})
+        .get("rank_record", {})
+        .get("registered_minus_max_wrong_margin", 0.0)
+        > 0.0
+        for result in prompt_results
+    )
+    carrier_rank_one_count = sum(
+        result.get("carrier_only_registered_rank_one") is True
+        for result in prompt_results
+    )
+    carrier_fixed_wrong_pass_count = sum(
+        result.get("carrier_only_fixed_wrong_key_pass") is True
+        for result in prompt_results
+    )
+    carrier_positive_max_wrong_margin_count = sum(
+        result.get("carrier_only_multi_key_scores", {})
+        .get("rank_record", {})
+        .get("registered_minus_max_wrong_margin", 0.0)
+        > 0.0
+        for result in prompt_results
+    )
     final_image_evidence_pass_count = sum(
         result.get("formal_runtime_complete") is True
         for result in prompt_results
@@ -356,15 +445,23 @@ def run_formal_terminal_hf_screen(
             "pass"
             if rank_one_count == len(prompt_ids)
             and fixed_wrong_pass_count == len(prompt_ids)
+            and positive_max_wrong_margin_count == len(prompt_ids)
+            and carrier_rank_one_count == len(prompt_ids)
+            and carrier_fixed_wrong_pass_count == len(prompt_ids)
+            and carrier_positive_max_wrong_margin_count == len(prompt_ids)
             else "fail"
         ),
         "prompt_ids": list(prompt_ids),
         "prompt_count": len(prompt_results),
         "complete_cell_count": len(prompt_results),
         "diffusion_chain_count": len(prompt_results) * 7,
-        "key_score_count": len(prompt_results) * 33,
+        "key_score_count": len(prompt_results) * 66,
         "registered_rank_one_count": rank_one_count,
         "formal_fixed_wrong_key_pass_count": fixed_wrong_pass_count,
+        "carrier_only_registered_rank_one_count": carrier_rank_one_count,
+        "carrier_only_fixed_wrong_key_pass_count": (
+            carrier_fixed_wrong_pass_count
+        ),
         "final_image_evidence_pass_count": final_image_evidence_pass_count,
         "scientific_gate_failure_count": (
             len(prompt_results) - final_image_evidence_pass_count

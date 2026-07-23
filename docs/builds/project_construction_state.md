@@ -16,18 +16,18 @@
 
 | 项目 | 基线 |
 |---|---|
-| 审计日期 | `2026-07-22` |
+| 审计日期 | `2026-07-24` |
 | 重复协议文档修订日期 | `2026-07-17` |
 | profile 与等价执行文档修订日期 | `2026-07-17` |
 | 攻击证据职责文档修订日期 | `2026-07-17` |
-| 源代码与已审 GPU 证据基线提交 | S1 证据绑定 `db324b7c86a1bef305114fe83db44dfed04fd706`；迁移前 terminal-HF 四 Prompt 筛选绑定 `ceb74b30b7b0341f9d52d2fa47ced27630dd4bd1` |
-| GitNexus 索引提交 | `ceb74b30b7b0341f9d52d2fa47ced27630dd4bd1` |
-| GitNexus 索引规模 | 15,176 nodes、33,626 edges、300 execution flows |
-| 当前活动构建单元 | `late_hf_generation_runtime_construction`（固定20步流程在callback index 18对carrier/full nominal replay写入一次HF-only载体；输出冻结后才评价wrong key） |
-| 下一目标构建单元 | 以新提交和全新run在Colab A100-80G先执行1 Prompt正式入口smoke，再执行4 Prompt筛选；迁移后结果不得沿用`ceb74b3`基线结论 |
+| 源代码与已审 GPU 证据基线提交 | S1 证据绑定 `db324b7c86a1bef305114fe83db44dfed04fd706`；step-18 late-HF 四 Prompt 筛选绑定 `ea36f3bbab5d0c137c2a0db4e67844118dd60db0` |
+| GitNexus 索引提交 | `ea36f3bbab5d0c137c2a0db4e67844118dd60db0` |
+| GitNexus 索引规模 | 15,147 nodes、33,615 edges、300 execution flows |
+| 当前活动构建单元 | `late_qk_geometry_generation_runtime_construction`（固定index 18先对carrier/full写相同late-HF，再仅对full执行registered-only Q/K geometry；冻结输出后分别评分carrier/full） |
+| 下一目标构建单元 | CPU补丁独审后，以新提交和两个全新run在Colab A100-80G依次执行1 Prompt smoke与4 Prompt筛选；不得直接进入33 Prompt或qualification |
 | 受治理解释器 | 仓库 `.venv` 的 CPython 3.12.13 |
-| 默认测试事实 | `.venv/bin/pytest -q -s` 为 `2378 passed, 82 deselected`；精确 `.venv/bin/pytest -q` 仍在收集前触发宿主 capture 临时文件 `FileNotFoundError`；真实 Colab A100-40G 与 A100-80G 诊断结果按下文边界登记 |
-| 定向协议/cache/约束检查 | observation protocol、专用 host 与 Colab 适配合计 `74 passed`；最小验收面覆盖公开 GitHub 提交、固定 Drive 输入、kernel 内 controller 调用、薄 Notebook、A100 显存门、secret 隔离、长时 pipe 排空、进程组清理、失败落盘和最终固定 Drive 交付，不建立模型供应链或通用持久化门禁 |
+| 默认测试事实 | `.venv/bin/pytest -q -s` 为 `2391 passed, 82 deselected`；精确 `.venv/bin/pytest -q` 仍在收集前触发宿主 capture 临时文件 `FileNotFoundError`；真实 Colab A100-40G 与 A100-80G 诊断结果按下文边界登记 |
+| 定向协议/runtime/cache检查 | late-HF/QK、协议、formal screen、writer/loader与真实算子选择面合计`180 passed`；CPU只证明时序、预算、密钥隔离及carrier/full双视图接线，不建立GPU科学结论 |
 | harness 与格式检查 | 10项 harness 全部通过；`git diff --check` 通过 |
 | 外部源码 qualification | 显式 integration 运行 `6 failed, 0 skipped`；失败均来自4套登记真实源码目录缺失，符合缺源失败关闭边界，不属于默认测试失败 |
 | 工作树说明 | S3 从已独立审计的 `db324b7` 开始；`.codex/config.toml` 是既有范围外 untracked 文件，本原子不得修改或提交；旧 S1 存储归档保持只读 |
@@ -90,6 +90,8 @@
 - `ba2c2d5` 的真实 A100-80G 失败包已通过Drive checksum与secret scan复验：依赖、formal lock、模型与pipeline加载均通过，首个Prompt完成7条20步扩散日志，但在首个cell manifest发布前因terminal Q/K固定候选中出现actual-dtype预算超限而抛出host异常。该控制流与协议规定的“保留zero baseline并由最终图像Q/K门失败关闭”不一致；当前CPU修复只把超限/nonfinite候选记录为不可选并继续固定候选顺序，zero baseline本身超限时返回未追加Q/K的terminal HF结果。`0.001`/`0.014`预算、`1e-4`最终门、registered-only选择和wrong-key隔离均未改变。Drive run request可在同一正式CLI/runner入口中固定选择首个Prompt smoke或完整4 Prompt筛选；两者必须使用不同run id和独立outputs，smoke只验证完整HF结果与loader/manifest闭合。HF筛选结论只消费registered在32个wrong key中的严格rank-1及既有fixed-wrong正margin；最终Q/K治理字段继续如实记录但不替代HF密钥归因。上述修复和最小工作量入口尚未经过新的GPU运行，不构成方法通过。
 - `content_survival_observation_colab_20260722T163359Z_ceb74b3` 在A100-SXM4-80GB完成4个冻结Prompt、28条diffusion chain与132次key评分：四个Prompt的registered HF分数均在registered+32 wrong集合严格rank-1，registered减max-wrong margin依次约为`0.00320/0.00330/0.00248/0.00211`，三图preservation均通过，因此迁移前terminal-HF screening为4/4。最终图像Q/K gain仅3/4达到固定`1e-4`，d026约为`-3.85e-6`并以`final_image_attention_observability`失败关闭；四个screening cell均完整，但只有三个formal runtime artifact完整。该结果只建立迁移前诊断基线，不支持论文、promotion或qualification。
 - 当前CPU原子把HF-only 8×写入从pipeline返回后的latent改到固定20步流程的`callback_on_step_end` index 18，仅carrier/full nominal replay各写一次，并让更新继续经过最后一次真实Transformer/scheduler步骤；clean和四条probe不写，wrong key仍只在输出冻结后评分。full输出不再运行registered-only post-generation Q/K optimizer；真实clean/carrier/full Q/K observability与固定`1e-4`门保持不变，失败仍阻断formal runtime artifact但不替代HF rank/margin筛选。该接线尚未经过GPU验证，不能继承迁移前4/4结论。
+- `content_survival_observation_colab_20260723T170508Z_ea36f3b` 在A100-SXM4-80GB完成4个Prompt、28条diffusion chain和132次full-output HF评分。step-18 late-HF在四个Prompt均为registered rank-1，registered减max-wrong margin约为`0.00273/0.00274/0.00240/0.00191`，三图preservation为4/4；独立Q/K gain约为`8.25e-5/1.59e-5/3.25e-5/5.05e-5`，固定`1e-4`门为0/4，formal runtime artifact为0/4。该阶段只批准late-HF方法筛选，不是完整方法通过。
+- 当前有限CPU原子不改上述late-HF强度、路由、密钥计划、检测器或阈值：z10 nominal replay不再实际写入geometry；index 18在相同late-HF基底上仅为full replay执行registered-only Q/K梯度、固定`0.001` geometry与`0.014` combined actual-dtype上限的首次严格改善写入，carrier不写，wrong key不参与选择。screen在不增加diffusion chain的前提下，对冻结的carrier-only与full图分别执行registered+32 wrong HF评分并分别报告；最终Q/K仍只表示full-vs-carrier geometry增益。该实现必须经新的1 Prompt与4 Prompt GPU运行证伪，CPU测试不能构成科学通过。
 
 ---
 

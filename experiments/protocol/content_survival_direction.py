@@ -167,6 +167,7 @@ def validate_content_survival_direction_payload(
             "replay_protocol",
             "failure_protocol",
             "late_hf_generation",
+            "late_qk_geometry",
             _SEMANTIC_DIGEST_FIELD,
         ),
         "protocol",
@@ -175,7 +176,7 @@ def validate_content_survival_direction_payload(
         raise ValueError("content survival protocol schema mismatch")
     if (
         resolved["protocol_version"]
-        != "content_survival_direction_late_hf_generation"
+        != "content_survival_direction_late_hf_qk_generation"
     ):
         raise ValueError("unsupported content survival protocol version")
 
@@ -302,6 +303,25 @@ def validate_content_survival_direction_payload(
         "wrong_key_access": "forbidden_until_output_frozen",
     }:
         raise ValueError("late HF generation protocol drifted")
+    late_qk_geometry = resolved["late_qk_geometry"]
+    if type(late_qk_geometry) is not dict or late_qk_geometry != {
+        "callback_step_index": 18,
+        "roles": ["full_nominal_replay"],
+        "carrier_only_write": "forbidden",
+        "probe_write": "forbidden",
+        "registered_key_only": True,
+        "wrong_key_access": "forbidden_until_output_frozen",
+        "geometry_actual_dtype_relative_l2_limit": 0.001,
+        "combined_actual_dtype_relative_l2_limit": 0.014,
+        "maximum_backtracking_index": 8,
+        "backtracking_factor": 0.5,
+        "stable_token_fraction": 0.5,
+        "unstable_pair_weight": 0.25,
+        "acceptance": "first_strict_registered_qk_improvement",
+        "write_count_per_full_replay": 1,
+        "post_pipeline_write": "forbidden",
+    }:
+        raise ValueError("late Q/K geometry protocol drifted")
     claimed = _required_sha256(
         resolved[_SEMANTIC_DIGEST_FIELD],
         _SEMANTIC_DIGEST_FIELD,
@@ -336,6 +356,8 @@ def load_content_survival_direction_protocol(
             "sign_selection",
             "replay_protocol",
             "failure_protocol",
+            "late_hf_generation",
+            "late_qk_geometry",
             _SEMANTIC_DIGEST_FIELD,
         ]
     ):

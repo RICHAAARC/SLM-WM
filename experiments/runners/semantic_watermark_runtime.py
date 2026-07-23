@@ -4565,6 +4565,226 @@ def _build_late_hf_generation_update(
     }
 
 
+def _build_late_qk_geometry_generation_update(
+    latent: Any,
+    *,
+    late_hf_latent: Any,
+    geometry_capacity_map: Any,
+    transformer_forward: Any,
+    recorder: DifferentiableAttentionRecorder,
+    key_material: str,
+    component_weights: tuple[float, ...],
+    protocol: ContentSurvivalDirectionProtocol,
+) -> tuple[Any, dict[str, Any]]:
+    """在 late-HF 基底上仅用 registered Q/K 写入一次后段几何更新。"""
+
+    import torch
+
+    settings = protocol.payload["late_qk_geometry"]
+    baseline = late_hf_latent.detach()
+    original = latent.detach().float()
+    original_l2 = torch.linalg.vector_norm(original.reshape(-1))
+    if (
+        baseline.shape != latent.shape
+        or geometry_capacity_map.shape[-2:] != latent.shape[-2:]
+        or not bool(torch.isfinite(baseline).all())
+        or not bool(torch.isfinite(geometry_capacity_map).all())
+        or not bool(torch.isfinite(original_l2))
+        or float(original_l2.item()) <= 0.0
+    ):
+        raise RuntimeError("late Q/K geometry input is invalid")
+    evidence = compute_attention_geometry_gradient(
+        baseline,
+        transformer_forward,
+        recorder,
+        key_material,
+        prg_version=KEYED_PRG_VERSION,
+        stable_token_fraction=float(settings["stable_token_fraction"]),
+        unstable_pair_weight=float(settings["unstable_pair_weight"]),
+        component_weights=component_weights,
+    )
+    masked_gradient = (
+        evidence.gradient.detach().float()
+        * geometry_capacity_map.detach().float()
+    )
+    direction_norm = torch.linalg.vector_norm(masked_gradient.reshape(-1))
+    baseline_score = float(evidence.score_before)
+
+    def not_ready(reason: str) -> tuple[Any, dict[str, Any]]:
+        zero_update = torch.zeros_like(baseline.detach().float())
+        record = {
+            "late_qk_geometry_ready": False,
+            "late_qk_geometry_failure_reason": reason,
+            "late_qk_geometry_applied": False,
+            "late_qk_geometry_registered_key_only": True,
+            "late_qk_geometry_wrong_key_accessed": False,
+            "late_qk_geometry_callback_step_index": int(
+                settings["callback_step_index"]
+            ),
+            "late_qk_geometry_write_count": 0,
+            "late_qk_geometry_input_hf_latent_content_sha256": (
+                tensor_content_sha256(baseline.detach().float())
+            ),
+            "late_qk_geometry_update_content_sha256": (
+                tensor_content_sha256(zero_update)
+            ),
+            "late_qk_geometry_written_latent_content_sha256": (
+                tensor_content_sha256(baseline.detach().float())
+            ),
+            "late_qk_geometry_direction_content_sha256": "",
+            "late_qk_geometry_backtracking_index": None,
+            "late_qk_geometry_actual_dtype_relative_l2": 0.0,
+            "late_qk_geometry_combined_actual_dtype_relative_l2": float(
+                (
+                    torch.linalg.vector_norm(
+                        (baseline.detach().float() - original).reshape(-1)
+                    )
+                    / original_l2
+                ).item()
+            ),
+            "late_qk_geometry_relation_score_before": (
+                baseline_score if math.isfinite(baseline_score) else None
+            ),
+            "late_qk_geometry_relation_score_after": (
+                baseline_score if math.isfinite(baseline_score) else None
+            ),
+            "late_qk_geometry_baseline_qk_atomic_content_digest": (
+                evidence.qk_atomic_content_digest
+            ),
+            "late_qk_geometry_candidate_qk_atomic_content_digest": (
+                evidence.qk_atomic_content_digest
+            ),
+        }
+        record["late_qk_geometry_record_digest"] = build_stable_digest(record)
+        return baseline, record
+
+    if (
+        not bool(torch.isfinite(masked_gradient).all())
+        or not bool(torch.isfinite(direction_norm))
+        or float(direction_norm.item()) <= 0.0
+        or not math.isfinite(baseline_score)
+    ):
+        return not_ready("late_qk_geometry_registered_direction_not_ready")
+    direction = masked_gradient / direction_norm
+    geometry_limit = float(
+        settings["geometry_actual_dtype_relative_l2_limit"]
+    )
+    combined_limit = float(
+        settings["combined_actual_dtype_relative_l2_limit"]
+    )
+    accepted: tuple[int, Any, float, float, float, str] | None = None
+    for backtracking_index in range(
+        int(settings["maximum_backtracking_index"]) + 1
+    ):
+        scale = float(settings["backtracking_factor"]) ** backtracking_index
+        proposed = (
+            baseline.detach().float()
+            + direction * original_l2 * geometry_limit * scale
+        )
+        candidate = proposed.to(dtype=latent.dtype)
+        geometry_delta = candidate.detach().float() - baseline.detach().float()
+        combined_delta = candidate.detach().float() - original
+        geometry_relative = float(
+            (
+                torch.linalg.vector_norm(geometry_delta.reshape(-1))
+                / original_l2
+            ).item()
+        )
+        combined_relative = float(
+            (
+                torch.linalg.vector_norm(combined_delta.reshape(-1))
+                / original_l2
+            ).item()
+        )
+        if (
+            not math.isfinite(geometry_relative)
+            or not math.isfinite(combined_relative)
+            or geometry_relative > geometry_limit
+            or combined_relative > combined_limit
+            or geometry_relative <= 0.0
+        ):
+            continue
+        with torch.no_grad():
+            recorder.clear()
+            transformer_forward(candidate)
+            candidate_score = float(
+                attention_geometry_score(
+                    recorder.records,
+                    key_material,
+                    prg_version=KEYED_PRG_VERSION,
+                    stable_pair_weights=evidence.stable_pair_weights,
+                    component_weights=component_weights,
+                )
+                .detach()
+                .item()
+            )
+            candidate_identity = build_attention_relation_graph_identity(
+                recorder.records,
+                key_material,
+                prg_version=KEYED_PRG_VERSION,
+                component_weights=component_weights,
+            )
+        if candidate_score > float(evidence.score_before):
+            accepted = (
+                backtracking_index,
+                candidate,
+                geometry_relative,
+                combined_relative,
+                candidate_score,
+                candidate_identity.qk_atomic_content_digest,
+            )
+            break
+    if accepted is None:
+        return not_ready(
+            "late_qk_geometry_no_strict_actual_dtype_improvement"
+        )
+    (
+        backtracking_index,
+        written,
+        geometry_relative,
+        combined_relative,
+        candidate_score,
+        candidate_qk_digest,
+    ) = accepted
+    geometry_delta = written.detach().float() - baseline.detach().float()
+    record = {
+        "late_qk_geometry_ready": True,
+        "late_qk_geometry_failure_reason": "",
+        "late_qk_geometry_applied": True,
+        "late_qk_geometry_registered_key_only": True,
+        "late_qk_geometry_wrong_key_accessed": False,
+        "late_qk_geometry_callback_step_index": int(
+            settings["callback_step_index"]
+        ),
+        "late_qk_geometry_write_count": 1,
+        "late_qk_geometry_input_hf_latent_content_sha256": (
+            tensor_content_sha256(baseline.detach().float())
+        ),
+        "late_qk_geometry_update_content_sha256": tensor_content_sha256(
+            geometry_delta
+        ),
+        "late_qk_geometry_written_latent_content_sha256": (
+            tensor_content_sha256(written.detach().float())
+        ),
+        "late_qk_geometry_direction_content_sha256": tensor_content_sha256(
+            direction
+        ),
+        "late_qk_geometry_backtracking_index": backtracking_index,
+        "late_qk_geometry_actual_dtype_relative_l2": geometry_relative,
+        "late_qk_geometry_combined_actual_dtype_relative_l2": combined_relative,
+        "late_qk_geometry_relation_score_before": float(evidence.score_before),
+        "late_qk_geometry_relation_score_after": candidate_score,
+        "late_qk_geometry_baseline_qk_atomic_content_digest": (
+            evidence.qk_atomic_content_digest
+        ),
+        "late_qk_geometry_candidate_qk_atomic_content_digest": (
+            candidate_qk_digest
+        ),
+    }
+    record["late_qk_geometry_record_digest"] = build_stable_digest(record)
+    return written, record
+
+
 def _public_detection_noise_evidence_cursor(extractor: Any | None) -> int:
     """返回 extractor 当前公开检测噪声证据条数。"""
 
@@ -7219,7 +7439,82 @@ def _run_semantic_watermark_runtime_with_content_strength(
                         protocol=protocol,
                     )
                 )
-                callback_kwargs["latents"] = written_late_hf
+                written_late = written_late_hf
+                if role == "full_nominal_replay":
+                    recorder = DifferentiableAttentionRecorder(
+                        context.attention_modules,
+                        max_tokens=config.max_attention_tokens,
+                    )
+                    try:
+                        written_late, late_qk_record = (
+                            _build_late_qk_geometry_generation_update(
+                                latent,
+                                late_hf_latent=written_late_hf,
+                                geometry_capacity_map=(
+                                    terminal_routing.writable_capacity_map
+                                ),
+                                transformer_forward=(
+                                    _transformer_forward_function(
+                                        pipe,
+                                        timestep,
+                                        prompt_embeds,
+                                        pooled_prompt_embeds,
+                                    )
+                                ),
+                                recorder=recorder,
+                                key_material=config.key_material,
+                                component_weights=(
+                                    config.attention_relation_component_weights
+                                ),
+                                protocol=protocol,
+                            )
+                        )
+                    finally:
+                        recorder.close()
+                    payload.update(late_qk_record)
+                    payload.update(
+                        {
+                            "attention_geometry_update_content_sha256": (
+                                late_qk_record[
+                                    "late_qk_geometry_update_content_sha256"
+                                ]
+                            ),
+                            "geometry_effective_l2": float(
+                                torch.linalg.vector_norm(
+                                    (
+                                        written_late.detach().float()
+                                        - written_late_hf.detach().float()
+                                    ).reshape(-1)
+                                ).item()
+                            ),
+                            "geometry_update_digest": late_qk_record[
+                                "late_qk_geometry_record_digest"
+                            ],
+                            "geometry_qk_atomic_records_digest": (
+                                late_qk_record[
+                                    "late_qk_geometry_candidate_qk_atomic_content_digest"
+                                ]
+                            ),
+                            "content_only_postwrite_qk_score": late_qk_record[
+                                "late_qk_geometry_relation_score_before"
+                            ],
+                            "final_postwrite_qk_score": late_qk_record[
+                                "late_qk_geometry_relation_score_after"
+                            ],
+                            "post_write_qk_strict_ready": (
+                                late_qk_record["late_qk_geometry_ready"]
+                            ),
+                        }
+                    )
+                else:
+                    payload.update(
+                        {
+                            "late_qk_geometry_applied": False,
+                            "late_qk_geometry_wrong_key_accessed": False,
+                            "late_qk_geometry_write_count": 0,
+                        }
+                    )
+                callback_kwargs["latents"] = written_late
                 payload.update(late_hf_record)
                 payload.update(
                     {
@@ -7314,7 +7609,7 @@ def _run_semantic_watermark_runtime_with_content_strength(
             full_role = role.startswith("full_")
             geometry = None
             geometry_evidence = None
-            if full_role:
+            if full_role and probe_sign is not None:
                 recorder = DifferentiableAttentionRecorder(
                     context.attention_modules,
                     max_tokens=config.max_attention_tokens,
@@ -7389,8 +7684,8 @@ def _run_semantic_watermark_runtime_with_content_strength(
                 raise RuntimeError("nominal replay requires the selected sign")
             signed_lf = content_update.lf_update * float(replay_sign)
             signed_hf = content_update.hf_tail_update * float(replay_sign)
-            signed_geometry = geometry_update * float(replay_sign)
-            method_role = "full_dual_chain" if full_role else "content_chain_only"
+            signed_geometry = torch.zeros_like(z10, dtype=torch.float32)
+            method_role = "content_chain_only"
             write_budget = formal_dual_chain_write_budget()
             write_result = compose_dual_chain_update_once(
                 z10,
@@ -7438,48 +7733,6 @@ def _run_semantic_watermark_runtime_with_content_strength(
                     ),
                 }
             )
-            if full_role:
-                recorder = DifferentiableAttentionRecorder(
-                    context.attention_modules,
-                    max_tokens=config.max_attention_tokens,
-                )
-                try:
-                    content_latent = (
-                        z10.detach().float()
-                        + signed_lf * write_result.accepted_common_scale
-                        + signed_hf * write_result.accepted_common_scale
-                    ).to(dtype=z10.dtype)
-                    content_score, content_qk_digest = (
-                        _evaluate_post_write_geometry_relation(
-                            written_latent=content_latent,
-                            transformer_forward=transformer_forward,
-                            recorder=recorder,
-                            key_material=config.key_material,
-                            runtime_evidence=geometry_evidence,
-                        )
-                    )
-                    full_score, full_qk_digest = (
-                        _evaluate_post_write_geometry_relation(
-                            written_latent=write_result.written_latent,
-                            transformer_forward=transformer_forward,
-                            recorder=recorder,
-                            key_material=config.key_material,
-                            runtime_evidence=geometry_evidence,
-                        )
-                    )
-                finally:
-                    recorder.close()
-                if not full_score > content_score:
-                    raise RuntimeError("nominal full replay failed the strict Q/K gate")
-                payload.update(
-                    {
-                        "content_only_postwrite_qk_score": content_score,
-                        "final_postwrite_qk_score": full_score,
-                        "post_write_qk_strict_ready": True,
-                        "content_only_postwrite_qk_digest": content_qk_digest,
-                        "final_postwrite_qk_digest": full_qk_digest,
-                    }
-                )
             return callback_kwargs
 
         output = pipeline(
@@ -7638,18 +7891,39 @@ def _run_semantic_watermark_runtime_with_content_strength(
             raise RuntimeError(
                 "seven-chain carrier identity drifted across scheduler forks"
             )
-    full_geometry_records = (
-        chain_records[1],
-        chain_records[2],
-        chain_records[6],
-    )
+    full_geometry_records = (chain_records[1], chain_records[2])
     if len(
         {
             record.get("attention_geometry_update_content_sha256")
             for record in full_geometry_records
         }
     ) != 1:
-        raise RuntimeError("full probe and replay geometry identity drifted")
+        raise RuntimeError("full probe geometry identity drifted")
+    full_late_qk_ready = full_payload.get("late_qk_geometry_ready") is True
+    full_late_qk_identity_ready = (
+        (
+            full_payload.get("late_qk_geometry_applied") is True
+            and full_payload.get("late_qk_geometry_write_count") == 1
+            and not full_payload.get("late_qk_geometry_failure_reason")
+        )
+        if full_late_qk_ready
+        else (
+            full_payload.get("late_qk_geometry_applied") is False
+            and full_payload.get("late_qk_geometry_write_count") == 0
+            and full_payload.get("late_qk_geometry_failure_reason")
+            in {
+                "late_qk_geometry_registered_direction_not_ready",
+                "late_qk_geometry_no_strict_actual_dtype_improvement",
+            }
+        )
+    )
+    if not (
+        full_late_qk_identity_ready
+        and full_payload.get("late_qk_geometry_wrong_key_accessed") is False
+        and carrier_payload.get("late_qk_geometry_applied") is False
+        and carrier_payload.get("late_qk_geometry_write_count") == 0
+    ):
+        raise RuntimeError("late Q/K geometry role or write identity drifted")
     for replay_payload in (carrier_payload, full_payload):
         replay_payload["probe_bundle_digest"] = probe_bundle_digest
         replay_payload["nominal_replay_parent_ready"] = True
@@ -7701,7 +7975,14 @@ def _run_semantic_watermark_runtime_with_content_strength(
                 "scheduler_step_timestep": full_payload[
                     "scheduler_step_timestep"
                 ],
-            }
+            },
+            {
+                "step_index": late_hf_callback_step_index,
+                "full_late_qk_geometry_record_digest": full_payload[
+                    "late_qk_geometry_record_digest"
+                ],
+                "carrier_late_qk_geometry_applied": False,
+            },
         ],
         "carrier_only_counterfactual_effect_scope": (
             "attention_geometry_switch_total_mechanism_effect"
@@ -7749,6 +8030,10 @@ def _run_semantic_watermark_runtime_with_content_strength(
         counterfactual_identity_digest=counterfactual_identity_digest,
     )
     final_image_evidence_gate_failures: list[str] = []
+    if not full_late_qk_ready:
+        final_image_evidence_gate_failures.append(
+            "late_qk_geometry_not_ready"
+        )
     if (
         final_image_preservation["final_image_preservation_gate_ready"] is not True
         or carrier_only_final_image_preservation[

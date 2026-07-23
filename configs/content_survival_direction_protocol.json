@@ -58,7 +58,7 @@
     "zero_direction": "fail_closed"
   },
   "protocol_schema": "slm_wm_content_survival_direction_protocol",
-  "protocol_version": "content_survival_direction_late_hf_generation",
+  "protocol_version": "content_survival_direction_late_hf_qk_generation",
   "replay_protocol": {
     "only_full_carrier_difference": "attention_geometry_enabled",
     "parent_binding": "probe_bundle_digest",
@@ -102,5 +102,24 @@
     "write_count_per_role": 1,
     "wrong_key_access": "forbidden_until_output_frozen"
   },
-  "survival_protocol_semantic_digest": "85693eccb4764cc6619d4b1099da3a0e32c64d0c5ca036df18d3a439e53218d2"
+  "late_qk_geometry": {
+    "callback_step_index": 18,
+    "roles": [
+      "full_nominal_replay"
+    ],
+    "carrier_only_write": "forbidden",
+    "probe_write": "forbidden",
+    "registered_key_only": true,
+    "wrong_key_access": "forbidden_until_output_frozen",
+    "geometry_actual_dtype_relative_l2_limit": 0.001,
+    "combined_actual_dtype_relative_l2_limit": 0.014,
+    "maximum_backtracking_index": 8,
+    "backtracking_factor": 0.5,
+    "stable_token_fraction": 0.5,
+    "unstable_pair_weight": 0.25,
+    "acceptance": "first_strict_registered_qk_improvement",
+    "write_count_per_full_replay": 1,
+    "post_pipeline_write": "forbidden"
+  },
+  "survival_protocol_semantic_digest": "de3ede730bfb399740bb83192da1555dfb5a395acc8e82313c1d24d95d0eb9d1"
 }

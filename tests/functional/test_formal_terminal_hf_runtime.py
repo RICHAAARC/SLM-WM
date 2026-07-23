@@ -37,12 +37,15 @@ def _configs() -> dict[str, SemanticWatermarkRuntimeConfig]:
     }
 
 
-@pytest.mark.parametrize("prompt_count", [1, 4])
 @pytest.mark.parametrize(
-    "scientific_failure_reason",
+    ("prompt_count", "scientific_failure_reason", "carrier_screen_pass"),
     [
-        None,
-        "final_image_attention_observability",
+        (1, None, True),
+        (4, None, True),
+        (1, "final_image_attention_observability", True),
+        (4, "final_image_attention_observability", True),
+        (1, None, False),
+        (1, "late_qk_geometry_not_ready", True),
     ],
 )
 def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
@@ -50,6 +53,7 @@ def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
     monkeypatch: pytest.MonkeyPatch,
     prompt_count: int,
     scientific_failure_reason: str | None,
+    carrier_screen_pass: bool,
 ) -> None:
     (tmp_path / "outputs").mkdir()
     completed: dict[str, SimpleNamespace] = {}
@@ -88,7 +92,11 @@ def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
         run_root = root / config.output_dir / run_id
         run_root.mkdir(parents=True)
         image_path = run_root / "watermarked.png"
+        carrier_image_path = run_root / "carrier_only.png"
         Image.new("RGB", (8, 8), color=(10, 20, 30)).save(image_path)
+        Image.new("RGB", (8, 8), color=(9, 19, 29)).save(
+            carrier_image_path
+        )
         detection_path = run_root / "image_only_detection_records.jsonl"
         rows = [
             ("clean_negative", 0.0),
@@ -130,6 +138,9 @@ def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
                 "final_image_attention_blind_attribution_gain": -0.0002,
                 "final_image_attention_carrier_paired_attribution_gain": -0.0001,
             },
+            "carrier_only_image_path": carrier_image_path.relative_to(
+                root
+            ).as_posix(),
         }
         if scientific_failure_reason is not None:
             failed_runtime = SemanticWatermarkRuntimeResult(
@@ -158,7 +169,7 @@ def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
                     tuple(detection_records),
                     Image.new("RGB", (8, 8)),
                     Image.new("RGB", (8, 8), color=(10, 20, 30)),
-                    Image.new("RGB", (8, 8)),
+                    Image.new("RGB", (8, 8), color=(9, 19, 29)),
                     {},
                 ),
             )
@@ -177,26 +188,44 @@ def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
 
     monkeypatch.setattr(runtime, "load_completed_semantic_watermark_runtime_result", load)
     monkeypatch.setattr(runtime, "write_semantic_watermark_runtime_outputs", write)
-    monkeypatch.setattr(
-        runtime,
-        "_encode_image_latent",
-        lambda pipeline, image: torch.zeros((1, 4, 8, 8)),
-    )
-    monkeypatch.setattr(
-        runtime,
-        "_score_key_roster",
-        lambda *args, **kwargs: {
+    encoded_image_colors: list[tuple[int, int, int]] = []
+
+    def encode_image(_pipeline: object, image: Image.Image) -> torch.Tensor:
+        encoded_image_colors.append(image.getpixel((0, 0)))
+        return torch.zeros((1, 4, 8, 8))
+
+    monkeypatch.setattr(runtime, "_encode_image_latent", encode_image)
+    score_calls: list[tuple[object, ...]] = []
+
+    def score_roster(*args: object, **kwargs: object) -> dict[str, object]:
+        call_index = len(score_calls)
+        score_calls.append(tuple(kwargs["wrong_keys"]))
+        carrier_roster_call = call_index % 3 == 1
+        wrong_score = (
+            0.2
+            if carrier_roster_call and not carrier_screen_pass
+            else 0.0
+        )
+        wrong_count = len(tuple(kwargs["wrong_keys"]))
+        return {
             "latent_content_sha256": "a" * 64,
             "key_score_records": [
                 {"key_role": "registered", "blind_content_score": 0.1},
                 *(
-                    {"key_role": "wrong", "blind_content_score": 0.0}
-                    for _ in range(32)
+                    {
+                        "key_role": "wrong",
+                        "blind_content_score": wrong_score,
+                    }
+                    for _ in range(wrong_count)
                 ),
             ],
-            "rank_record": {"registered_rank": 1},
-        },
-    )
+            "rank_record": {
+                "registered_rank": 2 if wrong_score > 0.1 else 1,
+                "registered_minus_max_wrong_margin": 0.1 - wrong_score,
+            },
+        }
+
+    monkeypatch.setattr(runtime, "_score_key_roster", score_roster)
     kwargs = {
         "references": object(),
         "verified_formal_execution_lock": {"lock": "synthetic"},
@@ -214,12 +243,18 @@ def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
     summary = runtime.run_formal_terminal_hf_screen(configs, **kwargs)
 
     assert summary["decision"] == "pass"
-    assert summary["method_screening_decision"] == "pass"
+    assert summary["method_screening_decision"] == (
+        "pass" if carrier_screen_pass else "fail"
+    )
     assert summary["prompt_ids"] == list(selected_prompt_ids)
     assert summary["prompt_count"] == prompt_count
     assert summary["diffusion_chain_count"] == prompt_count * 7
-    assert summary["key_score_count"] == prompt_count * 33
+    assert summary["key_score_count"] == prompt_count * 66
     assert summary["registered_rank_one_count"] == prompt_count
+    assert summary["carrier_only_registered_rank_one_count"] == (
+        prompt_count if carrier_screen_pass else 0
+    )
+    assert summary["carrier_only_fixed_wrong_key_pass_count"] == prompt_count
     assert summary["final_image_evidence_pass_count"] == (
         0 if scientific_failure_reason is not None else prompt_count
     )
@@ -233,16 +268,28 @@ def test_formal_screen_runs_writer_loader_and_32_wrong_key_rank(
             scientific_failure_reason
         ]
         assert first["registered_rank_one"] is True
+        assert first["carrier_only_registered_rank_one"] is True
+        assert first["carrier_only_fixed_wrong_key_margin"] == pytest.approx(0.1)
+        assert first["hf_attribution_views"] == {
+            "full_combined": "multi_key_scores",
+            "carrier_only": "carrier_only_multi_key_scores",
+            "qk_geometry_gain_source": "final_image_attention_observability",
+        }
         assert first["formal_fixed_wrong_key_margin"] == pytest.approx(0.1)
         assert first["final_image_attention_observability"][
             "final_image_attention_blind_attribution_gain"
         ] == -0.0002
         assert issubclass(FinalImageEvidenceGateFailure, RuntimeError)
     assert writer_calls == list(selected_prompt_ids)
+    assert [len(call) for call in score_calls] == [32, 32, 1] * prompt_count
+    assert encoded_image_colors == [(10, 20, 30), (9, 19, 29)] * prompt_count
     assert len(list((tmp_path / "outputs").rglob("cell_manifest.json"))) == prompt_count
 
     resumed = runtime.run_formal_terminal_hf_screen(configs, **kwargs)
     assert resumed["registered_rank_one_count"] == prompt_count
+    assert resumed["method_screening_decision"] == (
+        "pass" if carrier_screen_pass else "fail"
+    )
     assert resumed["scientific_gate_failure_count"] == (
         prompt_count if scientific_failure_reason is not None else 0
     )
