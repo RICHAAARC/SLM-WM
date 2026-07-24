@@ -315,9 +315,18 @@ def validate_content_survival_direction_payload(
         "combined_actual_dtype_relative_l2_limit": 0.014,
         "maximum_backtracking_index": 8,
         "backtracking_factor": 0.5,
-        "stable_token_fraction": 0.5,
-        "unstable_pair_weight": 0.25,
-        "acceptance": "first_strict_registered_qk_improvement",
+        "direction_objective": "carrier_frozen_registered_suffix_qk_score",
+        "direction_gradient_scope": "suffix_and_additive_delta_only",
+        "suffix_operator": (
+            "remaining_generation_step_decode_vae_reencode_"
+            "public_noise_schedule_7_frozen_qk"
+        ),
+        "carrier_reference": "frozen_carrier_only_final_image_qk",
+        "candidate_order": "maximum_geometry_then_fixed_halving",
+        "acceptance": (
+            "first_budget_ready_blind_and_carrier_paired_gain_"
+            "at_least_formal_minimum"
+        ),
         "write_count_per_full_replay": 1,
         "post_pipeline_write": "forbidden",
     }:

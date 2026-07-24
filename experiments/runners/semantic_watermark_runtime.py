@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 import json
 import math
@@ -4565,18 +4566,72 @@ def _build_late_hf_generation_update(
     }
 
 
+def _replay_late_qk_generation_suffix(
+    pipeline: Any,
+    latent: Any,
+    *,
+    timestep: Any,
+    prompt_embeds: Any,
+    pooled_prompt_embeds: Any,
+    negative_prompt_embeds: Any,
+    negative_pooled_prompt_embeds: Any,
+    guidance_scale: float,
+) -> Any:
+    """用隔离 scheduler 精确重放 callback 后唯一剩余的生成步。"""
+
+    import torch
+
+    if float(guidance_scale) <= 1.0:
+        latent_input = latent
+        resolved_prompt_embeds = prompt_embeds
+        resolved_pooled_prompt_embeds = pooled_prompt_embeds
+    else:
+        latent_input = torch.cat((latent, latent), dim=0)
+        resolved_prompt_embeds = torch.cat(
+            (negative_prompt_embeds, prompt_embeds),
+            dim=0,
+        )
+        resolved_pooled_prompt_embeds = torch.cat(
+            (negative_pooled_prompt_embeds, pooled_prompt_embeds),
+            dim=0,
+        )
+    transformer_dtype = next(pipeline.transformer.parameters()).dtype
+    timestep_batch = timestep.expand(latent_input.shape[0])
+    noise_prediction = pipeline.transformer(
+        hidden_states=latent_input.to(dtype=transformer_dtype),
+        timestep=timestep_batch,
+        encoder_hidden_states=resolved_prompt_embeds,
+        pooled_projections=resolved_pooled_prompt_embeds,
+        joint_attention_kwargs=None,
+        return_dict=False,
+    )[0]
+    if float(guidance_scale) > 1.0:
+        noise_unconditional, noise_conditional = noise_prediction.chunk(2)
+        noise_prediction = noise_unconditional + float(guidance_scale) * (
+            noise_conditional - noise_unconditional
+        )
+    isolated_scheduler = deepcopy(pipeline.scheduler)
+    replayed = isolated_scheduler.step(
+        noise_prediction,
+        timestep,
+        latent,
+        return_dict=False,
+    )[0]
+    return replayed.to(dtype=latent.dtype)
+
+
 def _build_late_qk_geometry_generation_update(
     latent: Any,
     *,
     late_hf_latent: Any,
     geometry_capacity_map: Any,
-    transformer_forward: Any,
-    recorder: DifferentiableAttentionRecorder,
-    key_material: str,
-    component_weights: tuple[float, ...],
+    registered_suffix_objective: Any,
+    exact_suffix_evaluator: Any,
+    carrier_reference_score: Mapping[str, Any],
+    minimum_gain: float,
     protocol: ContentSurvivalDirectionProtocol,
 ) -> tuple[Any, dict[str, Any]]:
-    """在 late-HF 基底上仅用 registered Q/K 写入一次后段几何更新。"""
+    """以 registered-only 最终门同构 suffix 选择一次后段几何更新。"""
 
     import torch
 
@@ -4593,24 +4648,50 @@ def _build_late_qk_geometry_generation_update(
         or float(original_l2.item()) <= 0.0
     ):
         raise RuntimeError("late Q/K geometry input is invalid")
-    evidence = compute_attention_geometry_gradient(
-        baseline,
-        transformer_forward,
-        recorder,
-        key_material,
-        prg_version=KEYED_PRG_VERSION,
-        stable_token_fraction=float(settings["stable_token_fraction"]),
-        unstable_pair_weight=float(settings["unstable_pair_weight"]),
-        component_weights=component_weights,
+    carrier_blind_score = float(
+        carrier_reference_score["blind_attention_score"]
     )
-    masked_gradient = (
-        evidence.gradient.detach().float()
-        * geometry_capacity_map.detach().float()
+    carrier_paired_score = float(
+        carrier_reference_score["carrier_paired_attention_score"]
     )
+    carrier_qk_digest = str(
+        carrier_reference_score["qk_atomic_content_digest"]
+    )
+    if (
+        not math.isfinite(carrier_blind_score)
+        or not math.isfinite(carrier_paired_score)
+        or len(carrier_qk_digest) != 64
+        or not math.isfinite(float(minimum_gain))
+        or float(minimum_gain) != 1.0e-4
+    ):
+        raise RuntimeError("late Q/K carrier reference is invalid")
+    with torch.enable_grad():
+        frozen_baseline = baseline.detach().to(dtype=torch.float32)
+        additive_delta = torch.zeros_like(
+            frozen_baseline,
+            requires_grad=True,
+        )
+        direction_score = registered_suffix_objective(
+            frozen_baseline + additive_delta
+        )
+        if (
+            not isinstance(direction_score, torch.Tensor)
+            or direction_score.numel() != 1
+        ):
+            raise RuntimeError("late Q/K suffix objective must be a scalar Tensor")
+        gradient = torch.autograd.grad(
+            direction_score,
+            additive_delta,
+            allow_unused=False,
+        )[0]
+    direction_score_value = float(direction_score.detach().item())
+    masked_gradient = gradient.detach().float() * geometry_capacity_map.detach().float()
     direction_norm = torch.linalg.vector_norm(masked_gradient.reshape(-1))
-    baseline_score = float(evidence.score_before)
 
-    def not_ready(reason: str) -> tuple[Any, dict[str, Any]]:
+    def not_ready(
+        reason: str,
+        candidate_records: list[dict[str, Any]] | None = None,
+    ) -> tuple[Any, dict[str, Any]]:
         zero_update = torch.zeros_like(baseline.detach().float())
         record = {
             "late_qk_geometry_ready": False,
@@ -4618,6 +4699,8 @@ def _build_late_qk_geometry_generation_update(
             "late_qk_geometry_applied": False,
             "late_qk_geometry_registered_key_only": True,
             "late_qk_geometry_wrong_key_accessed": False,
+            "late_qk_geometry_suffix_operator": settings["suffix_operator"],
+            "late_qk_geometry_candidate_records": candidate_records or [],
             "late_qk_geometry_callback_step_index": int(
                 settings["callback_step_index"]
             ),
@@ -4633,6 +4716,8 @@ def _build_late_qk_geometry_generation_update(
             ),
             "late_qk_geometry_direction_content_sha256": "",
             "late_qk_geometry_backtracking_index": None,
+            "late_qk_geometry_selected_suffix_terminal_latent_content_sha256": "",
+            "late_qk_geometry_selected_output_image_rgb_uint8_content_sha256": "",
             "late_qk_geometry_actual_dtype_relative_l2": 0.0,
             "late_qk_geometry_combined_actual_dtype_relative_l2": float(
                 (
@@ -4642,17 +4727,21 @@ def _build_late_qk_geometry_generation_update(
                     / original_l2
                 ).item()
             ),
-            "late_qk_geometry_relation_score_before": (
-                baseline_score if math.isfinite(baseline_score) else None
+            "late_qk_geometry_direction_objective_score": (
+                direction_score_value
+                if math.isfinite(direction_score_value)
+                else None
             ),
-            "late_qk_geometry_relation_score_after": (
-                baseline_score if math.isfinite(baseline_score) else None
-            ),
+            "late_qk_geometry_relation_score_before": carrier_paired_score,
+            "late_qk_geometry_relation_score_after": carrier_paired_score,
+            "late_qk_geometry_blind_full_vs_carrier_gain": None,
+            "late_qk_geometry_carrier_paired_full_vs_carrier_gain": None,
+            "late_qk_geometry_minimum_gain": float(minimum_gain),
             "late_qk_geometry_baseline_qk_atomic_content_digest": (
-                evidence.qk_atomic_content_digest
+                carrier_qk_digest
             ),
             "late_qk_geometry_candidate_qk_atomic_content_digest": (
-                evidence.qk_atomic_content_digest
+                carrier_qk_digest
             ),
         }
         record["late_qk_geometry_record_digest"] = build_stable_digest(record)
@@ -4662,9 +4751,11 @@ def _build_late_qk_geometry_generation_update(
         not bool(torch.isfinite(masked_gradient).all())
         or not bool(torch.isfinite(direction_norm))
         or float(direction_norm.item()) <= 0.0
-        or not math.isfinite(baseline_score)
+        or not math.isfinite(direction_score_value)
     ):
-        return not_ready("late_qk_geometry_registered_direction_not_ready")
+        return not_ready(
+            "late_qk_geometry_registered_suffix_direction_not_ready"
+        )
     direction = masked_gradient / direction_norm
     geometry_limit = float(
         settings["geometry_actual_dtype_relative_l2_limit"]
@@ -4672,7 +4763,8 @@ def _build_late_qk_geometry_generation_update(
     combined_limit = float(
         settings["combined_actual_dtype_relative_l2_limit"]
     )
-    accepted: tuple[int, Any, float, float, float, str] | None = None
+    candidate_records: list[dict[str, Any]] = []
+    candidate_values: list[tuple[Any, Mapping[str, Any] | None]] = []
     for backtracking_index in range(
         int(settings["maximum_backtracking_index"]) + 1
     ):
@@ -4703,49 +4795,99 @@ def _build_late_qk_geometry_generation_update(
             or combined_relative > combined_limit
             or geometry_relative <= 0.0
         ):
-            continue
-        with torch.no_grad():
-            recorder.clear()
-            transformer_forward(candidate)
-            candidate_score = float(
-                attention_geometry_score(
-                    recorder.records,
-                    key_material,
-                    prg_version=KEYED_PRG_VERSION,
-                    stable_pair_weights=evidence.stable_pair_weights,
-                    component_weights=component_weights,
+            budget_failure_reason = "actual_dtype_budget_not_ready"
+            evaluation: Mapping[str, Any] | None = None
+        else:
+            budget_failure_reason = ""
+            evaluation = dict(exact_suffix_evaluator(candidate))
+        candidate_record = {
+            "candidate_index": backtracking_index,
+            "candidate_scale_fraction": scale,
+            "written_latent_content_sha256": tensor_content_sha256(
+                candidate.detach().float()
+            ),
+            "geometry_actual_dtype_relative_l2": (
+                geometry_relative if math.isfinite(geometry_relative) else None
+            ),
+            "combined_actual_dtype_relative_l2": (
+                combined_relative if math.isfinite(combined_relative) else None
+            ),
+            "actual_dtype_budget_ready": not budget_failure_reason,
+            "actual_dtype_budget_failure_reason": budget_failure_reason,
+            "candidate_score_evaluated": evaluation is not None,
+            "candidate_acceptance_ready": False,
+            "registered_key_only": True,
+            "wrong_key_accessed": False,
+            "score_source": settings["suffix_operator"],
+            "supports_paper_claim": False,
+        }
+        if evaluation is not None:
+            blind_score = float(evaluation["blind_attention_score"])
+            paired_score = float(
+                evaluation["carrier_paired_attention_score"]
+            )
+            blind_gain = blind_score - carrier_blind_score
+            paired_gain = paired_score - carrier_paired_score
+            qk_digest = str(evaluation["qk_atomic_content_digest"])
+            terminal_digest = str(
+                evaluation["suffix_terminal_latent_content_sha256"]
+            )
+            image_digest = str(
+                evaluation["output_image_rgb_uint8_content_sha256"]
+            )
+            if (
+                not all(
+                    math.isfinite(value)
+                    for value in (
+                        blind_score,
+                        paired_score,
+                        blind_gain,
+                        paired_gain,
+                    )
                 )
-                .detach()
-                .item()
+                or any(
+                    len(value) != 64
+                    for value in (qk_digest, terminal_digest, image_digest)
+                )
+            ):
+                raise RuntimeError("late Q/K exact suffix score is invalid")
+            candidate_record.update(
+                {
+                    "blind_attention_score": blind_score,
+                    "carrier_paired_attention_score": paired_score,
+                    "blind_full_vs_carrier_gain": blind_gain,
+                    "carrier_paired_full_vs_carrier_gain": paired_gain,
+                    "qk_atomic_content_digest": qk_digest,
+                    "suffix_terminal_latent_content_sha256": terminal_digest,
+                    "output_image_rgb_uint8_content_sha256": image_digest,
+                    "candidate_acceptance_ready": bool(
+                        blind_gain >= float(minimum_gain)
+                        and paired_gain >= float(minimum_gain)
+                    ),
+                }
             )
-            candidate_identity = build_attention_relation_graph_identity(
-                recorder.records,
-                key_material,
-                prg_version=KEYED_PRG_VERSION,
-                component_weights=component_weights,
-            )
-        if candidate_score > float(evidence.score_before):
-            accepted = (
-                backtracking_index,
-                candidate,
-                geometry_relative,
-                combined_relative,
-                candidate_score,
-                candidate_identity.qk_atomic_content_digest,
-            )
-            break
-    if accepted is None:
-        return not_ready(
-            "late_qk_geometry_no_strict_actual_dtype_improvement"
+        candidate_record["candidate_record_digest"] = build_stable_digest(
+            candidate_record
         )
-    (
-        backtracking_index,
-        written,
-        geometry_relative,
-        combined_relative,
-        candidate_score,
-        candidate_qk_digest,
-    ) = accepted
+        candidate_records.append(candidate_record)
+        candidate_values.append((candidate, evaluation))
+    accepted_index = next(
+        (
+            index
+            for index, record in enumerate(candidate_records)
+            if record["candidate_acceptance_ready"]
+        ),
+        None,
+    )
+    if accepted_index is None:
+        return not_ready(
+            "late_qk_geometry_no_exact_suffix_candidate_passed",
+            candidate_records,
+        )
+    selected_record = candidate_records[accepted_index]
+    written, selected_evaluation = candidate_values[accepted_index]
+    if selected_evaluation is None:
+        raise RuntimeError("late Q/K selected candidate lacks exact suffix evidence")
     geometry_delta = written.detach().float() - baseline.detach().float()
     record = {
         "late_qk_geometry_ready": True,
@@ -4753,6 +4895,8 @@ def _build_late_qk_geometry_generation_update(
         "late_qk_geometry_applied": True,
         "late_qk_geometry_registered_key_only": True,
         "late_qk_geometry_wrong_key_accessed": False,
+        "late_qk_geometry_suffix_operator": settings["suffix_operator"],
+        "late_qk_geometry_candidate_records": candidate_records,
         "late_qk_geometry_callback_step_index": int(
             settings["callback_step_index"]
         ),
@@ -4769,16 +4913,38 @@ def _build_late_qk_geometry_generation_update(
         "late_qk_geometry_direction_content_sha256": tensor_content_sha256(
             direction
         ),
-        "late_qk_geometry_backtracking_index": backtracking_index,
-        "late_qk_geometry_actual_dtype_relative_l2": geometry_relative,
-        "late_qk_geometry_combined_actual_dtype_relative_l2": combined_relative,
-        "late_qk_geometry_relation_score_before": float(evidence.score_before),
-        "late_qk_geometry_relation_score_after": candidate_score,
+        "late_qk_geometry_backtracking_index": int(
+            selected_record["candidate_index"]
+        ),
+        "late_qk_geometry_selected_suffix_terminal_latent_content_sha256": (
+            selected_record["suffix_terminal_latent_content_sha256"]
+        ),
+        "late_qk_geometry_selected_output_image_rgb_uint8_content_sha256": (
+            selected_record["output_image_rgb_uint8_content_sha256"]
+        ),
+        "late_qk_geometry_actual_dtype_relative_l2": selected_record[
+            "geometry_actual_dtype_relative_l2"
+        ],
+        "late_qk_geometry_combined_actual_dtype_relative_l2": selected_record[
+            "combined_actual_dtype_relative_l2"
+        ],
+        "late_qk_geometry_direction_objective_score": direction_score_value,
+        "late_qk_geometry_relation_score_before": carrier_paired_score,
+        "late_qk_geometry_relation_score_after": selected_record[
+            "carrier_paired_attention_score"
+        ],
+        "late_qk_geometry_blind_full_vs_carrier_gain": selected_record[
+            "blind_full_vs_carrier_gain"
+        ],
+        "late_qk_geometry_carrier_paired_full_vs_carrier_gain": selected_record[
+            "carrier_paired_full_vs_carrier_gain"
+        ],
+        "late_qk_geometry_minimum_gain": float(minimum_gain),
         "late_qk_geometry_baseline_qk_atomic_content_digest": (
-            evidence.qk_atomic_content_digest
+            carrier_qk_digest
         ),
         "late_qk_geometry_candidate_qk_atomic_content_digest": (
-            candidate_qk_digest
+            selected_record["qk_atomic_content_digest"]
         ),
     }
     record["late_qk_geometry_record_digest"] = build_stable_digest(record)
@@ -7369,6 +7535,12 @@ def _run_semantic_watermark_runtime_with_content_strength(
         pipeline,
         config.prompt,
     )
+    negative_prompt_embeds, negative_pooled_prompt_embeds = (
+        _content_runtime_prompt_embeddings(
+            pipeline,
+            config.negative_prompt,
+        )
+    )
     model_identity_digest = build_stable_digest(
         {"model_id": config.model_id, "model_revision": config.model_revision}
     )
@@ -7384,6 +7556,19 @@ def _run_semantic_watermark_runtime_with_content_strength(
     }
     chain_records: list[dict[str, Any]] = []
     role_payloads: dict[str, dict[str, Any]] = {}
+    late_qk_carrier_score: Mapping[str, Any] | None = None
+    late_qk_carrier_pair_weights: Any | None = None
+
+    def isolated_detection_pipeline() -> Any:
+        """共享正式模型，仅隔离候选评分对 generation scheduler 的改写。"""
+
+        return SimpleNamespace(
+            scheduler=deepcopy(pipeline.scheduler),
+            transformer=pipeline.transformer,
+            vae=pipeline.vae,
+            image_processor=pipeline.image_processor,
+            _execution_device=pipeline._execution_device,
+        )
 
     def run_chain(
         role: str,
@@ -7441,36 +7626,163 @@ def _run_semantic_watermark_runtime_with_content_strength(
                 )
                 written_late = written_late_hf
                 if role == "full_nominal_replay":
-                    recorder = DifferentiableAttentionRecorder(
-                        context.attention_modules,
-                        max_tokens=config.max_attention_tokens,
-                    )
-                    try:
-                        written_late, late_qk_record = (
-                            _build_late_qk_geometry_generation_update(
-                                latent,
-                                late_hf_latent=written_late_hf,
-                                geometry_capacity_map=(
-                                    terminal_routing.writable_capacity_map
+                    if (
+                        late_qk_carrier_score is None
+                        or late_qk_carrier_pair_weights is None
+                        or step_index + 1
+                        != len(pipe.scheduler.timesteps) - 1
+                    ):
+                        raise RuntimeError(
+                            "late Q/K suffix requires one frozen carrier "
+                            "reference and one remaining generation step"
+                        )
+                    suffix_timestep = pipe.scheduler.timesteps[step_index + 1]
+
+                    def suffix_latent(candidate: Any) -> Any:
+                        return _replay_late_qk_generation_suffix(
+                            pipe,
+                            candidate,
+                            timestep=suffix_timestep,
+                            prompt_embeds=prompt_embeds,
+                            pooled_prompt_embeds=pooled_prompt_embeds,
+                            negative_prompt_embeds=negative_prompt_embeds,
+                            negative_pooled_prompt_embeds=(
+                                negative_pooled_prompt_embeds
+                            ),
+                            guidance_scale=config.guidance_scale,
+                        )
+
+                    def registered_suffix_objective(candidate: Any) -> Any:
+                        terminal_candidate = suffix_latent(candidate)
+                        vae_dtype = next(pipe.vae.parameters()).dtype
+                        scaled = (
+                            terminal_candidate.to(dtype=vae_dtype)
+                            / pipe.vae.config.scaling_factor
+                        )
+                        scaled = scaled + pipe.vae.config.shift_factor
+                        decoded = pipe.vae.decode(
+                            scaled,
+                            return_dict=False,
+                        )[0]
+                        detector_pixels = decoded.clamp(-1.0, 1.0)
+                        encoded = pipe.vae.encode(
+                            detector_pixels
+                        ).latent_dist.mode()
+                        observed_latent = (
+                            encoded - float(pipe.vae.config.shift_factor)
+                        ) * float(pipe.vae.config.scaling_factor)
+                        detection_scheduler = deepcopy(pipe.scheduler)
+                        detection_scheduler.set_timesteps(
+                            config.inference_steps,
+                            device=pipe._execution_device,
+                        )
+                        detection_timestep = detection_scheduler.timesteps[
+                            config.public_detection_schedule_index
+                        ]
+                        scale_noise = getattr(
+                            detection_scheduler,
+                            "scale_noise",
+                            None,
+                        )
+                        if not callable(scale_noise):
+                            raise RuntimeError(
+                                "late Q/K suffix requires scheduler.scale_noise"
+                            )
+                        public_noise = _public_detection_noise_tensor(
+                            observed_latent,
+                            config,
+                        )
+                        timestep_batch = detection_timestep.reshape(1).expand(
+                            observed_latent.shape[0]
+                        )
+                        noisy_latent = scale_noise(
+                            observed_latent,
+                            timestep_batch,
+                            public_noise,
+                        )
+                        with DifferentiableAttentionRecorder(
+                            context.attention_modules,
+                            max_tokens=config.max_attention_tokens,
+                        ) as recorder:
+                            _transformer_forward_function(
+                                pipe,
+                                detection_timestep,
+                                context.unconditional_prompt,
+                                context.unconditional_pooled,
+                            )(noisy_latent)
+                            return attention_geometry_score(
+                                recorder.records,
+                                config.key_material,
+                                prg_version=config.keyed_prg_version,
+                                stable_pair_weights=(
+                                    late_qk_carrier_pair_weights
                                 ),
-                                transformer_forward=(
-                                    _transformer_forward_function(
-                                        pipe,
-                                        timestep,
-                                        prompt_embeds,
-                                        pooled_prompt_embeds,
-                                    )
-                                ),
-                                recorder=recorder,
-                                key_material=config.key_material,
                                 component_weights=(
                                     config.attention_relation_component_weights
                                 ),
-                                protocol=protocol,
                             )
+
+                    def exact_suffix_evaluator(
+                        candidate: Any,
+                    ) -> dict[str, Any]:
+                        with torch.no_grad():
+                            terminal_candidate = suffix_latent(candidate)
+                            candidate_image = (
+                                _decode_content_runtime_latent_image(
+                                    pipe,
+                                    terminal_candidate,
+                                )
+                            )
+                        candidate_extractor = _image_attention_extractor(
+                            isolated_detection_pipeline(),
+                            config,
+                            context.attention_modules,
+                            context.unconditional_prompt,
+                            context.unconditional_pooled,
                         )
-                    finally:
-                        recorder.close()
+                        qk_records = tuple(
+                            candidate_extractor(candidate_image)
+                        )
+                        score_record, _ = _terminal_registered_qk_score(
+                            qk_records,
+                            config.key_material,
+                            config,
+                            carrier_pair_weights=(
+                                late_qk_carrier_pair_weights
+                            ),
+                        )
+                        return {
+                            **score_record,
+                            "suffix_terminal_latent_content_sha256": (
+                                tensor_content_sha256(
+                                    terminal_candidate.detach().float()
+                                )
+                            ),
+                            "output_image_rgb_uint8_content_sha256": (
+                                canonical_rgb_uint8_content_record(
+                                    candidate_image
+                                )["image_rgb_uint8_content_sha256"]
+                            ),
+                        }
+
+                    written_late, late_qk_record = (
+                        _build_late_qk_geometry_generation_update(
+                            latent,
+                            late_hf_latent=written_late_hf,
+                            geometry_capacity_map=(
+                                terminal_routing.writable_capacity_map
+                            ),
+                            registered_suffix_objective=(
+                                registered_suffix_objective
+                            ),
+                            exact_suffix_evaluator=exact_suffix_evaluator,
+                            carrier_reference_score=late_qk_carrier_score,
+                            minimum_gain=(
+                                config.minimum_final_image_attention_score_gain
+                            ),
+                            protocol=protocol,
+                        )
+                    )
                     payload.update(late_qk_record)
                     payload.update(
                         {
@@ -7749,6 +8061,17 @@ def _run_semantic_watermark_runtime_with_content_strength(
         if late_hf_write_count != expected_late_hf_write_count:
             raise RuntimeError("late HF generation write count drifted")
         terminal_latent = _extract_terminal_pipeline_latent(output)
+        if (
+            role == "full_nominal_replay"
+            and payload.get("late_qk_geometry_ready") is True
+            and payload.get(
+                "late_qk_geometry_selected_suffix_terminal_latent_content_sha256"
+            )
+            != tensor_content_sha256(terminal_latent.detach().float())
+        ):
+            raise RuntimeError(
+                "selected late Q/K suffix did not match pipeline output"
+            )
         rendered_latent = terminal_latent
         if role in CONTENT_SURVIVAL_REPLAY_ROLES:
             payload.update(
@@ -7772,6 +8095,17 @@ def _run_semantic_watermark_runtime_with_content_strength(
             )
         image = _decode_content_runtime_latent_image(pipeline, rendered_latent)
         image_identity = canonical_rgb_uint8_content_record(image)
+        if (
+            role == "full_nominal_replay"
+            and payload.get("late_qk_geometry_ready") is True
+            and payload.get(
+                "late_qk_geometry_selected_output_image_rgb_uint8_content_sha256"
+            )
+            != image_identity["image_rgb_uint8_content_sha256"]
+        ):
+            raise RuntimeError(
+                "selected late Q/K suffix image did not match pipeline output"
+            )
         payload.update(
             {
                 "chain_index": len(chain_records),
@@ -7869,6 +8203,21 @@ def _run_semantic_watermark_runtime_with_content_strength(
         "carrier_nominal_replay",
         replay_sign=selected_sign,
     )
+    carrier_qk_extractor = _image_attention_extractor(
+        isolated_detection_pipeline(),
+        config,
+        context.attention_modules,
+        context.unconditional_prompt,
+        context.unconditional_pooled,
+    )
+    carrier_qk_records = tuple(carrier_qk_extractor(carrier_only_image))
+    late_qk_carrier_score, late_qk_carrier_pair_weights = (
+        _terminal_registered_qk_score(
+            carrier_qk_records,
+            config.key_material,
+            config,
+        )
+    )
     watermarked_image, full_payload = run_chain(
         "full_nominal_replay",
         replay_sign=selected_sign,
@@ -7912,8 +8261,8 @@ def _run_semantic_watermark_runtime_with_content_strength(
             and full_payload.get("late_qk_geometry_write_count") == 0
             and full_payload.get("late_qk_geometry_failure_reason")
             in {
-                "late_qk_geometry_registered_direction_not_ready",
-                "late_qk_geometry_no_strict_actual_dtype_improvement",
+                "late_qk_geometry_registered_suffix_direction_not_ready",
+                "late_qk_geometry_no_exact_suffix_candidate_passed",
             }
         )
     )

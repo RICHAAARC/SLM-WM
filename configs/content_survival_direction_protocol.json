@@ -115,11 +115,14 @@
     "combined_actual_dtype_relative_l2_limit": 0.014,
     "maximum_backtracking_index": 8,
     "backtracking_factor": 0.5,
-    "stable_token_fraction": 0.5,
-    "unstable_pair_weight": 0.25,
-    "acceptance": "first_strict_registered_qk_improvement",
+    "direction_objective": "carrier_frozen_registered_suffix_qk_score",
+    "direction_gradient_scope": "suffix_and_additive_delta_only",
+    "suffix_operator": "remaining_generation_step_decode_vae_reencode_public_noise_schedule_7_frozen_qk",
+    "carrier_reference": "frozen_carrier_only_final_image_qk",
+    "candidate_order": "maximum_geometry_then_fixed_halving",
+    "acceptance": "first_budget_ready_blind_and_carrier_paired_gain_at_least_formal_minimum",
     "write_count_per_full_replay": 1,
     "post_pipeline_write": "forbidden"
   },
-  "survival_protocol_semantic_digest": "de3ede730bfb399740bb83192da1555dfb5a395acc8e82313c1d24d95d0eb9d1"
+  "survival_protocol_semantic_digest": "df3caa15a43a008c034562b8b03fc72ffd7e9272c83e7c43a888cf4fba860f9d"
 }
